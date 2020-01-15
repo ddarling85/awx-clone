@@ -16,16 +16,21 @@ const CheckboxListItem = ({
   label,
   isSelected,
   onSelect,
+  onDeselect,
   isRadio,
 }) => {
   const CheckboxRadio = isRadio ? DataListRadio : DataListCheck;
   return (
-    <DataListItem key={itemId} aria-labelledby={`check-action-item-${itemId}`}>
+    <DataListItem
+      key={itemId}
+      aria-labelledby={`check-action-item-${itemId}`}
+      id={`${itemId}`}
+    >
       <DataListItemRow>
         <CheckboxRadio
           id={`selected-${itemId}`}
           checked={isSelected}
-          onChange={onSelect}
+          onChange={isSelected ? onDeselect : onSelect}
           aria-labelledby={`check-action-item-${itemId}`}
           name={name}
           value={itemId}
@@ -60,6 +65,7 @@ CheckboxListItem.propTypes = {
   label: PropTypes.string.isRequired,
   isSelected: PropTypes.bool.isRequired,
   onSelect: PropTypes.func.isRequired,
+  onDeselect: PropTypes.func.isRequired,
 };
 
 export default CheckboxListItem;

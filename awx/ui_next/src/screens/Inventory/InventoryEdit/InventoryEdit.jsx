@@ -2,9 +2,10 @@ import React, { useState, useEffect } from 'react';
 import { withI18n } from '@lingui/react';
 import { withRouter } from 'react-router-dom';
 import { t } from '@lingui/macro';
-import { CardHeader, CardBody, Tooltip } from '@patternfly/react-core';
+import { CardHeader, Tooltip } from '@patternfly/react-core';
 import { object } from 'prop-types';
 
+import { CardBody } from '@components/Card';
 import CardCloseButton from '@components/CardCloseButton';
 import { InventoriesAPI, CredentialTypesAPI } from '@api';
 import ContentLoading from '@components/ContentLoading';
@@ -15,7 +16,7 @@ import { getAddedAndRemoved } from '../../../util/lists';
 function InventoryEdit({ history, i18n, inventory }) {
   const [error, setError] = useState(null);
   const [associatedInstanceGroups, setInstanceGroups] = useState(null);
-  const [isLoading, setIsLoading] = useState(true);
+  const [contentLoading, setContentLoading] = useState(true);
   const [credentialTypeId, setCredentialTypeId] = useState(null);
 
   useEffect(() => {
@@ -39,11 +40,11 @@ function InventoryEdit({ history, i18n, inventory }) {
       } catch (err) {
         setError(err);
       } finally {
-        setIsLoading(false);
+        setContentLoading(false);
       }
     };
     loadData();
-  }, [inventory.id, isLoading, inventory, credentialTypeId]);
+  }, [inventory.id, contentLoading, inventory, credentialTypeId]);
 
   const handleCancel = () => {
     history.push('/inventories');
@@ -58,7 +59,9 @@ function InventoryEdit({ history, i18n, inventory }) {
     } = values;
     try {
       await InventoriesAPI.update(inventory.id, {
-        insights_credential: insights_credential.id,
+        insights_credential: insights_credential
+          ? insights_credential.id
+          : null,
         organization: organization.id,
         ...remainingValues,
       });
@@ -76,16 +79,16 @@ function InventoryEdit({ history, i18n, inventory }) {
         );
         await Promise.all([...associatePromises, ...disassociatePromises]);
       }
+      const url =
+        history.location.pathname.search('smart') > -1
+          ? `/inventories/smart_inventory/${inventory.id}/details`
+          : `/inventories/inventory/${inventory.id}/details`;
+      history.push(`${url}`);
     } catch (err) {
       setError(err);
-    } finally {
-      const url = history.location.pathname.search('smart')
-        ? `/inventories/smart_inventory/${inventory.id}/details`
-        : `/inventories/inventory/${inventory.id}/details`;
-      history.push(`${url}`);
     }
   };
-  if (isLoading) {
+  if (contentLoading) {
     return <ContentLoading />;
   }
   if (error) {

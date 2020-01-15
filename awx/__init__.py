@@ -24,31 +24,18 @@ except ImportError: # pragma: no cover
 import hashlib
 
 try:
-    import django
-    from django.db.backends.base import schema
-    from django.db.backends.utils import names_digest
+    import django  # noqa: F401
     HAS_DJANGO = True
 except ImportError:
     HAS_DJANGO = False
+else:
+    from django.db.backends.base import schema
+    from django.db.backends.utils import names_digest
 
 
 if HAS_DJANGO is True:
-    # This line exists to make sure we don't regress on FIPS support if we
-    # upgrade Django; if you're upgrading Django and see this error,
-    # update the version check below, and confirm that FIPS still works.
-    # If operating in a FIPS environment, `hashlib.md5()` will raise a `ValueError`,
-    # but will support the `usedforsecurity` keyword on RHEL and Centos systems.
 
-    # Keep an eye on https://code.djangoproject.com/ticket/28401
-    target_version = '2.2.4'
-    if django.__version__ != target_version:
-        raise RuntimeError(
-            "Django version other than {target} detected: {current}. "
-            "Overriding `names_digest` is known to work for Django {target} "
-            "and may not work in other Django versions.".format(target=target_version,
-                                                                current=django.__version__)
-        )
-
+    # See upgrade blocker note in requirements/README.md
     try:
         names_digest('foo', 'bar', 'baz', length=8)
     except ValueError:
@@ -86,7 +73,14 @@ def oauth2_getattribute(self, attr):
     # Custom method to override
     # oauth2_provider.settings.OAuth2ProviderSettings.__getattribute__
     from django.conf import settings
-    val = settings.OAUTH2_PROVIDER.get(attr)
+    val = None
+    if 'migrate' not in sys.argv:
+        # certain Django OAuth Toolkit migrations actually reference
+        # setting lookups for references to model classes (e.g.,
+        # oauth2_settings.REFRESH_TOKEN_MODEL)
+        # If we're doing an OAuth2 setting lookup *while running* a migration,
+        # don't do our usual "Configure Tower in Tower" database setting lookup
+        val = settings.OAUTH2_PROVIDER.get(attr)
     if val is None:
         val = object.__getattribute__(self, attr)
     return val

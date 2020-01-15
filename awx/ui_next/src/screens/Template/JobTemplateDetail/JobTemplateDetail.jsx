@@ -2,7 +2,6 @@ import React, { Component, Fragment } from 'react';
 import { Link, withRouter } from 'react-router-dom';
 import { withI18n } from '@lingui/react';
 import {
-  CardBody,
   Button,
   TextList,
   TextListItem,
@@ -12,28 +11,20 @@ import {
 import styled from 'styled-components';
 import { t } from '@lingui/macro';
 
+import { CardBody, CardActionsRow } from '@components/Card';
 import ContentError from '@components/ContentError';
 import LaunchButton from '@components/LaunchButton';
 import ContentLoading from '@components/ContentLoading';
 import { ChipGroup, Chip, CredentialChip } from '@components/Chip';
-import { DetailList, Detail } from '@components/DetailList';
-import { formatDateString } from '@util/dates';
+import { DetailList, Detail, UserDateDetail } from '@components/DetailList';
 import { JobTemplatesAPI } from '@api';
-
-const ButtonGroup = styled.div`
-  display: flex;
-  justify-content: flex-end;
-  margin-top: 20px;
-  & > :not(:first-child) {
-    margin-left: 20px;
-  }
-`;
 
 const MissingDetail = styled(Detail)`
   dd& {
     color: red;
   }
 `;
+
 class JobTemplateDetail extends Component {
   constructor(props) {
     super(props);
@@ -112,32 +103,6 @@ class JobTemplateDetail extends Component {
     const renderOptionsField =
       become_enabled || host_config_key || allow_simultaneous || use_fact_cache;
 
-    let createdBy = '';
-    if (created) {
-      if (summary_fields.created_by && summary_fields.created_by.username) {
-        createdBy = i18n._(
-          t`${formatDateString(created)} by ${
-            summary_fields.created_by.username
-          }`
-        );
-      } else {
-        createdBy = formatDateString(created);
-      }
-    }
-
-    let modifiedBy = '';
-    if (modified) {
-      if (summary_fields.modified_by && summary_fields.modified_by.username) {
-        modifiedBy = i18n._(
-          t`${formatDateString(modified)} by ${
-            summary_fields.modified_by.username
-          }`
-        );
-      } else {
-        modifiedBy = formatDateString(modified);
-      }
-    }
-
     const renderOptions = (
       <TextList component={TextListVariants.ul}>
         {become_enabled && (
@@ -195,7 +160,7 @@ class JobTemplateDetail extends Component {
 
     return (
       isInitialized && (
-        <CardBody css="padding-top: 20px;">
+        <CardBody>
           <DetailList gutter="sm">
             <Detail
               label={i18n._(t`Name`)}
@@ -239,18 +204,16 @@ class JobTemplateDetail extends Component {
               value={verbosityDetails[0].details}
             />
             <Detail label={i18n._(t`Timeout`)} value={timeout || '0'} />
-            {createdBy && (
-              <Detail
-                label={i18n._(t`Created`)}
-                value={createdBy} // TODO: link to user in users
-              />
-            )}
-            {modifiedBy && (
-              <Detail
-                label={i18n._(t`Last Modified`)}
-                value={modifiedBy} // TODO: link to user in users
-              />
-            )}
+            <UserDateDetail
+              label={i18n._(t`Created`)}
+              date={created}
+              user={summary_fields.created_by}
+            />
+            <UserDateDetail
+              label={i18n._(t`Last Modified`)}
+              date={modified}
+              user={summary_fields.modified_by}
+            />
             <Detail
               label={i18n._(t`Show Changes`)}
               value={diff_mode ? 'On' : 'Off'}
@@ -346,11 +309,11 @@ class JobTemplateDetail extends Component {
               />
             )}
           </DetailList>
-          <ButtonGroup>
+          <CardActionsRow>
             {summary_fields.user_capabilities.edit && (
               <Button
                 component={Link}
-                to={`/templates/${match.params.templateType}/${match.params.id}/edit`}
+                to={`/templates/job_template/${match.params.id}/edit`}
                 aria-label={i18n._(t`Edit`)}
               >
                 {i18n._(t`Edit`)}
@@ -369,7 +332,7 @@ class JobTemplateDetail extends Component {
                 )}
               </LaunchButton>
             )}
-          </ButtonGroup>
+          </CardActionsRow>
         </CardBody>
       )
     );

@@ -72,17 +72,21 @@ class ResourceAccessListItem extends React.Component {
     const [teamRoles, userRoles] = this.getRoleLists();
 
     return (
-      <DataListItem aria-labelledby="access-list-item" key={accessRecord.id}>
+      <DataListItem
+        aria-labelledby="access-list-item"
+        key={accessRecord.id}
+        id={`${accessRecord.id}`}
+      >
         <DataListItemRow>
           <DataListItemCells
             dataListCells={[
               <DataListCell key="name">
                 {accessRecord.username && (
                   <TextContent>
-                    {accessRecord.url ? (
+                    {accessRecord.id ? (
                       <Text component={TextVariants.h6}>
                         <Link
-                          to={{ pathname: accessRecord.url }}
+                          to={{ pathname: `/users/${accessRecord.id}/details` }}
                           css="font-weight: bold"
                         >
                           {accessRecord.username}

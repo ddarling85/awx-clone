@@ -1,4 +1,5 @@
 # Python
+import logging
 import re
 
 # Django
@@ -20,6 +21,9 @@ from awx.main.fields import OAuth2ClientSecretField
 DATA_URI_RE = re.compile(r'.*')  # FIXME
 
 __all__ = ['OAuth2AccessToken', 'OAuth2Application']
+
+
+logger = logging.getLogger('awx.main.models.oauth')
 
 
 class OAuth2Application(AbstractApplication):
@@ -121,14 +125,22 @@ class OAuth2AccessToken(AbstractAccessToken):
         valid = super(OAuth2AccessToken, self).is_valid(scopes)
         if valid:
             self.last_used = now()
-            connection.on_commit(lambda: self.save(update_fields=['last_used']))
+
+            def _update_last_used():
+                if OAuth2AccessToken.objects.filter(pk=self.pk).exists():
+                    self.save(update_fields=['last_used'])
+            connection.on_commit(_update_last_used)
         return valid
 
-    def save(self, *args, **kwargs):
+    def validate_external_users(self):
         if self.user and settings.ALLOW_OAUTH2_FOR_EXTERNAL_USERS is False:
             external_account = get_external_account(self.user)
             if external_account is not None:
                 raise oauth2.AccessDeniedError(_(
                     'OAuth2 Tokens cannot be created by users associated with an external authentication provider ({})'
                 ).format(external_account))
+
+    def save(self, *args, **kwargs):
+        if not self.pk:
+            self.validate_external_users()
         super(OAuth2AccessToken, self).save(*args, **kwargs)

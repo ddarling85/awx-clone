@@ -34,11 +34,13 @@ exports[`<ResourceAccessListItem /> initially renders succesfully 1`] = `
 >
   <DataListItem
     aria-labelledby="access-list-item"
+    id="2"
     key="2"
   >
     <li
       aria-labelledby="access-list-item"
       className="pf-c-data-list__item"
+      id="2"
     >
       <DataListItemRow
         key=".0"
@@ -58,7 +60,7 @@ exports[`<ResourceAccessListItem /> initially renders succesfully 1`] = `
                       <ForwardRef
                         to={
                           Object {
-                            "pathname": "/bar",
+                            "pathname": "/users/2/details",
                           }
                         }
                       >
@@ -114,7 +116,7 @@ exports[`<ResourceAccessListItem /> initially renders succesfully 1`] = `
                         <ForwardRef
                           to={
                             Object {
-                              "pathname": "/bar",
+                              "pathname": "/users/2/details",
                             }
                           }
                         >
@@ -193,7 +195,7 @@ exports[`<ResourceAccessListItem /> initially renders succesfully 1`] = `
                           <ForwardRef
                             to={
                               Object {
-                                "pathname": "/bar",
+                                "pathname": "/users/2/details",
                               }
                             }
                           >
@@ -260,7 +262,7 @@ exports[`<ResourceAccessListItem /> initially renders succesfully 1`] = `
                               <Styled(Link)
                                 to={
                                   Object {
-                                    "pathname": "/bar",
+                                    "pathname": "/users/2/details",
                                   }
                                 }
                               >
@@ -308,7 +310,7 @@ exports[`<ResourceAccessListItem /> initially renders succesfully 1`] = `
                                   forwardedRef={null}
                                   to={
                                     Object {
-                                      "pathname": "/bar",
+                                      "pathname": "/users/2/details",
                                     }
                                   }
                                 >
@@ -316,18 +318,18 @@ exports[`<ResourceAccessListItem /> initially renders succesfully 1`] = `
                                     className="sc-bdVaJa fqQVUT"
                                     to={
                                       Object {
-                                        "pathname": "/bar",
+                                        "pathname": "/users/2/details",
                                       }
                                     }
                                   >
                                     <LinkAnchor
                                       className="sc-bdVaJa fqQVUT"
-                                      href="/bar"
+                                      href="/users/2/details"
                                       navigate={[Function]}
                                     >
                                       <a
                                         className="sc-bdVaJa fqQVUT"
-                                        href="/bar"
+                                        href="/users/2/details"
                                         onClick={[Function]}
                                       >
                                         jane

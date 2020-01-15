@@ -1,5 +1,6 @@
 import {
   shape,
+  exact,
   arrayOf,
   number,
   string,
@@ -199,8 +200,6 @@ export const Host = shape({
   enabled: bool,
   instance_id: string,
   variables: string,
-  has_active_failures: bool,
-  has_inventory_sources: bool,
   last_job: number,
   last_job_host_summary: number,
 });
@@ -229,3 +228,46 @@ export const User = shape({
   ldap_dn: string,
   last_login: string,
 });
+
+// stripped-down User object found in summary_fields (e.g. modified_by)
+export const SummaryFieldUser = shape({
+  id: number.isRequired,
+  username: string.isRequired,
+  first_name: string,
+  last_name: string,
+});
+
+export const Group = shape({
+  id: number.isRequired,
+  type: oneOf(['group']),
+  url: string,
+  related: shape({}),
+  summary_fields: shape({}),
+  created: string,
+  modified: string,
+  name: string.isRequired,
+  description: string,
+  inventory: number,
+  variables: string,
+});
+
+export const SearchColumns = arrayOf(
+  exact({
+    name: string.isRequired,
+    key: string.isRequired,
+    isDefault: bool,
+    isBoolean: bool,
+    booleanLabels: shape({
+      true: string.isRequired,
+      false: string.isRequired,
+    }),
+    options: arrayOf(arrayOf(string, string)),
+  })
+);
+
+export const SortColumns = arrayOf(
+  exact({
+    name: string.isRequired,
+    key: string.isRequired,
+  })
+);

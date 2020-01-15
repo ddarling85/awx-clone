@@ -588,7 +588,7 @@ def handle_work_error(task_id, *args, **kwargs):
 
 
 @task()
-def update_inventory_computed_fields(inventory_id, should_update_hosts=True):
+def update_inventory_computed_fields(inventory_id):
     '''
     Signal handler and wrapper around inventory.update_computed_fields to
     prevent unnecessary recursive calls.
@@ -599,7 +599,7 @@ def update_inventory_computed_fields(inventory_id, should_update_hosts=True):
         return
     i = i[0]
     try:
-        i.update_computed_fields(update_hosts=should_update_hosts)
+        i.update_computed_fields()
     except DatabaseError as e:
         if 'did not affect any rows' in str(e):
             logger.debug('Exiting duplicate update_inventory_computed_fields task.')
@@ -642,7 +642,7 @@ def update_host_smart_inventory_memberships():
             logger.exception('Failed to update smart inventory memberships for {}'.format(smart_inventory.pk))
     # Update computed fields for changed inventories outside atomic action
     for smart_inventory in changed_inventories:
-        smart_inventory.update_computed_fields(update_groups=False, update_hosts=False)
+        smart_inventory.update_computed_fields()
 
 
 @task()
@@ -703,6 +703,7 @@ class BaseTask(object):
     def __init__(self):
         self.cleanup_paths = []
         self.parent_workflow_job_id = None
+        self.host_map = {}
 
     def update_model(self, pk, _attempt=0, **updates):
         """Reload the model instance from the database and update the
@@ -1001,11 +1002,17 @@ class BaseTask(object):
         return False
 
     def build_inventory(self, instance, private_data_dir):
-        script_params = dict(hostvars=True)
+        script_params = dict(hostvars=True, towervars=True)
         if hasattr(instance, 'job_slice_number'):
             script_params['slice_number'] = instance.job_slice_number
             script_params['slice_count'] = instance.job_slice_count
         script_data = instance.inventory.get_script_data(**script_params)
+        # maintain a list of host_name --> host_id
+        # so we can associate emitted events to Host objects
+        self.host_map = {
+            hostname: hv.pop('remote_tower_id', '')
+            for hostname, hv in script_data.get('_meta', {}).get('hostvars', {}).items()
+        }
         json_data = json.dumps(script_data)
         handle, path = tempfile.mkstemp(dir=private_data_dir)
         f = os.fdopen(handle, 'w')
@@ -1114,6 +1121,15 @@ class BaseTask(object):
                 event_data.pop('parent_uuid', None)
         if self.parent_workflow_job_id:
             event_data['workflow_job_id'] = self.parent_workflow_job_id
+        if self.host_map:
+            host = event_data.get('event_data', {}).get('host', '').strip()
+            if host:
+                event_data['host_name'] = host
+                if host in self.host_map:
+                    event_data['host_id'] = self.host_map[host]
+            else:
+                event_data['host_name'] = ''
+                event_data['host_id'] = ''
         should_write_event = False
         event_data.setdefault(self.event_data_key, self.instance.id)
         self.dispatcher.dispatch(event_data)
@@ -1640,8 +1656,12 @@ class RunJob(BaseTask):
                     args.append('--vault-id')
                     args.append('{}@prompt'.format(vault_id))
 
-        if job.forks:  # FIXME: Max limit?
-            args.append('--forks=%d' % job.forks)
+        if job.forks:
+            if settings.MAX_FORKS > 0 and job.forks > settings.MAX_FORKS:
+                logger.warning(f'Maximum number of forks ({settings.MAX_FORKS}) exceeded.')
+                args.append('--forks=%d' % settings.MAX_FORKS)
+            else: 
+                args.append('--forks=%d' % job.forks)
         if job.force_handlers:
             args.append('--force-handlers')
         if job.limit:
@@ -1852,7 +1872,7 @@ class RunJob(BaseTask):
         except Inventory.DoesNotExist:
             pass
         else:
-            update_inventory_computed_fields.delay(inventory.id, True)
+            update_inventory_computed_fields.delay(inventory.id)
 
 
 @task()
@@ -2183,7 +2203,10 @@ class RunProjectUpdate(BaseTask):
             project_path = instance.project.get_project_path(check_if_exists=False)
             if os.path.exists(project_path):
                 git_repo = git.Repo(project_path)
-                self.original_branch = git_repo.active_branch
+                if git_repo.head.is_detached:
+                    self.original_branch = git_repo.head.commit
+                else:
+                    self.original_branch = git_repo.active_branch
 
     @staticmethod
     def make_local_copy(project_path, destination_folder, scm_type, scm_revision):
@@ -2215,25 +2238,28 @@ class RunProjectUpdate(BaseTask):
             copy_tree(project_path, destination_folder)
 
     def post_run_hook(self, instance, status):
-        if self.playbook_new_revision:
-            instance.scm_revision = self.playbook_new_revision
-            instance.save(update_fields=['scm_revision'])
-        if self.job_private_data_dir:
-            # copy project folder before resetting to default branch
-            # because some git-tree-specific resources (like submodules) might matter
-            self.make_local_copy(
-                instance.get_project_path(check_if_exists=False), os.path.join(self.job_private_data_dir, 'project'),
-                instance.scm_type, instance.scm_revision
-            )
-            if self.original_branch:
-                # for git project syncs, non-default branches can be problems
-                # restore to branch the repo was on before this run
-                try:
-                    self.original_branch.checkout()
-                except Exception:
-                    # this could have failed due to dirty tree, but difficult to predict all cases
-                    logger.exception('Failed to restore project repo to prior state after {}'.format(instance.log_format))
-        self.release_lock(instance)
+        # To avoid hangs, very important to release lock even if errors happen here
+        try:
+            if self.playbook_new_revision:
+                instance.scm_revision = self.playbook_new_revision
+                instance.save(update_fields=['scm_revision'])
+            if self.job_private_data_dir:
+                # copy project folder before resetting to default branch
+                # because some git-tree-specific resources (like submodules) might matter
+                self.make_local_copy(
+                    instance.get_project_path(check_if_exists=False), os.path.join(self.job_private_data_dir, 'project'),
+                    instance.scm_type, instance.scm_revision
+                )
+                if self.original_branch:
+                    # for git project syncs, non-default branches can be problems
+                    # restore to branch the repo was on before this run
+                    try:
+                        self.original_branch.checkout()
+                    except Exception:
+                        # this could have failed due to dirty tree, but difficult to predict all cases
+                        logger.exception('Failed to restore project repo to prior state after {}'.format(instance.log_format))
+        finally:
+            self.release_lock(instance)
         p = instance.project
         if instance.job_type == 'check' and status not in ('failed', 'canceled',):
             if self.playbook_new_revision:
@@ -2731,10 +2757,11 @@ class RunSystemJob(BaseTask):
                 json_vars = {}
             else:
                 json_vars = json.loads(system_job.extra_vars)
-            if 'days' in json_vars:
-                args.extend(['--days', str(json_vars.get('days', 60))])
-            if 'dry_run' in json_vars and json_vars['dry_run']:
-                args.extend(['--dry-run'])
+            if system_job.job_type in ('cleanup_jobs', 'cleanup_activitystream'):
+                if 'days' in json_vars:
+                    args.extend(['--days', str(json_vars.get('days', 60))])
+                if 'dry_run' in json_vars and json_vars['dry_run']:
+                    args.extend(['--dry-run'])
             if system_job.job_type == 'cleanup_jobs':
                 args.extend(['--jobs', '--project-updates', '--inventory-updates',
                              '--management-jobs', '--ad-hoc-commands', '--workflow-jobs',
@@ -2828,4 +2855,4 @@ def deep_copy_model_obj(
             ), permission_check_func[2])
             permission_check_func(creater, copy_mapping.values())
     if isinstance(new_obj, Inventory):
-        update_inventory_computed_fields.delay(new_obj.id, True)
+        update_inventory_computed_fields.delay(new_obj.id)

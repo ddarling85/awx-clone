@@ -132,7 +132,7 @@ class PoolWorker(object):
                 # when this occurs, it's _fine_ to ignore this KeyError because
                 # the purpose of self.managed_tasks is to just track internal
                 # state of which events are *currently* being processed.
-                pass
+                logger.warn('Event UUID {} appears to be have been duplicated.'.format(uuid))
 
     @property
     def current_task(self):
@@ -277,7 +277,7 @@ class WorkerPool(object):
                 logger.warn("could not write to queue %s" % preferred_queue)
                 logger.warn("detail: {}".format(tb))
             write_attempt_order.append(preferred_queue)
-        logger.warn("could not write payload to any queue, attempted order: {}".format(write_attempt_order))
+        logger.error("could not write payload to any queue, attempted order: {}".format(write_attempt_order))
         return None
 
     def stop(self, signum):

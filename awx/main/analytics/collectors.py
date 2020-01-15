@@ -52,7 +52,7 @@ def config(since):
         'tower_version': get_awx_version(),
         'ansible_version': get_ansible_version(),
         'license_type': license_info.get('license_type', 'UNLICENSED'),
-        'free_instances': license_info.get('free instances', 0),
+        'free_instances': license_info.get('free_instances', 0),
         'license_expiry': license_info.get('time_remaining', 0),
         'pendo_tracking': settings.PENDO_TRACKING_STATE,
         'authentication_backends': settings.AUTHENTICATION_BACKENDS,
@@ -166,6 +166,8 @@ def instance_info(since, include_hostnames=False):
     instances = models.Instance.objects.values_list('hostname').values(
         'uuid', 'version', 'capacity', 'cpu', 'memory', 'managed_by_policy', 'hostname', 'last_isolated_check', 'enabled')
     for instance in instances:
+        consumed_capacity = sum(x.task_impact for x in models.UnifiedJob.objects.filter(execution_node=instance['hostname'],
+                                status__in=('running', 'waiting')))
         instance_info = {
             'uuid': instance['uuid'],
             'version': instance['version'],
@@ -174,7 +176,9 @@ def instance_info(since, include_hostnames=False):
             'memory': instance['memory'],
             'managed_by_policy': instance['managed_by_policy'],
             'last_isolated_check': _get_isolated_datetime(instance['last_isolated_check']),
-            'enabled': instance['enabled']
+            'enabled': instance['enabled'],
+            'consumed_capacity': consumed_capacity,
+            'remaining_capacity': instance['capacity'] - consumed_capacity
         }
         if include_hostnames is True:
             instance_info['hostname'] = instance['hostname']

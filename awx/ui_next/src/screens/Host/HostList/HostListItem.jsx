@@ -40,7 +40,7 @@ class HostListItem extends React.Component {
     } = this.props;
     const labelId = `check-action-${host.id}`;
     return (
-      <DataListItem key={host.id} aria-labelledby={labelId}>
+      <DataListItem key={host.id} aria-labelledby={labelId} id={`${host.id}`}>
         <DataListItemRow>
           <DataListCheck
             id={`select-host-${host.id}`}
@@ -50,7 +50,7 @@ class HostListItem extends React.Component {
           />
           <DataListItemCells
             dataListCells={[
-              <DataListCell key="divider">
+              <DataListCell key="name">
                 <VerticalSeparator />
                 <Link to={`${detailUrl}`}>
                   <b>{host.name}</b>

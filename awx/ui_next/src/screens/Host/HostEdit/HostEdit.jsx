@@ -1,12 +1,12 @@
 import React, { Component } from 'react';
 import PropTypes from 'prop-types';
 import { withRouter } from 'react-router-dom';
-import { CardBody } from '@patternfly/react-core';
+import { CardBody } from '@components/Card';
 
 import { HostsAPI } from '@api';
 import { Config } from '@contexts/Config';
 
-import HostForm from '../shared/HostForm';
+import HostForm from '../shared';
 
 class HostEdit extends Component {
   constructor(props) {

@@ -1,5 +1,5 @@
 import React, { Fragment } from 'react';
-import PropTypes, { arrayOf, shape, string, bool } from 'prop-types';
+import PropTypes from 'prop-types';
 import { DataList } from '@patternfly/react-core';
 import { withI18n } from '@lingui/react';
 import { t } from '@lingui/macro';
@@ -18,7 +18,7 @@ import {
   replaceParams,
 } from '@util/qs';
 
-import { QSConfig } from '@types';
+import { QSConfig, SearchColumns, SortColumns } from '@types';
 
 import PaginatedDataListItem from './PaginatedDataListItem';
 
@@ -27,7 +27,14 @@ class PaginatedDataList extends React.Component {
     super(props);
     this.handleSetPage = this.handleSetPage.bind(this);
     this.handleSetPageSize = this.handleSetPageSize.bind(this);
+    this.handleListItemSelect = this.handleListItemSelect.bind(this);
   }
+
+  handleListItemSelect = (id = 0) => {
+    const { items, onRowClick } = this.props;
+    const match = items.find(item => item.id === Number(id));
+    onRowClick(match);
+  };
 
   handleSetPage(event, pageNumber) {
     const { history, qsConfig } = this.props;
@@ -59,21 +66,29 @@ class PaginatedDataList extends React.Component {
       itemCount,
       qsConfig,
       renderItem,
-      toolbarColumns,
+      toolbarSearchColumns,
+      toolbarSortColumns,
       pluralizedItemName,
       showPageSizeOptions,
       location,
       i18n,
       renderToolbar,
     } = this.props;
-    const columns = toolbarColumns.length
-      ? toolbarColumns
+    const searchColumns = toolbarSearchColumns.length
+      ? toolbarSearchColumns
       : [
           {
             name: i18n._(t`Name`),
             key: 'name',
-            isSortable: true,
-            isSearchable: true,
+            isDefault: true,
+          },
+        ];
+    const sortColumns = toolbarSortColumns.length
+      ? toolbarSortColumns
+      : [
+          {
+            name: i18n._(t`Name`),
+            key: 'name',
           },
         ];
     const queryParams = parseQueryString(qsConfig, location.search);
@@ -95,7 +110,12 @@ class PaginatedDataList extends React.Component {
       );
     } else {
       Content = (
-        <DataList aria-label={dataListLabel}>{items.map(renderItem)}</DataList>
+        <DataList
+          aria-label={dataListLabel}
+          onSelectDataListItem={id => this.handleListItemSelect(id)}
+        >
+          {items.map(renderItem)}
+        </DataList>
       );
     }
 
@@ -105,7 +125,8 @@ class PaginatedDataList extends React.Component {
           itemCount={itemCount}
           renderToolbar={renderToolbar}
           emptyStateControls={emptyStateControls}
-          columns={columns}
+          searchColumns={searchColumns}
+          sortColumns={sortColumns}
           qsConfig={qsConfig}
         />
         {Content}
@@ -146,27 +167,25 @@ PaginatedDataList.propTypes = {
   pluralizedItemName: PropTypes.string,
   qsConfig: QSConfig.isRequired,
   renderItem: PropTypes.func,
-  toolbarColumns: arrayOf(
-    shape({
-      name: string.isRequired,
-      key: string.isRequired,
-      isSortable: bool,
-    })
-  ),
+  toolbarSearchColumns: SearchColumns,
+  toolbarSortColumns: SortColumns,
   showPageSizeOptions: PropTypes.bool,
   renderToolbar: PropTypes.func,
   hasContentLoading: PropTypes.bool,
   contentError: PropTypes.shape(),
+  onRowClick: PropTypes.func,
 };
 
 PaginatedDataList.defaultProps = {
   hasContentLoading: false,
   contentError: null,
-  toolbarColumns: [],
+  toolbarSearchColumns: [],
+  toolbarSortColumns: [],
   pluralizedItemName: 'Items',
   showPageSizeOptions: true,
   renderItem: item => <PaginatedDataListItem key={item.id} item={item} />,
   renderToolbar: props => <DataListToolbar {...props} />,
+  onRowClick: () => null,
 };
 
 export { PaginatedDataList as _PaginatedDataList };

@@ -1,8 +1,9 @@
 import React, { Component } from 'react';
 import { t } from '@lingui/macro';
 import { withI18n } from '@lingui/react';
-import { Card, CardHeader, PageSection } from '@patternfly/react-core';
+import { Card, PageSection } from '@patternfly/react-core';
 import { Switch, Route, Redirect, withRouter, Link } from 'react-router-dom';
+import { TabbedCardHeader } from '@components/Card';
 import CardCloseButton from '@components/CardCloseButton';
 import ContentError from '@components/ContentError';
 import NotificationList from '@components/NotificationList';
@@ -120,11 +121,11 @@ class Template extends Component {
       tab.id = n;
     });
 
-    let cardHeader = hasContentLoading ? null : (
-      <CardHeader style={{ padding: 0 }}>
+    let cardHeader = (
+      <TabbedCardHeader>
         <RoutedTabs history={history} tabsArray={tabsArray} />
         <CardCloseButton linkTo="/templates" />
-      </CardHeader>
+      </TabbedCardHeader>
     );
 
     if (location.pathname.endsWith('edit')) {

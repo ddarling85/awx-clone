@@ -310,6 +310,9 @@ REST_FRAMEWORK = {
     'VIEW_DESCRIPTION_FUNCTION': 'awx.api.generics.get_view_description',
     'NON_FIELD_ERRORS_KEY': '__all__',
     'DEFAULT_VERSION': 'v2',
+    # For swagger schema generation
+    # see https://github.com/encode/django-rest-framework/pull/6532
+    'DEFAULT_SCHEMA_CLASS': 'rest_framework.schemas.AutoSchema',
     #'URL_FORMAT_OVERRIDE': None,
 }
 
@@ -372,6 +375,10 @@ TACACSPLUS_AUTH_PROTOCOL = 'ascii'
 # Note: Session limits are not enforced when using HTTP Basic Authentication.
 # Note: This setting may be overridden by database settings.
 AUTH_BASIC_ENABLED = True
+
+# If set, specifies a URL that unauthenticated users will be redirected to
+# when trying to access a UI page that requries authentication.
+LOGIN_REDIRECT_OVERRIDE = ''
 
 # If set, serve only minified JS for UI.
 USE_MINIFIED_JS = False
@@ -568,9 +575,6 @@ ANSIBLE_INVENTORY_UNPARSED_FAILED = True
 
 # Additional environment variables to be passed to the ansible subprocesses
 AWX_TASK_ENV = {}
-
-# Flag to enable/disable updating hosts M2M when saving job events.
-CAPTURE_JOB_EVENT_HOSTS = False
 
 # Rebuild Host Smart Inventory memberships.
 AWX_REBUILD_SMART_MEMBERSHIP = False
@@ -1203,6 +1207,19 @@ SILENCED_SYSTEM_CHECKS = ['models.E006']
 
 # Use middleware to get request statistics
 AWX_REQUEST_PROFILE = False
+
+#
+# Optionally, AWX can generate DOT graphs
+# (http://www.graphviz.org/doc/info/lang.html) for per-request profiling
+# via gprof2dot (https://github.com/jrfonseca/gprof2dot)
+#
+# If you set this to True, you must `/var/lib/awx/venv/awx/bin/pip install gprof2dot`
+# .dot files will be saved in `/var/log/tower/profile/` and can be converted e.g.,
+#
+# ~ yum install graphviz
+# ~ dot -o profile.png -Tpng /var/log/tower/profile/some-profile-data.dot
+#
+AWX_REQUEST_PROFILE_WITH_DOT = False
 
 # Delete temporary directories created to store playbook run-time
 AWX_CLEANUP_PATHS = True

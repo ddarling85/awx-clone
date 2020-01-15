@@ -131,24 +131,26 @@ function InventoryHosts({ i18n, location, match }) {
         itemCount={hostCount}
         pluralizedItemName={i18n._(t`Hosts`)}
         qsConfig={QS_CONFIG}
-        toolbarColumns={[
+        onRowClick={handleSelect}
+        toolbarSearchColumns={[
           {
             name: i18n._(t`Name`),
             key: 'name',
-            isSortable: true,
-            isSearchable: true,
+            isDefault: true,
           },
           {
-            name: i18n._(t`Modified`),
-            key: 'modified',
-            isSortable: true,
-            isNumeric: true,
+            name: i18n._(t`Created By (Username)`),
+            key: 'created_by__username',
           },
           {
-            name: i18n._(t`Created`),
-            key: 'created',
-            isSortable: true,
-            isNumeric: true,
+            name: i18n._(t`Modified By (Username)`),
+            key: 'modified_by__username',
+          },
+        ]}
+        toolbarSortColumns={[
+          {
+            name: i18n._(t`Name`),
+            key: 'name',
           },
         ]}
         renderToolbar={props => (
@@ -178,7 +180,8 @@ function InventoryHosts({ i18n, location, match }) {
           <InventoryHostItem
             key={o.id}
             host={o}
-            detailUrl={`/hosts/${o.id}/details`}
+            detailUrl={`/inventories/inventory/${match.params.id}/hosts/${o.id}/details`}
+            editUrl={`/inventories/inventory/${match.params.id}/hosts/${o.id}/edit`}
             isSelected={selected.some(row => row.id === o.id)}
             onSelect={() => handleSelect(o)}
             toggleHost={handleToggle}

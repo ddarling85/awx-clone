@@ -77,6 +77,8 @@ function InventoryForm({
                     form.setFieldValue('organization', value);
                   }}
                   value={field.value}
+                  touched={form.touched.organization}
+                  error={form.errors.organization}
                   required
                 />
               )}
@@ -89,14 +91,9 @@ function InventoryForm({
                 <CredentialLookup
                   label={i18n._(t`Insights Credential`)}
                   credentialTypeId={credentialTypeId}
-                  onChange={value => {
-                    // TODO: BELOW SHOULD BE REFACTORED AND REMOVED ONCE THE LOOKUP REFACTOR
-                    // GOES INTO PLACE.
-                    if (value[0] === field.value) {
-                      return form.setFieldValue('insights_credential', null);
-                    }
-                    return form.setFieldValue('insights_credential', value);
-                  }}
+                  onChange={value =>
+                    form.setFieldValue('insights_credential', value)
+                  }
                   value={field.value}
                 />
               )}

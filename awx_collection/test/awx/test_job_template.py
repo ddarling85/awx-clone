@@ -12,6 +12,7 @@ def test_create_job_template(run_module, admin_user, project, inventory):
     module_args = {
         'name': 'foo', 'playbook': 'helloworld.yml',
         'project': project.name, 'inventory': inventory.name,
+        'extra_vars': {'foo': 'bar'},
         'job_type': 'run',
         'state': 'present'
     }
@@ -19,6 +20,7 @@ def test_create_job_template(run_module, admin_user, project, inventory):
     result = run_module('tower_job_template', module_args, admin_user)
 
     jt = JobTemplate.objects.get(name='foo')
+    assert jt.extra_vars == '{"foo": "bar"}'
 
     assert result == {
         "job_template": "foo",
@@ -40,17 +42,23 @@ def test_job_launch_with_prompting(run_module, admin_user, project, inventory, m
         name='foo',
         project=project,
         playbook='helloworld.yml',
+        ask_variables_on_launch=True,
         ask_inventory_on_launch=True,
         ask_credential_on_launch=True
     )
     result = run_module('tower_job_launch', dict(
         job_template='foo',
         inventory=inventory.name,
-        credential=machine_credential.name
+        credential=machine_credential.name,
+        extra_vars={"var1": "My First Variable",
+                    "var2": "My Second Variable",
+                    "var3": "My Third Variable"
+                    }
     ), admin_user)
     assert result.pop('changed', None), result
 
     job = Job.objects.get(id=result['id'])
+    assert job.extra_vars == '{"var1": "My First Variable", "var2": "My Second Variable", "var3": "My Third Variable"}'
     assert job.inventory == inventory
     assert [cred.id for cred in job.credentials.all()] == [machine_credential.id]
 

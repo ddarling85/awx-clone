@@ -2,14 +2,8 @@ import React, { useState, useEffect } from 'react';
 import { withI18n } from '@lingui/react';
 import { withRouter } from 'react-router-dom';
 import { t } from '@lingui/macro';
-import {
-  PageSection,
-  Card,
-  CardHeader,
-  CardBody,
-  Tooltip,
-} from '@patternfly/react-core';
-
+import { PageSection, Card, CardHeader, Tooltip } from '@patternfly/react-core';
+import { CardBody } from '@components/Card';
 import ContentError from '@components/ContentError';
 import ContentLoading from '@components/ContentLoading';
 
@@ -54,7 +48,9 @@ function InventoryAdd({ history, i18n }) {
         data: { id: inventoryId },
       } = await InventoriesAPI.create({
         organization: organization.id,
-        insights_credential: insights_credential.id,
+        insights_credential: insights_credential
+          ? insights_credential.id
+          : null,
         ...remainingValues,
       });
       if (instanceGroups) {
@@ -74,7 +70,15 @@ function InventoryAdd({ history, i18n }) {
   };
 
   if (error) {
-    return <ContentError />;
+    return (
+      <PageSection>
+        <Card>
+          <CardBody>
+            <ContentError error={error} />
+          </CardBody>
+        </Card>
+      </PageSection>
+    );
   }
   if (isLoading) {
     return <ContentLoading />;

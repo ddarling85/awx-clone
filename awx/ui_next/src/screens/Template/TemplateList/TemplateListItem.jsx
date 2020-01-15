@@ -70,6 +70,7 @@ class TemplateListItem extends Component {
       <DataListItem
         aria-labelledby={`check-action-${template.id}`}
         css="--pf-c-data-list__expandable-content--BoxShadow: none;"
+        id={`${template.id}`}
       >
         <DataListItemRow>
           <DataListCheck
@@ -88,14 +89,16 @@ class TemplateListItem extends Component {
                   </Link>
                 </span>
                 {missingResourceIcon && (
-                  <Tooltip
-                    content={i18n._(
-                      t`Resources are missing from this template.`
-                    )}
-                    position="right"
-                  >
-                    <ExclamationTriangleIcon css="color: #c9190b; margin-left: 20px;" />
-                  </Tooltip>
+                  <span>
+                    <Tooltip
+                      content={i18n._(
+                        t`Resources are missing from this template.`
+                      )}
+                      position="right"
+                    >
+                      <ExclamationTriangleIcon css="color: #c9190b; margin-left: 20px;" />
+                    </Tooltip>
+                  </span>
                 )}
               </LeftDataListCell>,
               <RightDataListCell

@@ -23,6 +23,7 @@ import { Host } from '@types';
 function InventoryHostItem(props) {
   const {
     detailUrl,
+    editUrl,
     host,
     i18n,
     isSelected,
@@ -34,7 +35,7 @@ function InventoryHostItem(props) {
   const labelId = `check-action-${host.id}`;
 
   return (
-    <DataListItem key={host.id} aria-labelledby={labelId}>
+    <DataListItem key={host.id} aria-labelledby={labelId} id={`${host.id}`}>
       <DataListItemRow>
         <DataListCheck
           id={`select-host-${host.id}`}
@@ -79,7 +80,7 @@ function InventoryHostItem(props) {
                   <ListActionButton
                     variant="plain"
                     component={Link}
-                    to={`/hosts/${host.id}/edit`}
+                    to={`${editUrl}`}
                   >
                     <PencilAltIcon />
                   </ListActionButton>

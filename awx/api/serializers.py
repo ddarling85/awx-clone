@@ -98,26 +98,19 @@ SUMMARIZABLE_FK_FIELDS = {
                                            'total_hosts',
                                            'hosts_with_active_failures',
                                            'total_groups',
-                                           'groups_with_active_failures',
                                            'has_inventory_sources',
                                            'total_inventory_sources',
                                            'inventory_sources_with_failures',
                                            'organization_id',
                                            'kind',
                                            'insights_credential_id',),
-    'host': DEFAULT_SUMMARY_FIELDS + ('has_active_failures',
-                                      'has_inventory_sources'),
-    'group': DEFAULT_SUMMARY_FIELDS + ('has_active_failures',
-                                       'total_hosts',
-                                       'hosts_with_active_failures',
-                                       'total_groups',
-                                       'groups_with_active_failures',
-                                       'has_inventory_sources'),
+    'host': DEFAULT_SUMMARY_FIELDS,
+    'group': DEFAULT_SUMMARY_FIELDS,
     'project': DEFAULT_SUMMARY_FIELDS + ('status', 'scm_type'),
     'source_project': DEFAULT_SUMMARY_FIELDS + ('status', 'scm_type'),
     'project_update': DEFAULT_SUMMARY_FIELDS + ('status', 'failed',),
     'credential': DEFAULT_SUMMARY_FIELDS + ('kind', 'cloud', 'kubernetes', 'credential_type_id'),
-    'job': DEFAULT_SUMMARY_FIELDS + ('status', 'failed', 'elapsed', 'type'),
+    'job': DEFAULT_SUMMARY_FIELDS + ('status', 'failed', 'elapsed', 'type', 'canceled_on'),
     'job_template': DEFAULT_SUMMARY_FIELDS,
     'workflow_job_template': DEFAULT_SUMMARY_FIELDS,
     'workflow_job': DEFAULT_SUMMARY_FIELDS,
@@ -125,7 +118,7 @@ SUMMARIZABLE_FK_FIELDS = {
     'workflow_approval': DEFAULT_SUMMARY_FIELDS + ('timeout',),
     'schedule': DEFAULT_SUMMARY_FIELDS + ('next_run',),
     'unified_job_template': DEFAULT_SUMMARY_FIELDS + ('unified_job_type',),
-    'last_job': DEFAULT_SUMMARY_FIELDS + ('finished', 'status', 'failed', 'license_error'),
+    'last_job': DEFAULT_SUMMARY_FIELDS + ('finished', 'status', 'failed', 'license_error', 'canceled_on'),
     'last_job_host_summary': DEFAULT_SUMMARY_FIELDS + ('failed',),
     'last_update': DEFAULT_SUMMARY_FIELDS + ('status', 'failed', 'license_error'),
     'current_update': DEFAULT_SUMMARY_FIELDS + ('status', 'failed', 'license_error'),
@@ -141,6 +134,7 @@ SUMMARIZABLE_FK_FIELDS = {
     'target_credential': DEFAULT_SUMMARY_FIELDS + ('kind', 'cloud', 'credential_type_id'),
     'webhook_credential': DEFAULT_SUMMARY_FIELDS,
     'approved_or_denied_by': ('id', 'username', 'first_name', 'last_name'),
+    'credential_type': DEFAULT_SUMMARY_FIELDS,
 }
 
 
@@ -718,7 +712,7 @@ class UnifiedJobSerializer(BaseSerializer):
     class Meta:
         model = UnifiedJob
         fields = ('*', 'unified_job_template', 'launch_type', 'status',
-                  'failed', 'started', 'finished', 'elapsed', 'job_args',
+                  'failed', 'started', 'finished', 'canceled_on', 'elapsed', 'job_args',
                   'job_cwd', 'job_env', 'job_explanation',
                   'execution_node', 'controller_node',
                   'result_traceback', 'event_processing_finished')
@@ -1548,20 +1542,15 @@ class InventorySerializer(BaseSerializerWithVariables):
         'admin', 'adhoc',
         {'copy': 'organization.inventory_admin'}
     ]
-    groups_with_active_failures = serializers.IntegerField(
-        read_only=True,
-        min_value=0,
-        help_text=_('This field has been deprecated and will be removed in a future release')
-    )
 
 
     class Meta:
         model = Inventory
         fields = ('*', 'organization', 'kind', 'host_filter', 'variables', 'has_active_failures',
                   'total_hosts', 'hosts_with_active_failures', 'total_groups',
-                  'groups_with_active_failures', 'has_inventory_sources',
-                  'total_inventory_sources', 'inventory_sources_with_failures',
-                  'insights_credential', 'pending_deletion',)
+                  'has_inventory_sources', 'total_inventory_sources',
+                  'inventory_sources_with_failures', 'insights_credential',
+                  'pending_deletion',)
 
     def get_related(self, obj):
         res = super(InventorySerializer, self).get_related(obj)
@@ -1642,6 +1631,9 @@ class InventoryScriptSerializer(InventorySerializer):
 class HostSerializer(BaseSerializerWithVariables):
     show_capabilities = ['edit', 'delete']
     capabilities_prefetch = ['inventory.admin']
+
+    has_active_failures = serializers.SerializerMethodField()
+    has_inventory_sources = serializers.SerializerMethodField()
 
     class Meta:
         model = Host
@@ -1756,6 +1748,14 @@ class HostSerializer(BaseSerializerWithVariables):
             ret['last_job_host_summary'] = None
         return ret
 
+    def get_has_active_failures(self, obj):
+        return bool(
+            obj.last_job_host_summary and obj.last_job_host_summary.failed
+        )
+
+    def get_has_inventory_sources(self, obj):
+        return obj.inventory_sources.exists()
+
 
 class AnsibleFactsSerializer(BaseSerializer):
     class Meta:
@@ -1768,17 +1768,10 @@ class AnsibleFactsSerializer(BaseSerializer):
 class GroupSerializer(BaseSerializerWithVariables):
     show_capabilities = ['copy', 'edit', 'delete']
     capabilities_prefetch = ['inventory.admin', 'inventory.adhoc']
-    groups_with_active_failures = serializers.IntegerField(
-        read_only=True,
-        min_value=0,
-        help_text=_('This field has been deprecated and will be removed in a future release')
-    )
 
     class Meta:
         model = Group
-        fields = ('*', 'inventory', 'variables', 'has_active_failures',
-                  'total_hosts', 'hosts_with_active_failures', 'total_groups',
-                  'groups_with_active_failures', 'has_inventory_sources')
+        fields = ('*', 'inventory', 'variables')
 
     def build_relational_field(self, field_name, relation_info):
         field_class, field_kwargs = super(GroupSerializer, self).build_relational_field(field_name, relation_info)
@@ -2822,7 +2815,7 @@ class JobTemplateMixin(object):
         # .only('id', 'status', 'finished', 'polymorphic_ctype_id')
         optimized_qs = uj_qs.non_polymorphic()
         return [{
-            'id': x.id, 'status': x.status, 'finished': x.finished,
+            'id': x.id, 'status': x.status, 'finished': x.finished, 'canceled_on': x.canceled_on,
             # Make type consistent with API top-level key, for instance workflow_job
             'type': x.get_real_instance_class()._meta.verbose_name.replace(' ', '_')
         } for x in optimized_qs[:10]]
@@ -3873,26 +3866,6 @@ class JobEventSerializer(BaseSerializer):
         return data
 
 
-class JobEventWebSocketSerializer(JobEventSerializer):
-    created = serializers.SerializerMethodField()
-    modified = serializers.SerializerMethodField()
-    event_name = serializers.CharField(source='event')
-    group_name = serializers.SerializerMethodField()
-
-    class Meta:
-        model = JobEvent
-        fields = ('*', 'event_name', 'group_name',)
-
-    def get_created(self, obj):
-        return obj.created.isoformat()
-
-    def get_modified(self, obj):
-        return obj.modified.isoformat()
-
-    def get_group_name(self, obj):
-        return 'job_events'
-
-
 class ProjectUpdateEventSerializer(JobEventSerializer):
     stdout = serializers.SerializerMethodField()
     event_data = serializers.SerializerMethodField()
@@ -3922,26 +3895,6 @@ class ProjectUpdateEventSerializer(JobEventSerializer):
         except Exception:
             logger.exception("Failed to sanitize event_data")
             return {}
-
-
-class ProjectUpdateEventWebSocketSerializer(ProjectUpdateEventSerializer):
-    created = serializers.SerializerMethodField()
-    modified = serializers.SerializerMethodField()
-    event_name = serializers.CharField(source='event')
-    group_name = serializers.SerializerMethodField()
-
-    class Meta:
-        model = ProjectUpdateEvent
-        fields = ('*', 'event_name', 'group_name',)
-
-    def get_created(self, obj):
-        return obj.created.isoformat()
-
-    def get_modified(self, obj):
-        return obj.modified.isoformat()
-
-    def get_group_name(self, obj):
-        return 'project_update_events'
 
 
 class AdHocCommandEventSerializer(BaseSerializer):
@@ -3975,26 +3928,6 @@ class AdHocCommandEventSerializer(BaseSerializer):
         return data
 
 
-class AdHocCommandEventWebSocketSerializer(AdHocCommandEventSerializer):
-    created = serializers.SerializerMethodField()
-    modified = serializers.SerializerMethodField()
-    event_name = serializers.CharField(source='event')
-    group_name = serializers.SerializerMethodField()
-
-    class Meta:
-        model = AdHocCommandEvent
-        fields = ('*', 'event_name', 'group_name',)
-
-    def get_created(self, obj):
-        return obj.created.isoformat()
-
-    def get_modified(self, obj):
-        return obj.modified.isoformat()
-
-    def get_group_name(self, obj):
-        return 'ad_hoc_command_events'
-
-
 class InventoryUpdateEventSerializer(AdHocCommandEventSerializer):
 
     class Meta:
@@ -4010,26 +3943,6 @@ class InventoryUpdateEventSerializer(AdHocCommandEventSerializer):
         return res
 
 
-class InventoryUpdateEventWebSocketSerializer(InventoryUpdateEventSerializer):
-    created = serializers.SerializerMethodField()
-    modified = serializers.SerializerMethodField()
-    event_name = serializers.CharField(source='event')
-    group_name = serializers.SerializerMethodField()
-
-    class Meta:
-        model = InventoryUpdateEvent
-        fields = ('*', 'event_name', 'group_name',)
-
-    def get_created(self, obj):
-        return obj.created.isoformat()
-
-    def get_modified(self, obj):
-        return obj.modified.isoformat()
-
-    def get_group_name(self, obj):
-        return 'inventory_update_events'
-
-
 class SystemJobEventSerializer(AdHocCommandEventSerializer):
 
     class Meta:
@@ -4043,26 +3956,6 @@ class SystemJobEventSerializer(AdHocCommandEventSerializer):
             'api:system_job_detail', kwargs={'pk': obj.system_job_id}
         )
         return res
-
-
-class SystemJobEventWebSocketSerializer(SystemJobEventSerializer):
-    created = serializers.SerializerMethodField()
-    modified = serializers.SerializerMethodField()
-    event_name = serializers.CharField(source='event')
-    group_name = serializers.SerializerMethodField()
-
-    class Meta:
-        model = SystemJobEvent
-        fields = ('*', 'event_name', 'group_name',)
-
-    def get_created(self, obj):
-        return obj.created.isoformat()
-
-    def get_modified(self, obj):
-        return obj.modified.isoformat()
-
-    def get_group_name(self, obj):
-        return 'system_job_events'
 
 
 class JobLaunchSerializer(BaseSerializer):
@@ -4664,6 +4557,10 @@ class ScheduleSerializer(LaunchConfigurationBaseSerializer, SchedulePreviewSeria
 
     def get_summary_fields(self, obj):
         summary_fields = super(ScheduleSerializer, self).get_summary_fields(obj)
+
+        if isinstance(obj.unified_job_template, SystemJobTemplate):
+            summary_fields['unified_job_template']['job_type'] = obj.unified_job_template.job_type
+
         if 'inventory' in summary_fields:
             return summary_fields
 
