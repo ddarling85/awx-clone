@@ -1,237 +1,159 @@
 /* eslint-disable react/jsx-pascal-case */
 import React from 'react';
-import { createMemoryHistory } from 'history';
-import { mountWithContexts } from '../../../testUtils/enzymeHelpers';
-import Lookup, { _Lookup } from './Lookup';
+import { act } from 'react-dom/test-utils';
+import { mountWithContexts, waitForElement } from '@testUtils/enzymeHelpers';
+import { getQSConfig } from '@util/qs';
+import Lookup from './Lookup';
 
-let mockData = [{ name: 'foo', id: 1, isChecked: false }];
-const mockColumns = [{ name: 'Name', key: 'name', isSortable: true }];
+/**
+ * Check that an element is present on the document body
+ * @param {selector} query selector
+ */
+function checkRootElementPresent(selector) {
+  const queryResult = global.document.querySelector(selector);
+  expect(queryResult).not.toEqual(null);
+}
+
+/**
+ * Check that an element isn't present on the document body
+ * @param {selector} query selector
+ */
+function checkRootElementNotPresent(selector) {
+  const queryResult = global.document.querySelector(selector);
+  expect(queryResult).toEqual(null);
+}
+
+/**
+ * Check lookup input group tags for expected values
+ * @param {wrapper} enzyme wrapper instance
+ * @param {expected} array of expected tag values
+ */
+async function checkInputTagValues(wrapper, expected) {
+  checkRootElementNotPresent('body div[role="dialog"]');
+  // check input group chip values
+  const chips = await waitForElement(
+    wrapper,
+    'Lookup InputGroup Chip span',
+    el => el.length === expected.length
+  );
+  expect(chips).toHaveLength(expected.length);
+  chips.forEach((el, index) => {
+    expect(el.text()).toEqual(expected[index]);
+  });
+}
+
+const QS_CONFIG = getQSConfig('test', {});
+const TestList = () => <div />;
+
 describe('<Lookup />', () => {
-  test('initially renders succesfully', () => {
-    mountWithContexts(
-      <Lookup
-        lookupHeader="Foo Bar"
-        name="fooBar"
-        value={mockData}
-        onLookupSave={() => {}}
-        getItems={() => {}}
-        columns={mockColumns}
-        sortedColumnKey="name"
-      />
-    );
-  });
+  let wrapper;
+  let onChange;
 
-  test('API response is formatted properly', done => {
-    const wrapper = mountWithContexts(
-      <Lookup
-        lookupHeader="Foo Bar"
-        name="fooBar"
-        value={mockData}
-        onLookupSave={() => {}}
-        getItems={() => ({
-          data: { results: [{ name: 'test instance', id: 1 }] },
-        })}
-        columns={mockColumns}
-        sortedColumnKey="name"
-      />
-    ).find('Lookup');
-
-    setImmediate(() => {
-      expect(wrapper.state().results).toEqual([
-        { id: 1, name: 'test instance' },
-      ]);
-      done();
+  async function mountWrapper() {
+    const mockSelected = [{ name: 'foo', id: 1, url: '/api/v2/item/1' }];
+    await act(async () => {
+      wrapper = mountWithContexts(
+        <Lookup
+          id="test"
+          multiple
+          header="Foo Bar"
+          value={mockSelected}
+          onChange={onChange}
+          qsConfig={QS_CONFIG}
+          renderOptionsList={({ state, dispatch, canDelete }) => (
+            <TestList
+              id="options-list"
+              state={state}
+              dispatch={dispatch}
+              canDelete={canDelete}
+            />
+          )}
+        />
+      );
     });
+    return wrapper;
+  }
+
+  beforeEach(() => {
+    onChange = jest.fn();
+    document.body.innerHTML = '';
   });
 
-  test('Opens modal when search icon is clicked', () => {
-    const spy = jest.spyOn(_Lookup.prototype, 'handleModalToggle');
-    const mockSelected = [{ name: 'foo', id: 1 }];
-    const wrapper = mountWithContexts(
-      <Lookup
-        id="search"
-        lookupHeader="Foo Bar"
-        name="fooBar"
-        value={mockSelected}
-        onLookupSave={() => {}}
-        getItems={() => {}}
-        columns={mockColumns}
-        sortedColumnKey="name"
-      />
-    ).find('Lookup');
-    expect(spy).not.toHaveBeenCalled();
-    expect(wrapper.state('lookupSelectedItems')).toEqual(mockSelected);
-    const searchItem = wrapper.find('button[aria-label="Search"]');
-    searchItem.first().simulate('click');
-    expect(spy).toHaveBeenCalled();
-    expect(wrapper.state('lookupSelectedItems')).toEqual([
-      {
-        id: 1,
-        name: 'foo',
-      },
-    ]);
-    expect(wrapper.state('isModalOpen')).toEqual(true);
+  afterEach(() => {
+    jest.restoreAllMocks();
   });
 
-  test('calls "toggleSelected" when a user changes a checkbox', done => {
-    const spy = jest.spyOn(_Lookup.prototype, 'toggleSelected');
-    const mockSelected = [{ name: 'foo', id: 1 }];
-    const data = {
-      results: [{ name: 'test instance', id: 1, url: '/foo' }],
-      count: 1,
-    };
-    const wrapper = mountWithContexts(
-      <Lookup
-        id="search"
-        lookupHeader="Foo Bar"
-        name="fooBar"
-        value={mockSelected}
-        onLookupSave={() => {}}
-        getItems={() => ({ data })}
-        columns={mockColumns}
-        sortedColumnKey="name"
-      />
-    );
-    setImmediate(() => {
-      const searchItem = wrapper.find('button[aria-label="Search"]');
-      searchItem.first().simulate('click');
-      wrapper.find('input[type="checkbox"]').simulate('change');
-      expect(spy).toHaveBeenCalled();
-      done();
+  test('should render succesfully', async () => {
+    wrapper = await mountWrapper();
+    expect(wrapper.find('Lookup')).toHaveLength(1);
+  });
+
+  test('should show selected items', async () => {
+    wrapper = await mountWrapper();
+    expect(wrapper.find('Lookup')).toHaveLength(1);
+    await checkInputTagValues(wrapper, ['foo']);
+  });
+
+  test('should open and close modal', async () => {
+    wrapper = await mountWrapper();
+    checkRootElementNotPresent('body div[role="dialog"]');
+    wrapper.find('button[aria-label="Search"]').simulate('click');
+    checkRootElementPresent('body div[role="dialog"]');
+    const list = wrapper.find('TestList');
+    expect(list).toHaveLength(1);
+    expect(list.prop('state')).toEqual({
+      selectedItems: [{ id: 1, name: 'foo', url: '/api/v2/item/1' }],
+      value: [{ id: 1, name: 'foo', url: '/api/v2/item/1' }],
+      multiple: true,
+      isModalOpen: true,
+      required: false,
     });
+    expect(list.prop('dispatch')).toBeTruthy();
+    expect(list.prop('canDelete')).toEqual(true);
+    wrapper
+      .find('Modal button')
+      .findWhere(e => e.text() === 'Cancel')
+      .first()
+      .simulate('click');
+    checkRootElementNotPresent('body div[role="dialog"]');
   });
 
-  test('calls "toggleSelected" when remove icon is clicked', () => {
-    const spy = jest.spyOn(_Lookup.prototype, 'toggleSelected');
-    mockData = [{ name: 'foo', id: 1 }, { name: 'bar', id: 2 }];
-    const data = {
-      results: [{ name: 'test instance', id: 1, url: '/foo' }],
-      count: 1,
-    };
-    const wrapper = mountWithContexts(
-      <Lookup
-        id="search"
-        lookupHeader="Foo Bar"
-        name="fooBar"
-        value={mockData}
-        onLookupSave={() => {}}
-        getItems={() => ({ data })}
-        columns={mockColumns}
-        sortedColumnKey="name"
-      />
-    );
-    const removeIcon = wrapper.find('button[aria-label="close"]').first();
-    removeIcon.simulate('click');
-    expect(spy).toHaveBeenCalled();
+  test('should remove item when X button clicked', async () => {
+    wrapper = await mountWrapper();
+    await checkInputTagValues(wrapper, ['foo']);
+    wrapper
+      .find('Lookup InputGroup Chip')
+      .findWhere(el => el.text() === 'foo')
+      .first()
+      .invoke('onClick')();
+    expect(onChange).toHaveBeenCalledTimes(1);
+    expect(onChange).toHaveBeenCalledWith([]);
   });
 
-  test('renders chips from prop value', () => {
-    mockData = [{ name: 'foo', id: 0 }, { name: 'bar', id: 1 }];
-    const wrapper = mountWithContexts(
-      <Lookup
-        lookupHeader="Foo Bar"
-        onLookupSave={() => {}}
-        value={mockData}
-        selected={[]}
-        getItems={() => {}}
-        columns={mockColumns}
-        sortedColumnKey="name"
-      />
-    ).find('Lookup');
-    const chip = wrapper.find('.pf-c-chip');
-    expect(chip).toHaveLength(2);
-  });
-
-  test('toggleSelected successfully adds/removes row from lookupSelectedItems state', () => {
-    mockData = [];
-    const wrapper = mountWithContexts(
-      <Lookup
-        lookupHeader="Foo Bar"
-        onLookupSave={() => {}}
-        value={mockData}
-        getItems={() => {}}
-        columns={mockColumns}
-        sortedColumnKey="name"
-      />
-    ).find('Lookup');
-    wrapper.instance().toggleSelected({
-      id: 1,
-      name: 'foo',
+  test('should pass canDelete false if required single select', async () => {
+    await act(async () => {
+      const mockSelected = { name: 'foo', id: 1, url: '/api/v2/item/1' };
+      wrapper = mountWithContexts(
+        <Lookup
+          id="test"
+          header="Foo Bar"
+          required
+          value={mockSelected}
+          onChange={onChange}
+          qsConfig={QS_CONFIG}
+          renderOptionsList={({ state, dispatch, canDelete }) => (
+            <TestList
+              id="options-list"
+              state={state}
+              dispatch={dispatch}
+              canDelete={canDelete}
+            />
+          )}
+        />
+      );
     });
-    expect(wrapper.state('lookupSelectedItems')).toEqual([
-      {
-        id: 1,
-        name: 'foo',
-      },
-    ]);
-    wrapper.instance().toggleSelected({
-      id: 1,
-      name: 'foo',
-    });
-    expect(wrapper.state('lookupSelectedItems')).toEqual([]);
-  });
-
-  test('saveModal calls callback with selected items', () => {
-    mockData = [];
-    const onLookupSaveFn = jest.fn();
-    const wrapper = mountWithContexts(
-      <Lookup
-        lookupHeader="Foo Bar"
-        name="fooBar"
-        value={mockData}
-        onLookupSave={onLookupSaveFn}
-        getItems={() => {}}
-        sortedColumnKey="name"
-      />
-    ).find('Lookup');
-    wrapper.instance().toggleSelected({
-      id: 1,
-      name: 'foo',
-    });
-    expect(wrapper.state('lookupSelectedItems')).toEqual([
-      {
-        id: 1,
-        name: 'foo',
-      },
-    ]);
-    wrapper.instance().saveModal();
-    expect(onLookupSaveFn).toHaveBeenCalledWith(
-      [
-        {
-          id: 1,
-          name: 'foo',
-        },
-      ],
-      'fooBar'
-    );
-  });
-
-  test('should re-fetch data when URL params change', async () => {
-    const history = createMemoryHistory({
-      initialEntries: ['/organizations/add'],
-    });
-    const getItems = jest.fn();
-    const wrapper = mountWithContexts(
-      <_Lookup
-        lookupHeader="Foo Bar"
-        onLookupSave={() => {}}
-        value={mockData}
-        selected={[]}
-        columns={mockColumns}
-        sortedColumnKey="name"
-        getItems={getItems}
-        handleHttpError={() => {}}
-        location={{ history }}
-        i18n={{ _: val => val.toString() }}
-      />
-    );
-
-    expect(getItems).toHaveBeenCalledTimes(1);
-    history.push('organizations/add?page=2');
-    wrapper.setProps({
-      location: { history },
-    });
-    wrapper.update();
-    expect(getItems).toHaveBeenCalledTimes(2);
+    wrapper.find('button[aria-label="Search"]').simulate('click');
+    const list = wrapper.find('TestList');
+    expect(list.prop('canDelete')).toEqual(false);
   });
 });

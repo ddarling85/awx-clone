@@ -7,12 +7,14 @@ from twilio.rest import Client
 
 from django.utils.encoding import smart_text
 from django.utils.translation import ugettext_lazy as _
+
 from awx.main.notifications.base import AWXBaseEmailBackend
+from awx.main.notifications.custom_notification_base import CustomNotificationBase
 
 logger = logging.getLogger('awx.main.notifications.twilio_backend')
 
 
-class TwilioBackend(AWXBaseEmailBackend):
+class TwilioBackend(AWXBaseEmailBackend, CustomNotificationBase):
 
     init_parameters = {"account_sid": {"label": "Account SID", "type": "string"},
                        "account_token": {"label": "Account Token", "type": "password"},

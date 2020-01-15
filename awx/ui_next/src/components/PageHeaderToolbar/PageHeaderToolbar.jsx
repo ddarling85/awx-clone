@@ -92,9 +92,10 @@ class PageHeaderToolbar extends Component {
               />
             </ToolbarItem>
           </Tooltip>
-          <Tooltip position="left" content={<div>User</div>}>
+          <Tooltip position="left" content={<div>{i18n._(t`User`)}</div>}>
             <ToolbarItem>
               <Dropdown
+                id="toolbar-user-dropdown"
                 isPlain
                 isOpen={isUserOpen}
                 position={DropdownPosition.right}
@@ -110,13 +111,21 @@ class PageHeaderToolbar extends Component {
                   </DropdownToggle>
                 }
                 dropdownItems={[
-                  <DropdownItem key="user" href="#/home">
+                  <DropdownItem
+                    key="user"
+                    href={
+                      loggedInUser
+                        ? `#/users/${loggedInUser.id}/details`
+                        : '#/home'
+                    }
+                  >
                     {i18n._(t`User Details`)}
                   </DropdownItem>,
                   <DropdownItem
                     key="logout"
                     component="button"
                     onClick={onLogoutClick}
+                    id="logout-button"
                   >
                     {i18n._(t`Logout`)}
                   </DropdownItem>,

@@ -123,8 +123,16 @@ class PoolWorker(object):
         # if any tasks were finished, removed them from the managed tasks for
         # this worker
         for uuid in finished:
-            self.messages_finished += 1
-            del self.managed_tasks[uuid]
+            try:
+                del self.managed_tasks[uuid]
+                self.messages_finished += 1
+            except KeyError:
+                # ansible _sometimes_ appears to send events w/ duplicate UUIDs;
+                # UUIDs for ansible events are *not* actually globally unique
+                # when this occurs, it's _fine_ to ignore this KeyError because
+                # the purpose of self.managed_tasks is to just track internal
+                # state of which events are *currently* being processed.
+                logger.warn('Event UUID {} appears to be have been duplicated.'.format(uuid))
 
     @property
     def current_task(self):
@@ -269,7 +277,7 @@ class WorkerPool(object):
                 logger.warn("could not write to queue %s" % preferred_queue)
                 logger.warn("detail: {}".format(tb))
             write_attempt_order.append(preferred_queue)
-        logger.warn("could not write payload to any queue, attempted order: {}".format(write_attempt_order))
+        logger.error("could not write payload to any queue, attempted order: {}".format(write_attempt_order))
         return None
 
     def stop(self, signum):

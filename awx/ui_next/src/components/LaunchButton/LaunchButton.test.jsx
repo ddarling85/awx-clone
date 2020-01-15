@@ -1,5 +1,6 @@
 import React from 'react';
-import { mountWithContexts, waitForElement } from '@testUtils/enzymeHelpers';
+import { createMemoryHistory } from 'history';
+import { mountWithContexts } from '@testUtils/enzymeHelpers';
 import { sleep } from '@testUtils/testUtils';
 
 import LaunchButton from './LaunchButton';
@@ -14,33 +15,48 @@ describe('LaunchButton', () => {
     },
   });
 
+  const children = ({ handleLaunch }) => (
+    <button type="submit" onClick={() => handleLaunch()} />
+  );
+
+  const resource = {
+    id: 1,
+    type: 'job_template',
+  };
+
   test('renders the expected content', () => {
-    const wrapper = mountWithContexts(<LaunchButton templateId={1} />);
+    const wrapper = mountWithContexts(
+      <LaunchButton resource={resource}>{children}</LaunchButton>
+    );
     expect(wrapper).toHaveLength(1);
   });
-  test('redirects to details after successful launch', async done => {
-    const history = {
-      push: jest.fn(),
-    };
+
+  test('should redirect to job after successful launch', async () => {
+    const history = createMemoryHistory({
+      initialEntries: ['/jobs/9000'],
+    });
     JobTemplatesAPI.launch.mockResolvedValue({
       data: {
         id: 9000,
       },
     });
-    const wrapper = mountWithContexts(<LaunchButton templateId={1} />, {
-      context: {
-        router: { history },
-      },
-    });
-    const launchButton = wrapper.find('LaunchButton__StyledLaunchButton');
-    launchButton.simulate('click');
-    await sleep(0);
+    const wrapper = mountWithContexts(
+      <LaunchButton resource={resource}>{children}</LaunchButton>,
+      {
+        context: {
+          router: { history },
+        },
+      }
+    );
+    const button = wrapper.find('button');
+    button.prop('onClick')();
     expect(JobTemplatesAPI.readLaunch).toHaveBeenCalledWith(1);
+    await sleep(0);
     expect(JobTemplatesAPI.launch).toHaveBeenCalledWith(1);
-    expect(history.push).toHaveBeenCalledWith('/jobs/9000/details');
-    done();
+    expect(history.location.pathname).toEqual('/jobs/9000');
   });
-  test('displays error modal after unsuccessful launch', async done => {
+
+  test('displays error modal after unsuccessful launch', async () => {
     JobTemplatesAPI.launch.mockRejectedValue(
       new Error({
         response: {
@@ -53,21 +69,17 @@ describe('LaunchButton', () => {
         },
       })
     );
-    const wrapper = mountWithContexts(<LaunchButton templateId={1} />);
-    const launchButton = wrapper.find('LaunchButton__StyledLaunchButton');
-    launchButton.simulate('click');
-    await waitForElement(
-      wrapper,
-      'Modal.at-c-alertModal--danger',
-      el => el.props().isOpen === true && el.props().title === 'Error!'
+    const wrapper = mountWithContexts(
+      <LaunchButton resource={resource}>{children}</LaunchButton>
     );
-    const modalCloseButton = wrapper.find('ModalBoxCloseButton');
-    modalCloseButton.simulate('click');
-    await waitForElement(
-      wrapper,
-      'Modal.at-c-alertModal--danger',
-      el => el.props().isOpen === false
-    );
-    done();
+    expect(wrapper.find('Modal').length).toBe(0);
+    wrapper.find('button').prop('onClick')();
+    await sleep(0);
+    wrapper.update();
+    expect(wrapper.find('Modal').length).toBe(1);
+    wrapper.find('ModalBoxCloseButton').simulate('click');
+    await sleep(0);
+    wrapper.update();
+    expect(wrapper.find('Modal').length).toBe(0);
   });
 });

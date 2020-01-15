@@ -1,233 +1,207 @@
-import React, { Fragment } from 'react';
-import PropTypes from 'prop-types';
+import React, { Fragment, useReducer, useEffect } from 'react';
+import {
+  string,
+  bool,
+  arrayOf,
+  func,
+  number,
+  oneOfType,
+  shape,
+} from 'prop-types';
 import { withRouter } from 'react-router-dom';
 import { SearchIcon } from '@patternfly/react-icons';
 import {
   Button,
   ButtonVariant,
-  InputGroup,
+  InputGroup as PFInputGroup,
   Modal,
 } from '@patternfly/react-core';
 import { withI18n } from '@lingui/react';
 import { t } from '@lingui/macro';
+import styled from 'styled-components';
 
-import PaginatedDataList from '../PaginatedDataList';
-import DataListToolbar from '../DataListToolbar';
-import CheckboxListItem from '../CheckboxListItem';
-import SelectedList from '../SelectedList';
+import reducer, { initReducer } from './shared/reducer';
 import { ChipGroup, Chip } from '../Chip';
-import { getQSConfig, parseNamespacedQueryString } from '../../util/qs';
+import { QSConfig } from '@types';
 
-class Lookup extends React.Component {
-  constructor(props) {
-    super(props);
-
-    this.state = {
-      isModalOpen: false,
-      lookupSelectedItems: [...props.value] || [],
-      results: [],
-      count: 0,
-      error: null,
-    };
-    this.qsConfig = getQSConfig('lookup', {
-      page: 1,
-      page_size: 5,
-      order_by: props.sortedColumnKey,
-    });
-    this.handleModalToggle = this.handleModalToggle.bind(this);
-    this.toggleSelected = this.toggleSelected.bind(this);
-    this.saveModal = this.saveModal.bind(this);
-    this.getData = this.getData.bind(this);
+const SearchButton = styled(Button)`
+  ::after {
+    border: var(--pf-c-button--BorderWidth) solid
+      var(--pf-global--BorderColor--200);
   }
+`;
+SearchButton.displayName = 'SearchButton';
 
-  componentDidMount() {
-    this.getData();
-  }
+const InputGroup = styled(PFInputGroup)`
+  ${props =>
+    props.multiple &&
+    `
+    --pf-c-form-control--Height: 90px;
+    overflow-y: auto;
+  `}
+`;
 
-  componentDidUpdate(prevProps) {
-    const { location } = this.props;
-    if (location !== prevProps.location) {
-      this.getData();
-    }
-  }
+const ChipHolder = styled.div`
+  --pf-c-form-control--BorderTopColor: var(--pf-global--BorderColor--200);
+  --pf-c-form-control--BorderRightColor: var(--pf-global--BorderColor--200);
+  --pf-c-form-control--Height: auto;
+  border-top-right-radius: 3px;
+  border-bottom-right-radius: 3px;
+`;
 
-  async getData() {
-    const {
-      getItems,
-      location: { search },
-    } = this.props;
-    const queryParams = parseNamespacedQueryString(this.qsConfig, search);
+function Lookup(props) {
+  const {
+    id,
+    header,
+    onChange,
+    onBlur,
+    value,
+    multiple,
+    required,
+    qsConfig,
+    renderItemChip,
+    renderOptionsList,
+    history,
+    i18n,
+  } = props;
 
-    this.setState({ error: false });
-    try {
-      const { data } = await getItems(queryParams);
-      const { results, count } = data;
+  const [state, dispatch] = useReducer(
+    reducer,
+    { value, multiple, required },
+    initReducer
+  );
 
-      this.setState({
-        results,
-        count,
-      });
-    } catch (err) {
-      this.setState({ error: true });
-    }
-  }
+  useEffect(() => {
+    dispatch({ type: 'SET_MULTIPLE', value: multiple });
+  }, [multiple]);
 
-  toggleSelected(row) {
-    const { name, onLookupSave } = this.props;
-    const {
-      lookupSelectedItems: updatedSelectedItems,
-      isModalOpen,
-    } = this.state;
+  useEffect(() => {
+    dispatch({ type: 'SET_VALUE', value });
+  }, [value]);
 
-    const selectedIndex = updatedSelectedItems.findIndex(
-      selectedRow => selectedRow.id === row.id
-    );
+  const clearQSParams = () => {
+    const parts = history.location.search.replace(/^\?/, '').split('&');
+    const ns = qsConfig.namespace;
+    const otherParts = parts.filter(param => !param.startsWith(`${ns}.`));
+    history.push(`${history.location.pathname}?${otherParts.join('&')}`);
+  };
 
-    if (selectedIndex > -1) {
-      updatedSelectedItems.splice(selectedIndex, 1);
-      this.setState({ lookupSelectedItems: updatedSelectedItems });
+  const save = () => {
+    const { selectedItems } = state;
+    const val = multiple ? selectedItems : selectedItems[0] || null;
+    onChange(val);
+    clearQSParams();
+    dispatch({ type: 'CLOSE_MODAL' });
+  };
+
+  const removeItem = item => {
+    if (multiple) {
+      onChange(value.filter(i => i.id !== item.id));
     } else {
-      this.setState(prevState => ({
-        lookupSelectedItems: [...prevState.lookupSelectedItems, row],
-      }));
+      onChange(null);
     }
+  };
 
-    // Updates the selected items from parent state
-    // This handles the case where the user removes chips from the lookup input
-    // while the modal is closed
-    if (!isModalOpen) {
-      onLookupSave(updatedSelectedItems, name);
-    }
+  const closeModal = () => {
+    clearQSParams();
+    dispatch({ type: 'CLOSE_MODAL' });
+  };
+
+  const { isModalOpen, selectedItems } = state;
+  const canDelete = !required || (multiple && value.length > 1);
+  let items = [];
+  if (multiple) {
+    items = value;
+  } else if (value) {
+    items.push(value);
   }
-
-  handleModalToggle() {
-    const { isModalOpen } = this.state;
-    const { value } = this.props;
-    // Resets the selected items from parent state whenever modal is opened
-    // This handles the case where the user closes/cancels the modal and
-    // opens it again
-    if (!isModalOpen) {
-      this.setState({ lookupSelectedItems: [...value] });
-    }
-    this.setState(prevState => ({
-      isModalOpen: !prevState.isModalOpen,
-    }));
-  }
-
-  saveModal() {
-    const { onLookupSave, name } = this.props;
-    const { lookupSelectedItems } = this.state;
-    onLookupSave(lookupSelectedItems, name);
-    this.handleModalToggle();
-  }
-
-  render() {
-    const {
-      isModalOpen,
-      lookupSelectedItems,
-      error,
-      results,
-      count,
-    } = this.state;
-    const { id, lookupHeader, value, columns, i18n } = this.props;
-
-    const header = lookupHeader || i18n._(t`items`);
-
-    const chips = value ? (
-      <ChipGroup>
-        {value.map(chip => (
-          <Chip key={chip.id} onClick={() => this.toggleSelected(chip)}>
-            {chip.name}
-          </Chip>
-        ))}
-      </ChipGroup>
-    ) : null;
-
-    return (
-      <Fragment>
-        <InputGroup className="awx-lookup">
-          <Button
-            aria-label="Search"
-            id={id}
-            onClick={this.handleModalToggle}
-            variant={ButtonVariant.tertiary}
-          >
-            <SearchIcon />
-          </Button>
-          <div className="pf-c-form-control">{chips}</div>
-        </InputGroup>
-        <Modal
-          className="awx-c-modal"
-          title={i18n._(t`Select ${header}`)}
-          isOpen={isModalOpen}
-          onClose={this.handleModalToggle}
-          actions={[
-            <Button
-              key="save"
-              variant="primary"
-              onClick={this.saveModal}
-              style={results.length === 0 ? { display: 'none' } : {}}
-            >
-              {i18n._(t`Save`)}
-            </Button>,
-            <Button
-              key="cancel"
-              variant="secondary"
-              onClick={this.handleModalToggle}
-            >
-              {results.length === 0 ? i18n._(t`Close`) : i18n._(t`Cancel`)}
-            </Button>,
-          ]}
+  return (
+    <Fragment>
+      <InputGroup onBlur={onBlur}>
+        <SearchButton
+          aria-label="Search"
+          id={id}
+          onClick={() => dispatch({ type: 'TOGGLE_MODAL' })}
+          variant={ButtonVariant.tertiary}
         >
-          <PaginatedDataList
-            items={results}
-            itemCount={count}
-            itemName={lookupHeader}
-            qsConfig={this.qsConfig}
-            toolbarColumns={columns}
-            renderItem={item => (
-              <CheckboxListItem
-                key={item.id}
-                itemId={item.id}
-                name={item.name}
-                isSelected={lookupSelectedItems.some(i => i.id === item.id)}
-                onSelect={() => this.toggleSelected(item)}
-              />
+          <SearchIcon />
+        </SearchButton>
+        <ChipHolder className="pf-c-form-control">
+          <ChipGroup numChips={5}>
+            {items.map(item =>
+              renderItemChip({
+                item,
+                removeItem,
+                canDelete,
+              })
             )}
-            renderToolbar={props => (
-              <DataListToolbar {...props} alignToolbarLeft />
-            )}
-            showPageSizeOptions={false}
-          />
-          {lookupSelectedItems.length > 0 && (
-            <SelectedList
-              label={i18n._(t`Selected`)}
-              selected={lookupSelectedItems}
-              showOverflowAfter={5}
-              onRemove={this.toggleSelected}
-            />
-          )}
-          {error ? <div>error</div> : ''}
-        </Modal>
-      </Fragment>
-    );
-  }
+          </ChipGroup>
+        </ChipHolder>
+      </InputGroup>
+      <Modal
+        className="awx-c-modal"
+        title={i18n._(t`Select ${header || i18n._(t`Items`)}`)}
+        isOpen={isModalOpen}
+        onClose={closeModal}
+        actions={[
+          <Button
+            key="select"
+            variant="primary"
+            onClick={save}
+            style={
+              required && selectedItems.length === 0 ? { display: 'none' } : {}
+            }
+          >
+            {i18n._(t`Select`)}
+          </Button>,
+          <Button key="cancel" variant="secondary" onClick={closeModal}>
+            {i18n._(t`Cancel`)}
+          </Button>,
+        ]}
+      >
+        {renderOptionsList({
+          state,
+          dispatch,
+          canDelete,
+        })}
+      </Modal>
+    </Fragment>
+  );
 }
 
+const Item = shape({
+  id: number.isRequired,
+});
+
 Lookup.propTypes = {
-  id: PropTypes.string,
-  getItems: PropTypes.func.isRequired,
-  lookupHeader: PropTypes.string,
-  name: PropTypes.string, // TODO: delete, unused ?
-  onLookupSave: PropTypes.func.isRequired,
-  value: PropTypes.arrayOf(PropTypes.object).isRequired,
-  sortedColumnKey: PropTypes.string.isRequired,
+  id: string,
+  header: string,
+  onChange: func.isRequired,
+  value: oneOfType([Item, arrayOf(Item)]),
+  multiple: bool,
+  required: bool,
+  onBlur: func,
+  qsConfig: QSConfig.isRequired,
+  renderItemChip: func,
+  renderOptionsList: func.isRequired,
 };
 
 Lookup.defaultProps = {
   id: 'lookup-search',
-  lookupHeader: null,
-  name: null,
+  header: null,
+  value: null,
+  multiple: false,
+  required: false,
+  onBlur: () => {},
+  renderItemChip: ({ item, removeItem, canDelete }) => (
+    <Chip
+      key={item.id}
+      onClick={() => removeItem(item)}
+      isReadOnly={!canDelete}
+    >
+      {item.name}
+    </Chip>
+  ),
 };
 
 export { Lookup as _Lookup };

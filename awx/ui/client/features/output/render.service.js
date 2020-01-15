@@ -35,7 +35,7 @@ const hasAnsi = input => re.test(input);
 
 let $scope;
 
-function JobRenderService ($q, $compile, $sce, $window, strings) {
+function JobRenderService ($q, $compile, $sce, $window) {
     this.init = (_$scope_, { toggles }) => {
         $scope = _$scope_;
         this.setScope();
@@ -132,7 +132,7 @@ function JobRenderService ($q, $compile, $sce, $window, strings) {
             return { html: '', count: 0 };
         }
 
-        const html = this.buildRowHTML(this.records[uuid], null, null, event);
+        const html = this.buildRowHTML(this.records[uuid]);
         const count = 1;
 
         return { html, count };
@@ -193,7 +193,7 @@ function JobRenderService ($q, $compile, $sce, $window, strings) {
             return { html: '', count: 0 };
         }
 
-        const html = this.buildRowHTML(this.records[uuid], null, null, event);
+        const html = this.buildRowHTML(this.records[uuid]);
         const count = 1;
 
         return { html, count };
@@ -213,6 +213,18 @@ function JobRenderService ($q, $compile, $sce, $window, strings) {
         const record = this.createRecord(event, lines);
 
         if (lines.length === 1 && lines[0] === '') {
+            // runner_on_start, runner_on_ok, and a few other events have an actual line count
+            // of 1 (stdout = '') and a claimed line count of 0 (end_line - start_line = 0).
+            // Since a zero-length string has an actual line count of 1, they'll still get
+            // rendered as blank lines unless we intercept them and add some special
+            // handling to remove them.
+            //
+            // Although we're not going to render the blank line, the actual line count of
+            // the zero-length stdout string, which is 1, has already been recorded at this
+            // point so we must also go back and set the event's recorded line length to 0
+            // in order to avoid deleting too many lines when we need to pop or shift a
+            // page that contains this event off of the view.
+            this.records[record.uuid].lineCount = 0;
             return { html: '', count: 0 };
         }
 
@@ -226,10 +238,10 @@ function JobRenderService ($q, $compile, $sce, $window, strings) {
             const line = lines[i];
             const isLastLine = i === lines.length - 1;
 
-            let row = this.buildRowHTML(record, ln, line, event);
+            let row = this.buildRowHTML(record, ln, line);
 
             if (record && record.isTruncated && isLastLine) {
-                row += this.buildRowHTML(record, null, null, event);
+                row += this.buildRowHTML(record);
                 count++;
             }
 
@@ -350,14 +362,14 @@ function JobRenderService ($q, $compile, $sce, $window, strings) {
         return list;
     };
 
-    this.buildRowHTML = (record, ln, content, event) => {
+    this.buildRowHTML = (record, ln, content) => {
         let id = '';
         let icon = '';
         let timestamp = '';
         let tdToggle = '';
         let tdEvent = '';
         let classList = '';
-        let directives = `aw-tool-tip="${this.createToolTip(event, record)}" aw-tip-placement="top"`;
+        let directives = '';
 
         if (record.isMissing) {
             return `<div id="${record.uuid}" class="at-Stdout-row">
@@ -413,9 +425,9 @@ function JobRenderService ($q, $compile, $sce, $window, strings) {
 
         if (record && record.isClickable) {
             classList += ' at-Stdout-row--clickable';
-            directives += ` ng-click="vm.showHostDetails('${record.id}', '${record.uuid}')"
-            `;
+            directives = `ng-click="vm.showHostDetails('${record.id}', '${record.uuid}')"`;
         }
+
         return `
             <div id="${id}" class="at-Stdout-row ${classList}" ${directives}>
                 ${tdToggle}
@@ -424,16 +436,6 @@ function JobRenderService ($q, $compile, $sce, $window, strings) {
                 <div class="at-Stdout-time">${timestamp}</div>
             </div>
         `;
-    };
-
-    this.createToolTip = (event, record) => {
-        const status = strings.get('tooltips.HOST_STATUS');
-        const eventID = strings.get('tooltips.EVENT_ID');
-        const clickForDetails = strings.get('tooltips.DETAILS');
-
-        return record.isClickable
-            ? `${status} ${event.event_display}<br />${eventID} ${event.id}<br />${clickForDetails}`
-            : `${status} ${event.event_display}<br />${eventID} ${event.id}`;
     };
 
     this.getTimestamp = created => {
@@ -483,7 +485,7 @@ function JobRenderService ($q, $compile, $sce, $window, strings) {
     this.shift = lines => {
         // We multiply by two here under the assumption that one element and one text node
         // is generated for each line of output.
-        const count = 2 * lines;
+        const count = (2 * lines) + 1;
         const elements = this.el.contents().slice(0, count);
 
         return this.remove(elements);
@@ -492,7 +494,7 @@ function JobRenderService ($q, $compile, $sce, $window, strings) {
     this.pop = lines => {
         // We multiply by two here under the assumption that one element and one text node
         // is generated for each line of output.
-        const count = 2 * lines;
+        const count = (2 * lines) + 1;
         const elements = this.el.contents().slice(-count);
 
         return this.remove(elements);
@@ -568,7 +570,7 @@ function JobRenderService ($q, $compile, $sce, $window, strings) {
         }
 
         const max = this.state.tail;
-        const min = max - count;
+        const min = max - count + 1;
 
         let lines = 0;
 
@@ -599,7 +601,7 @@ function JobRenderService ($q, $compile, $sce, $window, strings) {
         }
 
         const min = this.state.head;
-        const max = min + count;
+        const max = min + count - 1;
 
         let lines = 0;
 
@@ -629,6 +631,6 @@ function JobRenderService ($q, $compile, $sce, $window, strings) {
     this.getCapacity = () => OUTPUT_EVENT_LIMIT - (this.getTailCounter() - this.getHeadCounter());
 }
 
-JobRenderService.$inject = ['$q', '$compile', '$sce', '$window', 'OutputStrings'];
+JobRenderService.$inject = ['$q', '$compile', '$sce', '$window'];
 
 export default JobRenderService;

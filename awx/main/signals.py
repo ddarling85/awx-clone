@@ -10,6 +10,7 @@ import pkg_resources
 import sys
 
 # Django
+from django.db import connection
 from django.conf import settings
 from django.db.models.signals import (
     pre_save,
@@ -30,12 +31,11 @@ from crum.signals import current_user_getter
 
 # AWX
 from awx.main.models import (
-    ActivityStream, AdHocCommandEvent, Group, Host, InstanceGroup, Inventory,
-    InventorySource, InventoryUpdateEvent, Job, JobEvent, JobHostSummary,
-    JobTemplate, OAuth2AccessToken, Organization, Project, ProjectUpdateEvent,
-    Role, SystemJob, SystemJobEvent, SystemJobTemplate, UnifiedJob,
-    UnifiedJobTemplate, User, UserSessionMembership,
-    ROLE_SINGLETON_SYSTEM_ADMINISTRATOR
+    ActivityStream, Group, Host, InstanceGroup, Inventory, InventorySource,
+    Job, JobHostSummary, JobTemplate, OAuth2AccessToken, Organization, Project,
+    Role, SystemJob, SystemJobTemplate, UnifiedJob, UnifiedJobTemplate, User,
+    UserSessionMembership, WorkflowJobTemplateNode, WorkflowApproval,
+    WorkflowApprovalTemplate, ROLE_SINGLETON_SYSTEM_ADMINISTRATOR
 )
 from awx.main.constants import CENSOR_VALUE
 from awx.main.utils import model_instance_diff, model_to_dict, camelcase_to_underscore, get_current_apps
@@ -72,42 +72,6 @@ def get_current_user_or_none():
     return u
 
 
-def emit_event_detail(serializer, relation, **kwargs):
-    instance = kwargs['instance']
-    created = kwargs['created']
-    if created:
-        event_serializer = serializer(instance)
-        consumers.emit_channel_notification(
-            '-'.join([event_serializer.get_group_name(instance), str(getattr(instance, relation))]),
-            event_serializer.data
-        )
-
-
-def emit_job_event_detail(sender, **kwargs):
-    from awx.api import serializers
-    emit_event_detail(serializers.JobEventWebSocketSerializer, 'job_id', **kwargs)
-
-
-def emit_ad_hoc_command_event_detail(sender, **kwargs):
-    from awx.api import serializers
-    emit_event_detail(serializers.AdHocCommandEventWebSocketSerializer, 'ad_hoc_command_id', **kwargs)
-
-
-def emit_project_update_event_detail(sender, **kwargs):
-    from awx.api import serializers
-    emit_event_detail(serializers.ProjectUpdateEventWebSocketSerializer, 'project_update_id', **kwargs)
-
-
-def emit_inventory_update_event_detail(sender, **kwargs):
-    from awx.api import serializers
-    emit_event_detail(serializers.InventoryUpdateEventWebSocketSerializer, 'inventory_update_id', **kwargs)
-
-
-def emit_system_job_event_detail(sender, **kwargs):
-    from awx.api import serializers
-    emit_event_detail(serializers.SystemJobEventWebSocketSerializer, 'system_job_id', **kwargs)
-
-
 def emit_update_inventory_computed_fields(sender, **kwargs):
     logger.debug("In update inventory computed fields")
     if getattr(_inventory_updates, 'is_updating', False):
@@ -140,7 +104,7 @@ def emit_update_inventory_computed_fields(sender, **kwargs):
     except Inventory.DoesNotExist:
         pass
     else:
-        update_inventory_computed_fields.delay(inventory.id, True)
+        update_inventory_computed_fields.delay(inventory.id)
 
 
 def emit_update_inventory_on_created_or_deleted(sender, **kwargs):
@@ -161,7 +125,9 @@ def emit_update_inventory_on_created_or_deleted(sender, **kwargs):
         pass
     else:
         if inventory is not None:
-            update_inventory_computed_fields.delay(inventory.id, True)
+            connection.on_commit(
+                lambda: update_inventory_computed_fields.delay(inventory.id)
+            )
 
 
 def rebuild_role_ancestor_list(reverse, model, instance, pk_set, action, **kwargs):
@@ -258,11 +224,6 @@ connect_computed_field_signals()
 
 post_save.connect(save_related_job_templates, sender=Project)
 post_save.connect(save_related_job_templates, sender=Inventory)
-post_save.connect(emit_job_event_detail, sender=JobEvent)
-post_save.connect(emit_ad_hoc_command_event_detail, sender=AdHocCommandEvent)
-post_save.connect(emit_project_update_event_detail, sender=ProjectUpdateEvent)
-post_save.connect(emit_inventory_update_event_detail, sender=InventoryUpdateEvent)
-post_save.connect(emit_system_job_event_detail, sender=SystemJobEvent)
 m2m_changed.connect(rebuild_role_ancestor_list, Role.parents.through)
 m2m_changed.connect(rbac_activity_stream, Role.members.through)
 m2m_changed.connect(rbac_activity_stream, Role.parents.through)
@@ -355,6 +316,7 @@ def update_host_last_job_after_job_deleted(sender, **kwargs):
     for host in Host.objects.filter(pk__in=hosts_pks):
         _update_host_last_jhs(host)
 
+
 # Set via ActivityStreamRegistrar to record activity stream events
 
 
@@ -429,6 +391,8 @@ def model_serializer_mapping():
         models.Label: serializers.LabelSerializer,
         models.WorkflowJobTemplate: serializers.WorkflowJobTemplateWithSpecSerializer,
         models.WorkflowJobTemplateNode: serializers.WorkflowJobTemplateNodeSerializer,
+        models.WorkflowApproval: serializers.WorkflowApprovalActivityStreamSerializer,
+        models.WorkflowApprovalTemplate: serializers.WorkflowApprovalTemplateSerializer,
         models.WorkflowJob: serializers.WorkflowJobSerializer,
         models.OAuth2AccessToken: serializers.OAuth2TokenSerializer,
         models.OAuth2Application: serializers.OAuth2ApplicationSerializer,
@@ -637,6 +601,30 @@ def delete_inventory_for_org(sender, instance, **kwargs):
             logger.debug(e)
 
 
+@receiver(pre_delete, sender=WorkflowJobTemplateNode)
+def delete_approval_templates(sender, instance, **kwargs):
+    if type(instance.unified_job_template) is WorkflowApprovalTemplate:
+        instance.unified_job_template.delete()
+
+
+@receiver(pre_save, sender=WorkflowJobTemplateNode)
+def delete_approval_node_type_change(sender, instance, **kwargs):
+    try:
+        old = WorkflowJobTemplateNode.objects.get(id=instance.id)
+    except sender.DoesNotExist:
+        return
+    if old.unified_job_template == instance.unified_job_template:
+        return
+    if type(old.unified_job_template) is WorkflowApprovalTemplate:
+        old.unified_job_template.delete()
+
+
+@receiver(pre_delete, sender=WorkflowApprovalTemplate)
+def deny_orphaned_approvals(sender, instance, **kwargs):
+    for approval in WorkflowApproval.objects.filter(workflow_approval_template=instance, status='pending'):
+        approval.deny()
+
+
 @receiver(post_save, sender=Session)
 def save_user_session_membership(sender, **kwargs):
     session = kwargs.get('instance', None)
@@ -657,16 +645,18 @@ def save_user_session_membership(sender, **kwargs):
         return
     if UserSessionMembership.objects.filter(user=user_id, session=session).exists():
         return
-    UserSessionMembership(user_id=user_id, session=session, created=timezone.now()).save()
-    expired = UserSessionMembership.get_memberships_over_limit(user_id)
-    for membership in expired:
-        Session.objects.filter(session_key__in=[membership.session_id]).delete()
-        membership.delete()
-    if len(expired):
-        consumers.emit_channel_notification(
-            'control-limit_reached_{}'.format(user_id),
-            dict(group_name='control', reason='limit_reached')
-        )
+    # check if user_id from session has an id match in User before saving
+    if User.objects.filter(id=int(user_id)).exists():
+        UserSessionMembership(user_id=user_id, session=session, created=timezone.now()).save()
+        expired = UserSessionMembership.get_memberships_over_limit(user_id)
+        for membership in expired:
+            Session.objects.filter(session_key__in=[membership.session_id]).delete()
+            membership.delete()
+        if len(expired):
+            consumers.emit_channel_notification(
+                'control-limit_reached_{}'.format(user_id),
+                dict(group_name='control', reason='limit_reached')
+            )
 
 
 @receiver(post_save, sender=OAuth2AccessToken)

@@ -1,3 +1,4 @@
+---
 version: '2'
 services:
   # Primary AWX Development Container
@@ -15,13 +16,15 @@ services:
       RABBITMQ_PASS: guest
       RABBITMQ_VHOST: /
       SDB_HOST: 0.0.0.0
+      SDB_PORT: 7899
       AWX_GROUP_QUEUES: tower
     ports:
       - "8888:8888"
       - "8080:8080"
       - "8013:8013"
       - "8043:8043"
-      - "6899-6999:6899-6999"  # default port range for sdb-listen
+      - "6899:6899"  # default port range for sdb-listen
+      - "7899-7999:7899-7999"  # default port range for sdb-listen
     links:
       - postgres
       - memcached
@@ -32,6 +35,7 @@ services:
     working_dir: "/awx_devel"
     volumes:
       - "../:/awx_devel"
+      - "../awx/projects/:/var/lib/awx/projects/"
     privileged: true
   # A useful container that simply passes through log messages to the console
   # helpful for testing awx/tower logging
@@ -39,12 +43,13 @@ services:
   #   build:
   #     context: ./docker-compose
   #     dockerfile: Dockerfile-logstash
+
   # Postgres Database Container
   postgres:
-    image: postgres:9.6
+    image: postgres:10
     container_name: tools_postgres_1
     ports:
-        - "5432:5432"
+      - "5432:5432"
   memcached:
     image: memcached:alpine
     container_name: tools_memcached_1

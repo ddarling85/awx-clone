@@ -97,7 +97,7 @@
   width: 600px;
 
   .pf-c-modal-box__body {
-    overflow: visible;
+    overflow: auto;
   }
 
   .pf-c-modal-box__footer > .pf-c-button:not(:last-child) {
@@ -110,6 +110,7 @@
   --pf-c-modal-box__footer--PaddingRight: 20px;
   --pf-c-modal-box__footer--PaddingBottom: 20px;
   --pf-c-modal-box__footer--PaddingLeft: 20px;
+  --pf-c-modal-box__footer--MarginTop: 24px;
   justify-content: flex-end;
 }
 
@@ -155,18 +156,6 @@
 // and bem style, as well as moved into component-based scss files
 //
 
-.awx-lookup .pf-c-form-control {
-  --pf-c-form-control--Height: 90px;
-  overflow-y: auto;
-}
-
-.at-c-listCardBody {
-  --pf-c-card__footer--PaddingX: 0;
-  --pf-c-card__footer--PaddingY: 0;
-  --pf-c-card__body--PaddingX: 0;
-  --pf-c-card__body--PaddingY: 0;
-}
-
 .awx-c-card {
   position: relative;
 }
@@ -192,10 +181,6 @@
   position: absolute;
   width: 100%;
   z-index: 20;
-}
-
-.pf-c-alert__icon {
-  --pf-c-alert__icon--Color: white;
 }
 
 .at-u-textRight {

@@ -2,7 +2,7 @@ import React, { Component } from 'react';
 import { withRouter } from 'react-router-dom';
 import { withI18n } from '@lingui/react';
 import { t } from '@lingui/macro';
-import { Card, PageSection, PageSectionVariants } from '@patternfly/react-core';
+import { Card, PageSection } from '@patternfly/react-core';
 
 import {
   JobTemplatesAPI,
@@ -15,15 +15,16 @@ import ErrorDetail from '@components/ErrorDetail';
 import PaginatedDataList, {
   ToolbarDeleteButton,
 } from '@components/PaginatedDataList';
-import { getQSConfig, parseNamespacedQueryString } from '@util/qs';
+import { getQSConfig, parseQueryString } from '@util/qs';
 
+import AddDropDownButton from '@components/AddDropDownButton';
 import TemplateListItem from './TemplateListItem';
 
 // The type value in const QS_CONFIG below does not have a space between job_template and
 // workflow_job_template so the params sent to the API match what the api expects.
 const QS_CONFIG = getQSConfig('template', {
   page: 1,
-  page_size: 5,
+  page_size: 20,
   order_by: 'name',
   type: 'job_template,workflow_job_template',
 });
@@ -40,6 +41,7 @@ class TemplatesList extends Component {
       templates: [],
       itemCount: 0,
     };
+
     this.loadTemplates = this.loadTemplates.bind(this);
     this.handleSelectAll = this.handleSelectAll.bind(this);
     this.handleSelect = this.handleSelect.bind(this);
@@ -53,9 +55,14 @@ class TemplatesList extends Component {
 
   componentDidUpdate(prevProps) {
     const { location } = this.props;
+
     if (location !== prevProps.location) {
       this.loadTemplates();
     }
+  }
+
+  componentWillUnmount() {
+    document.removeEventListener('click', this.handleAddToggle, false);
   }
 
   handleDeleteErrorClose() {
@@ -103,14 +110,54 @@ class TemplatesList extends Component {
 
   async loadTemplates() {
     const { location } = this.props;
-    const params = parseNamespacedQueryString(QS_CONFIG, location.search);
+    const {
+      jtActions: cachedJTActions,
+      wfjtActions: cachedWFJTActions,
+    } = this.state;
+    const params = parseQueryString(QS_CONFIG, location.search);
+
+    let jtOptionsPromise;
+    if (cachedJTActions) {
+      jtOptionsPromise = Promise.resolve({
+        data: { actions: cachedJTActions },
+      });
+    } else {
+      jtOptionsPromise = JobTemplatesAPI.readOptions();
+    }
+
+    let wfjtOptionsPromise;
+    if (cachedWFJTActions) {
+      wfjtOptionsPromise = Promise.resolve({
+        data: { actions: cachedWFJTActions },
+      });
+    } else {
+      wfjtOptionsPromise = WorkflowJobTemplatesAPI.readOptions();
+    }
+
+    const promises = Promise.all([
+      UnifiedJobTemplatesAPI.read(params),
+      jtOptionsPromise,
+      wfjtOptionsPromise,
+    ]);
 
     this.setState({ contentError: null, hasContentLoading: true });
+
     try {
-      const {
-        data: { count, results },
-      } = await UnifiedJobTemplatesAPI.read(params);
+      const [
+        {
+          data: { count, results },
+        },
+        {
+          data: { actions: jtActions },
+        },
+        {
+          data: { actions: wfjtActions },
+        },
+      ] = await promises;
+
       this.setState({
+        jtActions,
+        wfjtActions,
         itemCount: count,
         templates: results,
         selected: [],
@@ -130,33 +177,78 @@ class TemplatesList extends Component {
       templates,
       itemCount,
       selected,
+      jtActions,
+      wfjtActions,
     } = this.state;
     const { match, i18n } = this.props;
-    const isAllSelected = selected.length === templates.length;
-    const { medium } = PageSectionVariants;
+    const canAddJT =
+      jtActions && Object.prototype.hasOwnProperty.call(jtActions, 'POST');
+    const canAddWFJT =
+      wfjtActions && Object.prototype.hasOwnProperty.call(wfjtActions, 'POST');
+    const addButtonOptions = [];
+    if (canAddJT) {
+      addButtonOptions.push({
+        label: i18n._(t`Template`),
+        url: `${match.url}/job_template/add/`,
+      });
+    }
+    if (canAddWFJT) {
+      addButtonOptions.push({
+        label: i18n._(t`Workflow Template`),
+        url: `${match.url}/workflow_job_template/add/`,
+      });
+    }
+    const isAllSelected =
+      selected.length === templates.length && selected.length > 0;
+    const addButton = (
+      <AddDropDownButton key="add" dropdownItems={addButtonOptions} />
+    );
     return (
-      <PageSection variant={medium}>
+      <PageSection>
         <Card>
           <PaginatedDataList
-            error={contentError}
+            contentError={contentError}
             hasContentLoading={hasContentLoading}
             items={templates}
             itemCount={itemCount}
-            itemName={i18n._(t`Template`)}
+            pluralizedItemName={i18n._(t`Templates`)}
             qsConfig={QS_CONFIG}
-            toolbarColumns={[
-              { name: i18n._(t`Name`), key: 'name', isSortable: true },
+            onRowClick={this.handleSelect}
+            toolbarSearchColumns={[
               {
-                name: i18n._(t`Modified`),
-                key: 'modified',
-                isSortable: true,
-                isNumeric: true,
+                name: i18n._(t`Name`),
+                key: 'name',
+                isDefault: true,
               },
               {
-                name: i18n._(t`Created`),
-                key: 'created',
-                isSortable: true,
-                isNumeric: true,
+                name: i18n._(t`Type`),
+                key: 'type',
+                options: [
+                  [`job_template`, i18n._(t`Job Template`)],
+                  [`workflow_job_template`, i18n._(t`Workflow Template`)],
+                ],
+              },
+              {
+                name: i18n._(t`Playbook name`),
+                key: 'job_template__playbook',
+              },
+              {
+                name: i18n._(t`Created By (Username)`),
+                key: 'created_by__username',
+              },
+              {
+                name: i18n._(t`Modified By (Username)`),
+                key: 'modified_by__username',
+              },
+            ]}
+            toolbarSortColumns={[
+              {
+                name: i18n._(t`Name`),
+                key: 'name',
+              },
+              {
+                name: i18n._(t`Type`),
+                key: 'type',
               },
             ]}
             renderToolbar={props => (
@@ -166,13 +258,15 @@ class TemplatesList extends Component {
                 showExpandCollapse
                 isAllSelected={isAllSelected}
                 onSelectAll={this.handleSelectAll}
+                qsConfig={QS_CONFIG}
                 additionalControls={[
                   <ToolbarDeleteButton
                     key="delete"
                     onDelete={this.handleTemplateDelete}
                     itemsToDelete={selected}
-                    itemName={i18n._(t`Template`)}
+                    pluralizedItemName="Templates"
                   />,
+                  (canAddJT || canAddWFJT) && addButton,
                 ]}
               />
             )}
@@ -186,6 +280,7 @@ class TemplatesList extends Component {
                 isSelected={selected.some(row => row.id === template.id)}
               />
             )}
+            emptyStateControls={(canAddJT || canAddWFJT) && addButton}
           />
         </Card>
         <AlertModal
@@ -194,7 +289,7 @@ class TemplatesList extends Component {
           title={i18n._(t`Error!`)}
           onClose={this.handleDeleteErrorClose}
         >
-          {i18n._(t`Failed to delete one or more template.`)}
+          {i18n._(t`Failed to delete one or more templates.`)}
           <ErrorDetail error={deletionError} />
         </AlertModal>
       </PageSection>

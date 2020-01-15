@@ -28,6 +28,7 @@ from awx.main.models.inventory import (
     Host
 )
 from awx.main.utils.mem_inventory import MemInventory, dict_to_mem_data
+from awx.main.utils.safe_yaml import sanitize_jinja
 
 # other AWX imports
 from awx.main.models.rbac import batch_role_ancestor_rebuilding
@@ -795,6 +796,10 @@ class Command(BaseCommand):
             if self.instance_id_var:
                 instance_id = self._get_instance_id(mem_host.variables)
                 host_attrs['instance_id'] = instance_id
+            try:
+                sanitize_jinja(mem_host_name)
+            except ValueError as e:
+                raise ValueError(str(e) + ': {}'.format(mem_host_name))
             db_host = self.inventory.hosts.update_or_create(name=mem_host_name, defaults=host_attrs)[0]
             if enabled is False:
                 logger.debug('Host "%s" added (disabled)', mem_host_name)
@@ -916,10 +921,14 @@ class Command(BaseCommand):
         available_instances = license_info.get('available_instances', 0)
         free_instances = license_info.get('free_instances', 0)
         time_remaining = license_info.get('time_remaining', 0)
+        hard_error = license_info.get('trial', False) is True or license_info['instance_count'] == 10
         new_count = Host.objects.active_count()
-        if time_remaining <= 0 and not license_info.get('demo', False):
-            logger.error(LICENSE_EXPIRED_MESSAGE)
-            raise CommandError("License has expired!")
+        if time_remaining <= 0:
+            if hard_error:
+                logger.error(LICENSE_EXPIRED_MESSAGE)
+                raise CommandError("License has expired!")
+            else:
+                logger.warning(LICENSE_EXPIRED_MESSAGE)
         # special check for tower-type inventory sources
         # but only if running the plugin
         TOWER_SOURCE_FILES = ['tower.yml', 'tower.yaml']
@@ -932,11 +941,11 @@ class Command(BaseCommand):
                 'new_count': new_count,
                 'available_instances': available_instances,
             }
-            if license_info.get('demo', False):
-                logger.error(DEMO_LICENSE_MESSAGE % d)
-            else:
+            if hard_error:
                 logger.error(LICENSE_MESSAGE % d)
-            raise CommandError('License count exceeded!')
+                raise CommandError('License count exceeded!')
+            else:
+                logger.warning(LICENSE_MESSAGE % d)
 
     def check_org_host_limit(self):
         license_info = get_licenser().validate()

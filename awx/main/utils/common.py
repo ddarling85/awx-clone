@@ -19,9 +19,14 @@ from functools import reduce, wraps
 from decimal import Decimal
 
 # Django
-from django.core.exceptions import ObjectDoesNotExist
+from django.core.exceptions import ObjectDoesNotExist, FieldDoesNotExist
 from django.utils.translation import ugettext_lazy as _
+from django.utils.functional import cached_property
 from django.db.models.fields.related import ForeignObjectRel, ManyToManyField
+from django.db.models.fields.related_descriptors import (
+    ForwardManyToOneDescriptor,
+    ManyToManyDescriptor
+)
 from django.db.models.query import QuerySet
 from django.db.models import Q
 
@@ -31,20 +36,27 @@ from django.utils.encoding import smart_str
 from django.utils.text import slugify
 from django.apps import apps
 
+# AWX
+from awx.conf.license import get_license
+
 logger = logging.getLogger('awx.main.utils')
 
-__all__ = ['get_object_or_400', 'camelcase_to_underscore', 'underscore_to_camelcase', 'memoize', 'memoize_delete',
-           'get_ansible_version', 'get_ssh_version', 'get_licenser', 'get_awx_version', 'update_scm_url',
-           'get_type_for_model', 'get_model_for_type', 'copy_model_by_class', 'region_sorting',
-           'copy_m2m_relationships', 'prefetch_page_capabilities', 'to_python_boolean',
-           'ignore_inventory_computed_fields', 'ignore_inventory_group_removal',
-           '_inventory_updates', 'get_pk_from_dict', 'getattrd', 'getattr_dne', 'NoDefaultProvided',
-           'get_current_apps', 'set_current_apps',
-           'extract_ansible_vars', 'get_search_fields', 'get_system_task_capacity', 'get_cpu_capacity', 'get_mem_capacity',
-           'wrap_args_with_proot', 'build_proot_temp_dir', 'check_proot_installed', 'model_to_dict',
-           'model_instance_diff', 'parse_yaml_or_json', 'RequireDebugTrueOrTest',
-           'has_model_field_prefetched', 'set_environ', 'IllegalArgumentError', 'get_custom_venv_choices', 'get_external_account',
-           'task_manager_bulk_reschedule', 'schedule_task_manager', 'classproperty']
+__all__ = [
+    'get_object_or_400', 'camelcase_to_underscore', 'underscore_to_camelcase', 'memoize',
+    'memoize_delete', 'get_ansible_version', 'get_ssh_version', 'get_licenser', 'get_awx_http_client_headers',
+    'get_awx_version', 'update_scm_url', 'get_type_for_model', 'get_model_for_type',
+    'copy_model_by_class', 'region_sorting', 'copy_m2m_relationships',
+    'prefetch_page_capabilities', 'to_python_boolean', 'ignore_inventory_computed_fields',
+    'ignore_inventory_group_removal', '_inventory_updates', 'get_pk_from_dict', 'getattrd',
+    'getattr_dne', 'NoDefaultProvided', 'get_current_apps', 'set_current_apps',
+    'extract_ansible_vars', 'get_search_fields', 'get_system_task_capacity',
+    'get_cpu_capacity', 'get_mem_capacity', 'wrap_args_with_proot', 'build_proot_temp_dir',
+    'check_proot_installed', 'model_to_dict', 'NullablePromptPseudoField',
+    'model_instance_diff', 'parse_yaml_or_json', 'RequireDebugTrueOrTest',
+    'has_model_field_prefetched', 'set_environ', 'IllegalArgumentError',
+    'get_custom_venv_choices', 'get_external_account', 'task_manager_bulk_reschedule',
+    'schedule_task_manager', 'classproperty', 'create_temporary_fifo', 'truncate_stdout',
+]
 
 
 def get_object_or_400(klass, *args, **kwargs):
@@ -203,6 +215,19 @@ def get_awx_version():
         return __version__
 
 
+def get_awx_http_client_headers():
+    license = get_license(show_key=False).get('license_type', 'UNLICENSED')
+    headers = {
+        'Content-Type': 'application/json',
+        'User-Agent': '{} {} ({})'.format(
+            'AWX' if license == 'open' else 'Red Hat Ansible Tower',
+            get_awx_version(),
+            license
+        )
+    }
+    return headers
+
+
 class StubLicense(object):
 
     features = {
@@ -354,7 +379,12 @@ def get_allowed_fields(obj, serializer_mapping):
         'oauth2accesstoken': ['last_used'],
         'oauth2application': ['client_secret']
     }
-    field_blacklist = ACTIVITY_STREAM_FIELD_EXCLUSIONS.get(obj._meta.model_name, [])
+    model_name = obj._meta.model_name
+    field_blacklist = ACTIVITY_STREAM_FIELD_EXCLUSIONS.get(model_name, [])
+    # see definition of from_db for CredentialType
+    # injection logic of any managed types are incompatible with activity stream
+    if model_name == 'credentialtype' and obj.managed_by_tower and obj.namespace:
+        field_blacklist.extend(['inputs', 'injectors'])
     if field_blacklist:
         allowed_fields = [f for f in allowed_fields if f not in field_blacklist]
     return allowed_fields
@@ -435,6 +465,39 @@ def model_to_dict(obj, serializer_mapping=None):
     return attr_d
 
 
+class CharPromptDescriptor:
+    """Class used for identifying nullable launch config fields from class
+    ex. Schedule.limit
+    """
+    def __init__(self, field):
+        self.field = field
+
+
+class NullablePromptPseudoField:
+    """
+    Interface for pseudo-property stored in `char_prompts` dict
+    Used in LaunchTimeConfig and submodels, defined here to avoid circular imports
+    """
+    def __init__(self, field_name):
+        self.field_name = field_name
+
+    @cached_property
+    def field_descriptor(self):
+        return CharPromptDescriptor(self)
+
+    def __get__(self, instance, type=None):
+        if instance is None:
+            # for inspection on class itself
+            return self.field_descriptor
+        return instance.char_prompts.get(self.field_name, None)
+
+    def __set__(self, instance, value):
+        if value in (None, {}):
+            instance.char_prompts.pop(self.field_name, None)
+        else:
+            instance.char_prompts[self.field_name] = value
+
+
 def copy_model_by_class(obj1, Class2, fields, kwargs):
     '''
     Creates a new unsaved object of type Class2 using the fields from obj1
@@ -442,9 +505,10 @@ def copy_model_by_class(obj1, Class2, fields, kwargs):
     '''
     create_kwargs = {}
     for field_name in fields:
-        # Foreign keys can be specified as field_name or field_name_id.
-        id_field_name = '%s_id' % field_name
-        if hasattr(obj1, id_field_name):
+        descriptor = getattr(Class2, field_name)
+        if isinstance(descriptor, ForwardManyToOneDescriptor):  # ForeignKey
+            # Foreign keys can be specified as field_name or field_name_id.
+            id_field_name = '%s_id' % field_name
             if field_name in kwargs:
                 value = kwargs[field_name]
             elif id_field_name in kwargs:
@@ -454,15 +518,29 @@ def copy_model_by_class(obj1, Class2, fields, kwargs):
             if hasattr(value, 'id'):
                 value = value.id
             create_kwargs[id_field_name] = value
+        elif isinstance(descriptor, CharPromptDescriptor):
+            # difficult case of copying one launch config to another launch config
+            new_val = None
+            if field_name in kwargs:
+                new_val = kwargs[field_name]
+            elif hasattr(obj1, 'char_prompts'):
+                if field_name in obj1.char_prompts:
+                    new_val = obj1.char_prompts[field_name]
+            elif hasattr(obj1, field_name):
+                # extremely rare case where a template spawns a launch config - sliced jobs
+                new_val = getattr(obj1, field_name)
+            if new_val is not None:
+                create_kwargs.setdefault('char_prompts', {})
+                create_kwargs['char_prompts'][field_name] = new_val
+        elif isinstance(descriptor, ManyToManyDescriptor):
+            continue  # not copied in this method
         elif field_name in kwargs:
             if field_name == 'extra_vars' and isinstance(kwargs[field_name], dict):
                 create_kwargs[field_name] = json.dumps(kwargs['extra_vars'])
             elif not isinstance(Class2._meta.get_field(field_name), (ForeignObjectRel, ManyToManyField)):
                 create_kwargs[field_name] = kwargs[field_name]
         elif hasattr(obj1, field_name):
-            field_obj = obj1._meta.get_field(field_name)
-            if not isinstance(field_obj, ManyToManyField):
-                create_kwargs[field_name] = getattr(obj1, field_name)
+            create_kwargs[field_name] = getattr(obj1, field_name)
 
     # Apply class-specific extra processing for origination of unified jobs
     if hasattr(obj1, '_update_unified_job_kwargs') and obj1.__class__ != Class2:
@@ -481,7 +559,10 @@ def copy_m2m_relationships(obj1, obj2, fields, kwargs=None):
     '''
     for field_name in fields:
         if hasattr(obj1, field_name):
-            field_obj = obj1._meta.get_field(field_name)
+            try:
+                field_obj = obj1._meta.get_field(field_name)
+            except FieldDoesNotExist:
+                continue
             if isinstance(field_obj, ManyToManyField):
                 # Many to Many can be specified as field_name
                 src_field_value = getattr(obj1, field_name)
@@ -1015,3 +1096,36 @@ class classproperty:
 
     def __get__(self, instance, ownerclass):
         return self.fget(ownerclass)
+
+
+def create_temporary_fifo(data):
+    """Open fifo named pipe in a new thread using a temporary file path. The
+    thread blocks until data is read from the pipe.
+    Returns the path to the fifo.
+    :param data(bytes): Data to write to the pipe.
+    """
+    path = os.path.join(tempfile.mkdtemp(), next(tempfile._get_candidate_names()))
+    os.mkfifo(path, stat.S_IRUSR | stat.S_IWUSR)
+
+    threading.Thread(
+        target=lambda p, d: open(p, 'wb').write(d),
+        args=(path, data)
+    ).start()
+    return path
+
+
+def truncate_stdout(stdout, size):
+    from awx.main.constants import ANSI_SGR_PATTERN
+
+    if size <= 0 or len(stdout) <= size:
+        return stdout
+
+    stdout = stdout[:(size - 1)] + u'\u2026'
+    set_count, reset_count = 0, 0
+    for m in ANSI_SGR_PATTERN.finditer(stdout):
+        if m.group() == u'\u001b[0m':
+            reset_count += 1
+        else:
+            set_count += 1
+
+    return stdout + u'\u001b[0m' * (set_count - reset_count)

@@ -1,79 +1,68 @@
-FROM centos:7
+FROM centos:8
 
 ARG UID=0
 
-RUN yum -y update && yum -y install epel-release
+# Add ansible-devel so that we get collections!
+ADD tools/docker-compose/ansible_nightly.repo /etc/yum.repos.d/ansible_nightly.repo
 
 # sync with installer/roles/image_build/templates/Dockerfile.j2
-RUN yum -y install acl \
-  alsa-lib \
+RUN dnf -y update && \
+  dnf -y install epel-release 'dnf-command(config-manager)' && \
+  dnf module -y enable 'postgresql:10' && \
+  dnf config-manager --set-enabled PowerTools && \
+  dnf -y install acl \
   ansible \
-  atk \
   bubblewrap \
-  cups-libs \
   curl \
-  cyrus-sasl \
-  cyrus-sasl-devel \
   gcc \
   gcc-c++ \
-  GConf2 \
-  git \
-  gtk3 \
-  ipa-gothic-fonts \
-  krb5-devel \
-  krb5-libs \
+  gettext \
+  git-core \
+  glibc-langpack-en \
   krb5-workstation \
   libcurl-devel \
   libffi-devel \
-  libselinux-python \
   libstdc++.so.6 \
   libtool-ltdl-devel \
-  libXcomposite \
-  libXcursor \
-  libXdamage \
-  libXext \
-  libXi \
-  libxml2-devel \
-  libXrandr \
-  libXScrnSaver \
-  libxslt-devel \
-  libXtst \
+  libcgroup-tools \
   make \
   mercurial \
-  mg \
   nginx \
   nodejs \
+  nss \
   openldap-devel \
   openssh-server \
+  patch \
+  @postgresql:10 \
   postgresql-devel \
-  python-devel \
-  python-pip \
-  python-psutil \
-  python-psycopg2 \
-  python-setuptools \
-  python36-devel \
-  python36-setuptools \
+  python3-devel \
+  python3-libselinux \
+  python3-pip \
+  python3-psycopg2 \
+  python3-setuptools \
   rsync \
-  setools-libs \
   subversion \
   sudo \
   swig \
   tmux \
   unzip \
-  vim \
+  vim-minimal \
   xmlsec1 \
   xmlsec1-devel \
   xmlsec1-openssl \
   xmlsec1-openssl-devel \
-  xorg-x11-fonts-100dpi \
-  xorg-x11-fonts-75dpi \
-  xorg-x11-fonts-cyrillic \
-  xorg-x11-fonts-misc \
-  xorg-x11-fonts-Type1 \
-  xorg-x11-utils \
-  yum-utils
+  dnf-utils
 
-RUN yum install -y https://github.com/krallin/tini/releases/download/v0.18.0/tini_0.18.0.rpm
+# UI tests only, do not put in installer/roles/image_build/templates/Dockerfile.j2
+RUN dnf -y install \
+  gtk3 \
+  alsa-lib \
+  libX11-xcb \
+  libXScrnSaver
+
+ENV PATH="/usr/pgsql-10/bin:${PATH}"
+
+RUN dnf install -y https://github.com/krallin/tini/releases/download/v0.18.0/tini_0.18.0.rpm
 
 RUN /usr/bin/ssh-keygen -q -t rsa -N "" -f /root/.ssh/id_rsa
 RUN mkdir -p /data/db
@@ -84,9 +73,10 @@ ADD tools/docker-compose/awx.egg-info /tmp/awx.egg-info
 
 RUN openssl req -nodes -newkey rsa:2048 -keyout /etc/nginx/nginx.key -out /etc/nginx/nginx.csr -subj "/C=US/ST=North Carolina/L=Durham/O=Ansible/OU=AWX Development/CN=awx.localhost"
 RUN openssl x509 -req -days 365 -in /etc/nginx/nginx.csr -signkey /etc/nginx/nginx.key -out /etc/nginx/nginx.crt
+RUN chmod 640 /etc/nginx/nginx.{csr,key,crt}
 
 RUN python3 -m ensurepip && pip3 install virtualenv flake8
-RUN pip install supervisor
+RUN pip3 install supervisor
 
 ADD Makefile /tmp/Makefile
 RUN mkdir /tmp/requirements
@@ -105,26 +95,20 @@ RUN cd /tmp && VENV_BASE="/venv" make requirements_dev
 RUN npm install -g n
 RUN n 10.15.0
 
-RUN yum -y remove cyrus-sasl-devel \
-  gcc \
-  gcc-c++ \
-  krb5-devel \
-  libtool-ltdl-devel \
-  libxml2-devel \
-  libxslt-devel \
-  openldap-devel \
-  postgresql-devel \
-  python-devel \
-  python36-devel \
-  nodejs \
-  xmlsec1-devel \
-  xmlsec1-openssl-devel
+# Install OpenShift CLI
+RUN cd /usr/local/bin && \
+    curl -L https://github.com/openshift/origin/releases/download/v3.9.0/openshift-origin-client-tools-v3.9.0-191fece-linux-64bit.tar.gz | \
+    tar -xz --strip-components=1 --wildcards --no-anchored 'oc'
 
-RUN yum -y clean all
+ADD tools/docker-compose/google-cloud-sdk.repo /etc/yum.repos.d/
+RUN dnf install -y kubectl
+
+RUN dnf -y remove nodejs
+
+RUN dnf -y clean all
 
 RUN rm -rf /root/.cache
 
-RUN localedef -c -i en_US -f UTF-8 en_US.UTF-8
 ENV LANG en_US.UTF-8
 ENV LANGUAGE en_US:en
 ENV LC_ALL en_US.UTF-8
@@ -138,15 +122,18 @@ ADD tools/docker-compose/bootstrap_development.sh /bootstrap_development.sh
 EXPOSE 8043 8013 8080 22
 
 ADD tools/docker-compose/entrypoint.sh /
+ADD tools/scripts/awx-python /usr/bin/awx-python
 ENTRYPOINT ["/entrypoint.sh"]
 CMD ["/bin/bash"]
 
 # Pre-create things that we need to write to
-RUN for dir in /var/lib/awx/ /var/log/tower/ /projects /.ansible /var/log/nginx /var/lib/nginx /.local; \
+RUN for dir in /var/lib/awx/ /var/log/tower/ /var/lib/awx/projects /.ansible /var/log/nginx /var/lib/nginx /.local; \
   do mkdir -p $dir; chmod -R g+rwx $dir; chgrp -R root $dir; done
 
 RUN for file in /etc/passwd /etc/supervisord.conf \
   /venv/awx/lib/python3.6/site-packages/awx.egg-link /var/run/nginx.pid; \
   do touch $file; chmod -R g+rwx $file; chgrp -R root $file; done
+
+ENV HOME /var/lib/awx
 
 ENV PATH=/usr/local/n/versions/node/10.15.0/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin

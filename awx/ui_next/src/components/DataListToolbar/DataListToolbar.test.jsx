@@ -5,6 +5,13 @@ import DataListToolbar from './DataListToolbar';
 describe('<DataListToolbar />', () => {
   let toolbar;
 
+  const QS_CONFIG = {
+    namespace: 'organization',
+    dateFields: ['modified', 'created'],
+    defaultParams: { page: 1, page_size: 5, order_by: 'name' },
+    integerFields: ['page', 'page_size'],
+  };
+
   afterEach(() => {
     if (toolbar) {
       toolbar.unmount();
@@ -12,26 +19,28 @@ describe('<DataListToolbar />', () => {
     }
   });
 
-  test('it triggers the expected callbacks', () => {
-    const columns = [{ name: 'Name', key: 'name', isSortable: true }];
+  const onSearch = jest.fn();
+  const onReplaceSearch = jest.fn();
+  const onSort = jest.fn();
+  const onSelectAll = jest.fn();
 
-    const search = 'button[aria-label="Search"]';
+  test('it triggers the expected callbacks', () => {
+    const searchColumns = [{ name: 'Name', key: 'name', isDefault: true }];
+    const sortColumns = [{ name: 'Name', key: 'name' }];
+    const search = 'button[aria-label="Search submit button"]';
     const searchTextInput = 'input[aria-label="Search text input"]';
     const selectAll = 'input[aria-label="Select all"]';
     const sort = 'button[aria-label="Sort"]';
 
-    const onSearch = jest.fn();
-    const onSort = jest.fn();
-    const onSelectAll = jest.fn();
-
     toolbar = mountWithContexts(
       <DataListToolbar
+        qsConfig={QS_CONFIG}
         isAllSelected={false}
         showExpandCollapse
-        sortedColumnKey="name"
-        sortOrder="ascending"
-        columns={columns}
+        searchColumns={searchColumns}
+        sortColumns={sortColumns}
         onSearch={onSearch}
+        onReplaceSearch={onReplaceSearch}
         onSort={onSort}
         onSelectAll={onSelectAll}
         showSelectAll
@@ -53,28 +62,39 @@ describe('<DataListToolbar />', () => {
     toolbar.find(search).simulate('click');
 
     expect(onSearch).toHaveBeenCalledTimes(1);
-    expect(onSearch).toBeCalledWith('test-321');
+    expect(onSearch).toBeCalledWith('name__icontains', 'test-321');
   });
 
-  test('dropdown items sortable columns work', () => {
+  test('dropdown items sortable/searchable columns work', () => {
     const sortDropdownToggleSelector = 'button[id="awx-sort"]';
     const searchDropdownToggleSelector = 'button[id="awx-search"]';
-    const dropdownMenuItems = 'DropdownMenu > ul';
+    const sortDropdownMenuItems =
+      'DropdownMenu > ul[aria-labelledby="awx-sort"]';
+    const searchDropdownMenuItems =
+      'DropdownMenu > ul[aria-labelledby="awx-search"]';
 
-    const multipleColumns = [
-      { name: 'Foo', key: 'foo', isSortable: true },
-      { name: 'Bar', key: 'bar', isSortable: true },
-      { name: 'Bakery', key: 'bakery', isSortable: true },
-      { name: 'Baz', key: 'baz' },
+    const NEW_QS_CONFIG = {
+      namespace: 'organization',
+      dateFields: ['modified', 'created'],
+      defaultParams: { page: 1, page_size: 5, order_by: 'foo' },
+      integerFields: ['page', 'page_size'],
+    };
+
+    const searchColumns = [
+      { name: 'Foo', key: 'foo', isDefault: true },
+      { name: 'Bar', key: 'bar' },
     ];
-
-    const onSort = jest.fn();
+    const sortColumns = [
+      { name: 'Foo', key: 'foo' },
+      { name: 'Bar', key: 'bar' },
+      { name: 'Bakery', key: 'Bakery' },
+    ];
 
     toolbar = mountWithContexts(
       <DataListToolbar
-        sortedColumnKey="foo"
-        sortOrder="ascending"
-        columns={multipleColumns}
+        qsConfig={NEW_QS_CONFIG}
+        searchColumns={searchColumns}
+        sortColumns={sortColumns}
         onSort={onSort}
       />
     );
@@ -82,16 +102,21 @@ describe('<DataListToolbar />', () => {
     expect(sortDropdownToggle.length).toBe(1);
     sortDropdownToggle.simulate('click');
     toolbar.update();
-    const sortDropdownItems = toolbar.find(dropdownMenuItems).children();
+    const sortDropdownItems = toolbar.find(sortDropdownMenuItems).children();
     expect(sortDropdownItems.length).toBe(2);
-
+    let searchDropdownToggle = toolbar.find(searchDropdownToggleSelector);
+    expect(searchDropdownToggle.length).toBe(1);
+    searchDropdownToggle.simulate('click');
+    toolbar.update();
+    let searchDropdownItems = toolbar.find(searchDropdownMenuItems).children();
+    expect(searchDropdownItems.length).toBe(1);
     const mockedSortEvent = { target: { innerText: 'Bar' } };
-    sortDropdownItems.at(0).simulate('click', mockedSortEvent);
+    searchDropdownItems.at(0).simulate('click', mockedSortEvent);
     toolbar = mountWithContexts(
       <DataListToolbar
-        sortedColumnKey="foo"
-        sortOrder="descending"
-        columns={multipleColumns}
+        qsConfig={NEW_QS_CONFIG}
+        searchColumns={searchColumns}
+        sortColumns={sortColumns}
         onSort={onSort}
       />
     );
@@ -105,7 +130,7 @@ describe('<DataListToolbar />', () => {
     toolbar.update();
 
     const sortDropdownItemsDescending = toolbar
-      .find(dropdownMenuItems)
+      .find(sortDropdownMenuItems)
       .children();
     expect(sortDropdownItemsDescending.length).toBe(2);
     sortDropdownToggleDescending.simulate('click'); // toggle close the sort dropdown
@@ -114,86 +139,117 @@ describe('<DataListToolbar />', () => {
     sortDropdownItems.at(0).simulate('click', mockedSortEventDescending);
     toolbar.update();
 
-    const searchDropdownToggle = toolbar.find(searchDropdownToggleSelector);
+    searchDropdownToggle = toolbar.find(searchDropdownToggleSelector);
     expect(searchDropdownToggle.length).toBe(1);
     searchDropdownToggle.simulate('click');
     toolbar.update();
 
-    const searchDropdownItems = toolbar.find(dropdownMenuItems).children();
-    expect(searchDropdownItems.length).toBe(3);
+    searchDropdownItems = toolbar.find(searchDropdownMenuItems).children();
+    expect(searchDropdownItems.length).toBe(1);
 
     const mockedSearchEvent = { target: { innerText: 'Bar' } };
     searchDropdownItems.at(0).simulate('click', mockedSearchEvent);
   });
 
   test('it displays correct sort icon', () => {
-    const downNumericIconSelector = 'SortNumericDownIcon';
-    const upNumericIconSelector = 'SortNumericUpIcon';
-    const downAlphaIconSelector = 'SortAlphaDownIcon';
-    const upAlphaIconSelector = 'SortAlphaUpIcon';
+    const NUM_QS_CONFIG = {
+      namespace: 'organization',
+      dateFields: ['modified', 'created'],
+      defaultParams: { page: 1, page_size: 5, order_by: 'id' },
+      integerFields: ['page', 'page_size', 'id'],
+    };
 
-    const numericColumns = [
-      { name: 'ID', key: 'id', isSortable: true, isNumeric: true },
+    const NUM_DESC_QS_CONFIG = {
+      namespace: 'organization',
+      dateFields: ['modified', 'created'],
+      defaultParams: { page: 1, page_size: 5, order_by: '-id' },
+      integerFields: ['page', 'page_size', 'id'],
+    };
+
+    const ALPH_QS_CONFIG = {
+      namespace: 'organization',
+      dateFields: ['modified', 'created'],
+      defaultParams: { page: 1, page_size: 5, order_by: 'name' },
+      integerFields: ['page', 'page_size', 'id'],
+    };
+
+    const ALPH_DESC_QS_CONFIG = {
+      namespace: 'organization',
+      dateFields: ['modified', 'created'],
+      defaultParams: { page: 1, page_size: 5, order_by: '-name' },
+      integerFields: ['page', 'page_size', 'id'],
+    };
+
+    const forwardNumericIconSelector = 'SortNumericDownIcon';
+    const reverseNumericIconSelector = 'SortNumericDownAltIcon';
+    const forwardAlphaIconSelector = 'SortAlphaDownIcon';
+    const reverseAlphaIconSelector = 'SortAlphaDownAltIcon';
+
+    const numericColumns = [{ name: 'ID', key: 'id' }];
+
+    const alphaColumns = [{ name: 'Name', key: 'name' }];
+
+    const searchColumns = [
+      { name: 'Name', key: 'name', isDefault: true },
+      { name: 'ID', key: 'id' },
     ];
-    const alphaColumns = [
-      { name: 'Name', key: 'name', isSortable: true, isNumeric: false },
-    ];
 
     toolbar = mountWithContexts(
       <DataListToolbar
-        sortedColumnKey="id"
-        sortOrder="descending"
-        columns={numericColumns}
+        qsConfig={NUM_DESC_QS_CONFIG}
+        searchColumns={searchColumns}
+        sortColumns={numericColumns}
       />
     );
 
-    const downNumericIcon = toolbar.find(downNumericIconSelector);
-    expect(downNumericIcon.length).toBe(1);
+    const reverseNumericIcon = toolbar.find(reverseNumericIconSelector);
+    expect(reverseNumericIcon.length).toBe(1);
 
     toolbar = mountWithContexts(
       <DataListToolbar
-        sortedColumnKey="id"
-        sortOrder="ascending"
-        columns={numericColumns}
+        qsConfig={NUM_QS_CONFIG}
+        searchColumns={searchColumns}
+        sortColumns={numericColumns}
       />
     );
 
-    const upNumericIcon = toolbar.find(upNumericIconSelector);
-    expect(upNumericIcon.length).toBe(1);
+    const forwardNumericIcon = toolbar.find(forwardNumericIconSelector);
+    expect(forwardNumericIcon.length).toBe(1);
 
     toolbar = mountWithContexts(
       <DataListToolbar
-        sortedColumnKey="name"
-        sortOrder="descending"
-        columns={alphaColumns}
+        qsConfig={ALPH_DESC_QS_CONFIG}
+        searchColumns={searchColumns}
+        sortColumns={alphaColumns}
       />
     );
 
-    const downAlphaIcon = toolbar.find(downAlphaIconSelector);
-    expect(downAlphaIcon.length).toBe(1);
+    const reverseAlphaIcon = toolbar.find(reverseAlphaIconSelector);
+    expect(reverseAlphaIcon.length).toBe(1);
 
     toolbar = mountWithContexts(
       <DataListToolbar
-        sortedColumnKey="name"
-        sortOrder="ascending"
-        columns={alphaColumns}
+        qsConfig={ALPH_QS_CONFIG}
+        searchColumns={searchColumns}
+        sortColumns={alphaColumns}
       />
     );
 
-    const upAlphaIcon = toolbar.find(upAlphaIconSelector);
-    expect(upAlphaIcon.length).toBe(1);
+    const forwardAlphaIcon = toolbar.find(forwardAlphaIconSelector);
+    expect(forwardAlphaIcon.length).toBe(1);
   });
 
   test('should render additionalControls', () => {
-    const columns = [{ name: 'Name', key: 'name', isSortable: true }];
-    const onSearch = jest.fn();
-    const onSort = jest.fn();
-    const onSelectAll = jest.fn();
+    const searchColumns = [{ name: 'Name', key: 'name', isDefault: true }];
+    const sortColumns = [{ name: 'Name', key: 'name' }];
 
     toolbar = mountWithContexts(
       <DataListToolbar
-        columns={columns}
+        qsConfig={QS_CONFIG}
+        searchColumns={searchColumns}
+        sortColumns={sortColumns}
         onSearch={onSearch}
+        onReplaceSearch={onReplaceSearch}
         onSort={onSort}
         onSelectAll={onSelectAll}
         additionalControls={[
@@ -207,5 +263,26 @@ describe('<DataListToolbar />', () => {
     const button = toolbar.find('#test');
     expect(button).toHaveLength(1);
     expect(button.text()).toEqual('click');
+  });
+
+  test('it triggers the expected callbacks', () => {
+    const searchColumns = [{ name: 'Name', key: 'name', isDefault: true }];
+    const sortColumns = [{ name: 'Name', key: 'name' }];
+    toolbar = mountWithContexts(
+      <DataListToolbar
+        qsConfig={QS_CONFIG}
+        isAllSelected
+        showExpandCollapse
+        searchColumns={searchColumns}
+        sortColumns={sortColumns}
+        onSearch={onSearch}
+        onReplaceSearch={onReplaceSearch}
+        onSort={onSort}
+        onSelectAll={onSelectAll}
+        showSelectAll
+      />
+    );
+    const checkbox = toolbar.find('Checkbox');
+    expect(checkbox.prop('isChecked')).toBe(true);
   });
 });

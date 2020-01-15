@@ -7,12 +7,14 @@ import json
 
 from django.utils.encoding import smart_text
 from django.utils.translation import ugettext_lazy as _
+
 from awx.main.notifications.base import AWXBaseEmailBackend
+from awx.main.notifications.custom_notification_base import CustomNotificationBase
 
 logger = logging.getLogger('awx.main.notifications.mattermost_backend')
 
 
-class MattermostBackend(AWXBaseEmailBackend):
+class MattermostBackend(AWXBaseEmailBackend, CustomNotificationBase):
 
     init_parameters = {"mattermost_url": {"label": "Target URL", "type": "string"},
                        "mattermost_no_verify_ssl": {"label": "Verify SSL", "type": "bool"}}

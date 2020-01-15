@@ -1,3 +1,7 @@
+<<<<<<< HEAD
+# awx-clone
+Clone of the offical AWX repo - https://github.com/ansible/awx
+=======
 [![Gated by Zuul](https://zuul-ci.org/gated.svg)](https://ansible.softwarefactory-project.io/zuul/status)
 
 <img src="https://raw.githubusercontent.com/ansible/awx-logos/master/awx/ui/client/assets/logo-login.svg?sanitize=true" width=200 alt="AWX" />
@@ -44,3 +48,4 @@ License
 
 [Apache v2](./LICENSE.md)
 
+>>>>>>> 5935583c4ca7480d84d6bb22c9a8c76494649c7b

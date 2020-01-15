@@ -34,18 +34,6 @@ if MODE == 'production':
         logger.error("Missing or incorrect metadata for Tower version.  Ensure Tower was installed using the setup playbook.")
         raise Exception("Missing or incorrect metadata for Tower version.  Ensure Tower was installed using the setup playbook.")
 
-if social_django.__version__ != '2.1.0':
-    raise RuntimeError("social_django version other than 2.1.0 detected {}. \
-            Confirm that per-request social_django.utils.BACKENDS override \
-            still works".format(social_django.__version__))
-
-
-if not django.__version__.startswith('1.'):
-    raise RuntimeError("Django version other than 1.XX detected {}. \
-            Inherit from WSGIHandler to support short-circuit Django Middleware. \
-            This is known to work for Django 1.XX and may not work with other, \
-            even minor, versions.".format(django.__version__))
-
 
 # Return the default Django WSGI application.
 application = get_wsgi_application()

@@ -3,11 +3,12 @@ import PropTypes from 'prop-types';
 import { withRouter } from 'react-router-dom';
 import { withI18n } from '@lingui/react';
 import { t } from '@lingui/macro';
+import { SearchColumns, SortColumns } from '@types';
 import PaginatedDataList from '../PaginatedDataList';
 import DataListToolbar from '../DataListToolbar';
 import CheckboxListItem from '../CheckboxListItem';
 import SelectedList from '../SelectedList';
-import { getQSConfig, parseNamespacedQueryString } from '../../util/qs';
+import { getQSConfig, parseQueryString } from '../../util/qs';
 
 class SelectResourceStep extends React.Component {
   constructor(props) {
@@ -23,7 +24,11 @@ class SelectResourceStep extends React.Component {
     this.qsConfig = getQSConfig('resource', {
       page: 1,
       page_size: 5,
-      order_by: props.sortedColumnKey,
+      order_by: `${
+        props.sortColumns.filter(col => col.key === 'name').length
+          ? 'name'
+          : 'username'
+      }`,
     });
   }
 
@@ -40,10 +45,7 @@ class SelectResourceStep extends React.Component {
 
   async readResourceList() {
     const { onSearch, location } = this.props;
-    const queryParams = parseNamespacedQueryString(
-      this.qsConfig,
-      location.search
-    );
+    const queryParams = parseQueryString(this.qsConfig, location.search);
 
     this.setState({
       isLoading: true,
@@ -72,12 +74,12 @@ class SelectResourceStep extends React.Component {
     const { isInitialized, isLoading, count, error, resources } = this.state;
 
     const {
-      columns,
+      searchColumns,
+      sortColumns,
       displayKey,
       onRowClick,
       selectedLabel,
       selectedResourceRows,
-      itemName,
       i18n,
     } = this.props;
 
@@ -86,33 +88,37 @@ class SelectResourceStep extends React.Component {
         {isLoading && <div>{i18n._(t`Loading...`)}</div>}
         {isInitialized && (
           <Fragment>
+            <div>
+              {i18n._(
+                t`Choose the resources that will be receiving new roles.  You'll be able to select the roles to apply in the next step.  Note that the resources chosen here will receive all roles chosen in the next step.`
+              )}
+            </div>
             {selectedResourceRows.length > 0 && (
               <SelectedList
                 displayKey={displayKey}
                 label={selectedLabel}
                 onRemove={onRowClick}
                 selected={selectedResourceRows}
-                showOverflowAfter={5}
               />
             )}
             <PaginatedDataList
               items={resources}
               itemCount={count}
-              itemName={itemName}
               qsConfig={this.qsConfig}
-              toolbarColumns={columns}
+              onRowClick={onRowClick}
+              toolbarSearchColumns={searchColumns}
+              toolbarSortColumns={sortColumns}
               renderItem={item => (
                 <CheckboxListItem
                   isSelected={selectedResourceRows.some(i => i.id === item.id)}
                   itemId={item.id}
                   key={item.id}
                   name={item[displayKey]}
+                  label={item[displayKey]}
                   onSelect={() => onRowClick(item)}
                 />
               )}
-              renderToolbar={props => (
-                <DataListToolbar {...props} alignToolbarLeft />
-              )}
+              renderToolbar={props => <DataListToolbar {...props} fillWidth />}
               showPageSizeOptions={false}
             />
           </Fragment>
@@ -124,23 +130,22 @@ class SelectResourceStep extends React.Component {
 }
 
 SelectResourceStep.propTypes = {
-  columns: PropTypes.arrayOf(PropTypes.object).isRequired,
+  searchColumns: SearchColumns,
+  sortColumns: SortColumns,
   displayKey: PropTypes.string,
   onRowClick: PropTypes.func,
   onSearch: PropTypes.func.isRequired,
   selectedLabel: PropTypes.string,
   selectedResourceRows: PropTypes.arrayOf(PropTypes.object),
-  sortedColumnKey: PropTypes.string,
-  itemName: PropTypes.string,
 };
 
 SelectResourceStep.defaultProps = {
+  searchColumns: null,
+  sortColumns: null,
   displayKey: 'name',
   onRowClick: () => {},
   selectedLabel: null,
   selectedResourceRows: [],
-  sortedColumnKey: 'name',
-  itemName: 'item',
 };
 
 export { SelectResourceStep as _SelectResourceStep };

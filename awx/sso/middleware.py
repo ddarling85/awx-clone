@@ -20,17 +20,7 @@ class SocialAuthMiddleware(SocialAuthExceptionMiddleware):
 
     def process_request(self, request):
         if request.path.startswith('/sso'):
-            # django-social keeps a list of backends in memory that it gathers
-            # based on the value of settings.AUTHENTICATION_BACKENDS *at import
-            # time*:
-            # https://github.com/python-social-auth/social-app-django/blob/c1e2795b00b753d58a81fa6a0261d8dae1d9c73d/social_django/utils.py#L13
-            #
-            # our settings.AUTHENTICATION_BACKENDS can *change*
-            # dynamically as Tower settings are changed (i.e., if somebody
-            # configures Github OAuth2 integration), so we need to
-            # _overwrite_ this in-memory value at the top of every request so
-            # that we have the latest version
-            # see: https://github.com/ansible/tower/issues/1979
+            # See upgrade blocker note in requirements/README.md
             utils.BACKENDS = settings.AUTHENTICATION_BACKENDS
         token_key = request.COOKIES.get('token', '')
         token_key = urllib.parse.quote(urllib.parse.unquote(token_key).strip('"'))
@@ -39,7 +29,7 @@ class SocialAuthMiddleware(SocialAuthExceptionMiddleware):
             request.successful_authenticator = None
 
         if not request.path.startswith('/sso/') and 'migrations_notran' not in request.path:
-            if request.user and request.user.is_authenticated():
+            if request.user and request.user.is_authenticated:
                 # The rest of the code base rely hevily on type/inheritance checks,
                 # LazyObject sent from Django auth middleware can be buggy if not
                 # converted back to its original object.

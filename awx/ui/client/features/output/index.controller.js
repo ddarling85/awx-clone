@@ -230,8 +230,7 @@ function canStartFollowing () {
     }
 
     if (followOnce && // one-time activation from top of first page
-        scroll.isBeyondUpperThreshold() &&
-        slide.getTailCounter() - slide.getHeadCounter() >= OUTPUT_PAGE_SIZE) {
+        scroll.isBeyondUpperThreshold()) {
         followOnce = false;
 
         return true;
@@ -393,7 +392,8 @@ function last () {
         return lastPage();
     }
 
-    return lastRange();
+    return lastRange()
+        .then(() => previousRange());
 }
 
 function next () {
@@ -422,10 +422,18 @@ function menuLast () {
 
 function down () {
     scroll.moveDown();
+
+    if (scroll.isBeyondLowerThreshold()) {
+        next();
+    }
 }
 
 function up () {
     scroll.moveUp();
+
+    if (scroll.isBeyondUpperThreshold()) {
+        previous();
+    }
 }
 
 function togglePanelExpand () {

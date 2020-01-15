@@ -9,12 +9,14 @@ import irc.client
 
 from django.utils.encoding import smart_text
 from django.utils.translation import ugettext_lazy as _
+
 from awx.main.notifications.base import AWXBaseEmailBackend
+from awx.main.notifications.custom_notification_base import CustomNotificationBase
 
 logger = logging.getLogger('awx.main.notifications.irc_backend')
 
 
-class IrcBackend(AWXBaseEmailBackend):
+class IrcBackend(AWXBaseEmailBackend, CustomNotificationBase):
 
     init_parameters = {"server": {"label": "IRC Server Address", "type": "string"},
                        "port": {"label": "IRC Server Port", "type": "int"},

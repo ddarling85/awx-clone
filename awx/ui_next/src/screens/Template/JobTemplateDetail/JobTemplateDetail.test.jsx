@@ -19,8 +19,8 @@ describe('<JobTemplateDetail />', () => {
     verbosity: 1,
     summary_fields: {
       user_capabilities: { edit: true },
-      created_by: { username: 'Joe' },
-      modified_by: { username: 'Joe' },
+      created_by: { id: 1, username: 'Joe' },
+      modified_by: { id: 1, username: 'Joe' },
       credentials: [
         { id: 1, kind: 'ssh', name: 'Credential 1' },
         { id: 2, kind: 'awx', name: 'Credential 2' },
@@ -28,6 +28,8 @@ describe('<JobTemplateDetail />', () => {
       inventory: { name: 'Inventory' },
       project: { name: 'Project' },
     },
+    created: '2020-04-25T01:23:45.678901Z',
+    modified: '2020-04-25T01:23:45.678901Z',
   };
 
   const mockInstanceGroups = {
@@ -50,12 +52,20 @@ describe('<JobTemplateDetail />', () => {
     jest.clearAllMocks();
   });
 
-  test('initially renders succesfully', () => {
+  test('Can load with missing summary fields', async () => {
+    const mockTemplate = { ...template };
+    mockTemplate.summary_fields = { user_capabilities: {} };
+
     const wrapper = mountWithContexts(
-      <JobTemplateDetail template={template} />
+      <JobTemplateDetail template={mockTemplate} />
     );
-    expect(wrapper).toMatchSnapshot();
+    await waitForElement(
+      wrapper,
+      'Detail[label="Description"]',
+      el => el.length === 1
+    );
   });
+
   test('When component mounts API is called to get instance groups', async done => {
     const wrapper = mountWithContexts(
       <JobTemplateDetail template={template} />
@@ -74,6 +84,7 @@ describe('<JobTemplateDetail />', () => {
     expect(JobTemplatesAPI.readInstanceGroups).toHaveBeenCalledTimes(1);
     done();
   });
+
   test('Edit button is absent when user does not have edit privilege', async done => {
     const regularUser = {
       forks: 1,
@@ -91,12 +102,14 @@ describe('<JobTemplateDetail />', () => {
       skip_tags: 'coffe,tea',
       summary_fields: {
         user_capabilities: { edit: false },
-        created_by: { username: 'Joe' },
-        modified_by: { username: 'Joe' },
+        created_by: { id: 1, username: 'Joe' },
+        modified_by: { id: 1, username: 'Joe' },
         inventory: { name: 'Inventory' },
         project: { name: 'Project' },
         labels: { count: 1, results: [{ name: 'Label', id: 1 }] },
       },
+      created: '2020-04-25T01:23:45.678901Z',
+      modified: '2020-04-25T01:23:45.678901Z',
     };
     const wrapper = mountWithContexts(
       <JobTemplateDetail template={regularUser} />
@@ -113,19 +126,21 @@ describe('<JobTemplateDetail />', () => {
     done();
   });
 
-  test('Credential type is Cloud if credential.kind is null', async done => {
+  test('should render CredentialChip', () => {
     template.summary_fields.credentials = [{ id: 1, name: 'cred', kind: null }];
     const wrapper = mountWithContexts(
       <JobTemplateDetail template={template} />
     );
-    const jobTemplateDetail = wrapper.find('JobTemplateDetail');
-    jobTemplateDetail.setState({
-      instanceGroups: mockInstanceGroups.data.results,
+    wrapper.find('JobTemplateDetail').setState({
+      instanceGroups: mockInstanceGroups,
       hasContentLoading: false,
       contentError: false,
     });
-    const cred = wrapper.find('strong.credential');
-    expect(cred.text()).toContain('Cloud:');
-    done();
+
+    const chip = wrapper.find('CredentialChip');
+    expect(chip).toHaveLength(1);
+    expect(chip.prop('credential')).toEqual(
+      template.summary_fields.credentials[0]
+    );
   });
 });

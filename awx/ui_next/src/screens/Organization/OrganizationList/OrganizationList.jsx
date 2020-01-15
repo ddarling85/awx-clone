@@ -1,8 +1,8 @@
-import React, { Component, Fragment } from 'react';
-import { withRouter } from 'react-router-dom';
+import React, { useEffect, useState } from 'react';
+import { useLocation, useRouteMatch } from 'react-router-dom';
 import { withI18n } from '@lingui/react';
 import { t } from '@lingui/macro';
-import { Card, PageSection, PageSectionVariants } from '@patternfly/react-core';
+import { Card, PageSection } from '@patternfly/react-core';
 
 import { OrganizationsAPI } from '@api';
 import AlertModal from '@components/AlertModal';
@@ -12,101 +12,36 @@ import PaginatedDataList, {
   ToolbarAddButton,
   ToolbarDeleteButton,
 } from '@components/PaginatedDataList';
-import { getQSConfig, parseNamespacedQueryString } from '@util/qs';
+import { getQSConfig, parseQueryString } from '@util/qs';
 
 import OrganizationListItem from './OrganizationListItem';
 
 const QS_CONFIG = getQSConfig('organization', {
   page: 1,
-  page_size: 5,
+  page_size: 20,
   order_by: 'name',
 });
 
-class OrganizationsList extends Component {
-  constructor(props) {
-    super(props);
+function OrganizationsList({ i18n }) {
+  const location = useLocation();
+  const match = useRouteMatch();
+  const [contentError, setContentError] = useState(null);
+  const [deletionError, setDeletionError] = useState(null);
+  const [hasContentLoading, setHasContentLoading] = useState(true);
+  const [itemCount, setItemCount] = useState(0);
+  const [organizations, setOrganizations] = useState([]);
+  const [orgActions, setOrgActions] = useState(null);
+  const [selected, setSelected] = useState([]);
 
-    this.state = {
-      hasContentLoading: true,
-      contentError: null,
-      deletionError: null,
-      organizations: [],
-      selected: [],
-      itemCount: 0,
-      actions: null,
-    };
+  const addUrl = `${match.url}/add`;
+  const canAdd = orgActions && orgActions.POST;
+  const isAllSelected =
+    selected.length === organizations.length && selected.length > 0;
 
-    this.handleSelectAll = this.handleSelectAll.bind(this);
-    this.handleSelect = this.handleSelect.bind(this);
-    this.handleOrgDelete = this.handleOrgDelete.bind(this);
-    this.handleDeleteErrorClose = this.handleDeleteErrorClose.bind(this);
-    this.loadOrganizations = this.loadOrganizations.bind(this);
-  }
-
-  componentDidMount() {
-    this.loadOrganizations();
-  }
-
-  componentDidUpdate(prevProps) {
-    const { location } = this.props;
-    if (location !== prevProps.location) {
-      this.loadOrganizations();
-    }
-  }
-
-  handleSelectAll(isSelected) {
-    const { organizations } = this.state;
-
-    const selected = isSelected ? [...organizations] : [];
-    this.setState({ selected });
-  }
-
-  handleSelect(row) {
-    const { selected } = this.state;
-
-    if (selected.some(s => s.id === row.id)) {
-      this.setState({ selected: selected.filter(s => s.id !== row.id) });
-    } else {
-      this.setState({ selected: selected.concat(row) });
-    }
-  }
-
-  handleDeleteErrorClose() {
-    this.setState({ deletionError: null });
-  }
-
-  async handleOrgDelete() {
-    const { selected, itemCount } = this.state;
-
-    this.setState({ hasContentLoading: true });
-    try {
-      await Promise.all(selected.map(org => OrganizationsAPI.destroy(org.id)));
-      this.setState({ itemCount: itemCount - selected.length });
-    } catch (err) {
-      this.setState({ deletionError: err });
-    } finally {
-      await this.loadOrganizations();
-    }
-  }
-
-  async loadOrganizations() {
-    const { location } = this.props;
-    const { actions: cachedActions } = this.state;
-    const params = parseNamespacedQueryString(QS_CONFIG, location.search);
-
-    let optionsPromise;
-    if (cachedActions) {
-      optionsPromise = Promise.resolve({ data: { actions: cachedActions } });
-    } else {
-      optionsPromise = OrganizationsAPI.readOptions();
-    }
-
-    const promises = Promise.all([
-      OrganizationsAPI.read(params),
-      optionsPromise,
-    ]);
-
-    this.setState({ contentError: null, hasContentLoading: true });
+  const loadOrganizations = async ({ search }) => {
+    const params = parseQueryString(QS_CONFIG, search);
+    setContentError(null);
+    setHasContentLoading(true);
     try {
       const [
         {
@@ -115,112 +50,143 @@ class OrganizationsList extends Component {
         {
           data: { actions },
         },
-      ] = await promises;
-      this.setState({
-        actions,
-        itemCount: count,
-        organizations: results,
-        selected: [],
-      });
-    } catch (err) {
-      this.setState({ contentError: err });
+      ] = await Promise.all([
+        OrganizationsAPI.read(params),
+        loadOrganizationActions(),
+      ]);
+      setItemCount(count);
+      setOrganizations(results);
+      setOrgActions(actions);
+      setSelected([]);
+    } catch (error) {
+      setContentError(error);
     } finally {
-      this.setState({ hasContentLoading: false });
+      setHasContentLoading(false);
     }
-  }
+  };
 
-  render() {
-    const { medium } = PageSectionVariants;
-    const {
-      actions,
-      itemCount,
-      contentError,
-      hasContentLoading,
-      deletionError,
-      selected,
-      organizations,
-    } = this.state;
-    const { match, i18n } = this.props;
+  const loadOrganizationActions = () => {
+    if (orgActions) {
+      return Promise.resolve({ data: { actions: orgActions } });
+    }
+    return OrganizationsAPI.readOptions();
+  };
 
-    const canAdd =
-      actions && Object.prototype.hasOwnProperty.call(actions, 'POST');
-    const isAllSelected = selected.length === organizations.length;
+  const handleOrgDelete = async () => {
+    setHasContentLoading(true);
+    try {
+      await Promise.all(selected.map(({ id }) => OrganizationsAPI.destroy(id)));
+    } catch (error) {
+      setDeletionError(error);
+    } finally {
+      await loadOrganizations(location);
+    }
+  };
 
-    return (
-      <Fragment>
-        <PageSection variant={medium}>
-          <Card>
-            <PaginatedDataList
-              contentError={contentError}
-              hasContentLoading={hasContentLoading}
-              items={organizations}
-              itemCount={itemCount}
-              itemName="organization"
-              qsConfig={QS_CONFIG}
-              toolbarColumns={[
-                { name: i18n._(t`Name`), key: 'name', isSortable: true },
-                {
-                  name: i18n._(t`Modified`),
-                  key: 'modified',
-                  isSortable: true,
-                  isNumeric: true,
-                },
-                {
-                  name: i18n._(t`Created`),
-                  key: 'created',
-                  isSortable: true,
-                  isNumeric: true,
-                },
-              ]}
-              renderToolbar={props => (
-                <DataListToolbar
-                  {...props}
-                  showSelectAll
-                  isAllSelected={isAllSelected}
-                  onSelectAll={this.handleSelectAll}
-                  additionalControls={[
-                    <ToolbarDeleteButton
-                      key="delete"
-                      onDelete={this.handleOrgDelete}
-                      itemsToDelete={selected}
-                      itemName="Organization"
-                    />,
-                    canAdd ? (
-                      <ToolbarAddButton key="add" linkTo={`${match.url}/add`} />
-                    ) : null,
-                  ]}
-                />
-              )}
-              renderItem={o => (
-                <OrganizationListItem
-                  key={o.id}
-                  organization={o}
-                  detailUrl={`${match.url}/${o.id}`}
-                  isSelected={selected.some(row => row.id === o.id)}
-                  onSelect={() => this.handleSelect(o)}
-                />
-              )}
-              emptyStateControls={
-                canAdd ? (
-                  <ToolbarAddButton key="add" linkTo={`${match.url}/add`} />
-                ) : null
-              }
-            />
-          </Card>
-        </PageSection>
-        <AlertModal
-          isOpen={deletionError}
-          variant="danger"
-          title={i18n._(t`Error!`)}
-          onClose={this.handleDeleteErrorClose}
-        >
-          {i18n._(t`Failed to delete one or more organizations.`)}
-          <ErrorDetail error={deletionError} />
-        </AlertModal>
-      </Fragment>
-    );
-  }
+  const handleSelectAll = isSelected => {
+    if (isSelected) {
+      setSelected(organizations);
+    } else {
+      setSelected([]);
+    }
+  };
+
+  const handleSelect = row => {
+    if (selected.some(s => s.id === row.id)) {
+      setSelected(selected.filter(s => s.id !== row.id));
+    } else {
+      setSelected(selected.concat(row));
+    }
+  };
+
+  const handleDeleteErrorClose = () => {
+    setDeletionError(null);
+  };
+
+  useEffect(() => {
+    loadOrganizations(location);
+  }, [location]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  return (
+    <>
+      <PageSection>
+        <Card>
+          <PaginatedDataList
+            contentError={contentError}
+            hasContentLoading={hasContentLoading}
+            items={organizations}
+            itemCount={itemCount}
+            pluralizedItemName="Organizations"
+            qsConfig={QS_CONFIG}
+            onRowClick={handleSelect}
+            toolbarSearchColumns={[
+              {
+                name: i18n._(t`Name`),
+                key: 'name',
+                isDefault: true,
+              },
+              {
+                name: i18n._(t`Created By (Username)`),
+                key: 'created_by__username',
+              },
+              {
+                name: i18n._(t`Modified By (Username)`),
+                key: 'modified_by__username',
+              },
+            ]}
+            toolbarSortColumns={[
+              {
+                name: i18n._(t`Name`),
+                key: 'name',
+              },
+            ]}
+            renderToolbar={props => (
+              <DataListToolbar
+                {...props}
+                showSelectAll
+                isAllSelected={isAllSelected}
+                onSelectAll={handleSelectAll}
+                qsConfig={QS_CONFIG}
+                additionalControls={[
+                  <ToolbarDeleteButton
+                    key="delete"
+                    onDelete={handleOrgDelete}
+                    itemsToDelete={selected}
+                    pluralizedItemName="Organizations"
+                  />,
+                  canAdd ? (
+                    <ToolbarAddButton key="add" linkTo={addUrl} />
+                  ) : null,
+                ]}
+              />
+            )}
+            renderItem={o => (
+              <OrganizationListItem
+                key={o.id}
+                organization={o}
+                detailUrl={`${match.url}/${o.id}`}
+                isSelected={selected.some(row => row.id === o.id)}
+                onSelect={() => handleSelect(o)}
+              />
+            )}
+            emptyStateControls={
+              canAdd ? <ToolbarAddButton key="add" linkTo={addUrl} /> : null
+            }
+          />
+        </Card>
+      </PageSection>
+      <AlertModal
+        isOpen={deletionError}
+        variant="danger"
+        title={i18n._(t`Error!`)}
+        onClose={handleDeleteErrorClose}
+      >
+        {i18n._(t`Failed to delete one or more organizations.`)}
+        <ErrorDetail error={deletionError} />
+      </AlertModal>
+    </>
+  );
 }
 
 export { OrganizationsList as _OrganizationsList };
-export default withI18n()(withRouter(OrganizationsList));
+export default withI18n()(OrganizationsList);

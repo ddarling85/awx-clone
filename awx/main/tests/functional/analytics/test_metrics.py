@@ -25,11 +25,14 @@ EXPECTED_VALUES = {
     'awx_custom_virtualenvs_total':0.0,
     'awx_running_jobs_total':0.0,
     'awx_instance_capacity':100.0,
+    'awx_instance_consumed_capacity':0.0,
+    'awx_instance_remaining_capacity':100.0,
     'awx_instance_cpu':0.0,
     'awx_instance_memory':0.0,
     'awx_instance_info':1.0,
     'awx_license_instance_total':0,
     'awx_license_instance_free':0,
+    'awx_pending_jobs_total':0,
 }
 
 

@@ -8,13 +8,15 @@ import dateutil.parser as dp
 
 from django.utils.encoding import smart_text
 from django.utils.translation import ugettext_lazy as _
+
 from awx.main.notifications.base import AWXBaseEmailBackend
+from awx.main.notifications.custom_notification_base import CustomNotificationBase
 
 
 logger = logging.getLogger('awx.main.notifications.grafana_backend')
 
 
-class GrafanaBackend(AWXBaseEmailBackend):
+class GrafanaBackend(AWXBaseEmailBackend, CustomNotificationBase):
 
     init_parameters = {"grafana_url": {"label": "Grafana URL", "type": "string"},
                        "grafana_key": {"label": "Grafana API Key", "type": "password"}}

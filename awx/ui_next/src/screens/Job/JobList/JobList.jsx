@@ -2,25 +2,37 @@ import React, { Component } from 'react';
 import { withRouter } from 'react-router-dom';
 import { withI18n } from '@lingui/react';
 import { t } from '@lingui/macro';
-import { Card, PageSection, PageSectionVariants } from '@patternfly/react-core';
+import { Card, PageSection } from '@patternfly/react-core';
 
-import { UnifiedJobsAPI } from '@api';
+import {
+  AdHocCommandsAPI,
+  InventoryUpdatesAPI,
+  JobsAPI,
+  ProjectUpdatesAPI,
+  SystemJobsAPI,
+  UnifiedJobsAPI,
+  WorkflowJobsAPI,
+} from '@api';
 import AlertModal from '@components/AlertModal';
 import DatalistToolbar from '@components/DataListToolbar';
 import ErrorDetail from '@components/ErrorDetail';
 import PaginatedDataList, {
   ToolbarDeleteButton,
 } from '@components/PaginatedDataList';
-import { getQSConfig, parseNamespacedQueryString } from '@util/qs';
+import { getQSConfig, parseQueryString } from '@util/qs';
 
 import JobListItem from './JobListItem';
 
-const QS_CONFIG = getQSConfig('job', {
-  page: 1,
-  page_size: 20,
-  order_by: '-finished',
-  not__launch_type: 'sync',
-});
+const QS_CONFIG = getQSConfig(
+  'job',
+  {
+    page: 1,
+    page_size: 20,
+    order_by: '-finished',
+    not__launch_type: 'sync',
+  },
+  ['page', 'page_size', 'id']
+);
 
 class JobList extends Component {
   constructor(props) {
@@ -28,8 +40,8 @@ class JobList extends Component {
 
     this.state = {
       hasContentLoading: true,
-      contentError: null,
       deletionError: null,
+      contentError: null,
       selected: [],
       jobs: [],
       itemCount: 0,
@@ -37,7 +49,7 @@ class JobList extends Component {
     this.loadJobs = this.loadJobs.bind(this);
     this.handleSelectAll = this.handleSelectAll.bind(this);
     this.handleSelect = this.handleSelect.bind(this);
-    this.handleDelete = this.handleDelete.bind(this);
+    this.handleJobDelete = this.handleJobDelete.bind(this);
     this.handleDeleteErrorClose = this.handleDeleteErrorClose.bind(this);
   }
 
@@ -71,11 +83,39 @@ class JobList extends Component {
     }
   }
 
-  async handleDelete() {
-    const { selected } = this.state;
+  async handleJobDelete() {
+    const { selected, itemCount } = this.state;
     this.setState({ hasContentLoading: true });
     try {
-      await Promise.all(selected.map(({ id }) => UnifiedJobsAPI.destroy(id)));
+      await Promise.all(
+        selected.map(({ type, id }) => {
+          let deletePromise;
+          switch (type) {
+            case 'job':
+              deletePromise = JobsAPI.destroy(id);
+              break;
+            case 'ad_hoc_command':
+              deletePromise = AdHocCommandsAPI.destroy(id);
+              break;
+            case 'system_job':
+              deletePromise = SystemJobsAPI.destroy(id);
+              break;
+            case 'project_update':
+              deletePromise = ProjectUpdatesAPI.destroy(id);
+              break;
+            case 'inventory_update':
+              deletePromise = InventoryUpdatesAPI.destroy(id);
+              break;
+            case 'workflow_job':
+              deletePromise = WorkflowJobsAPI.destroy(id);
+              break;
+            default:
+              break;
+          }
+          return deletePromise;
+        })
+      );
+      this.setState({ itemCount: itemCount - selected.length });
     } catch (err) {
       this.setState({ deletionError: err });
     } finally {
@@ -85,7 +125,7 @@ class JobList extends Component {
 
   async loadJobs() {
     const { location } = this.props;
-    const params = parseNamespacedQueryString(QS_CONFIG, location.search);
+    const params = parseQueryString(QS_CONFIG, location.search);
 
     this.setState({ contentError: null, hasContentLoading: true });
     try {
@@ -114,26 +154,80 @@ class JobList extends Component {
       selected,
     } = this.state;
     const { match, i18n } = this.props;
-    const { medium } = PageSectionVariants;
-    const isAllSelected = selected.length === jobs.length;
-    const itemName = i18n._(t`Job`);
+    const isAllSelected =
+      selected.length === jobs.length && selected.length > 0;
     return (
-      <PageSection variant={medium}>
+      <PageSection>
         <Card>
           <PaginatedDataList
             contentError={contentError}
             hasContentLoading={hasContentLoading}
             items={jobs}
             itemCount={itemCount}
-            itemName={itemName}
+            pluralizedItemName="Jobs"
             qsConfig={QS_CONFIG}
-            toolbarColumns={[
-              { name: i18n._(t`Name`), key: 'name', isSortable: true },
+            onRowClick={this.handleSelect}
+            toolbarSearchColumns={[
+              {
+                name: i18n._(t`Name`),
+                key: 'name',
+                isDefault: true,
+              },
+              {
+                name: i18n._(t`ID`),
+                key: 'id',
+              },
+              {
+                name: i18n._(t`Label Name`),
+                key: 'labels__name',
+              },
+              {
+                name: i18n._(t`Job Type`),
+                key: `type`,
+                options: [
+                  [`project_update`, i18n._(t`SCM Update`)],
+                  [`inventory_update`, i18n._(t`Inventory Sync`)],
+                  [`job`, i18n._(t`Playbook Run`)],
+                  [`ad_hoc_command`, i18n._(t`Command`)],
+                  [`system_job`, i18n._(t`Management Job`)],
+                  [`workflow_job`, i18n._(t`Workflow Job`)],
+                ],
+              },
+              {
+                name: i18n._(t`Launched By (Username)`),
+                key: 'created_by__username',
+              },
+              {
+                name: i18n._(t`Status`),
+                key: 'status',
+                options: [
+                  [`new`, i18n._(t`New`)],
+                  [`pending`, i18n._(t`Pending`)],
+                  [`waiting`, i18n._(t`Waiting`)],
+                  [`running`, i18n._(t`Running`)],
+                  [`successful`, i18n._(t`Successful`)],
+                  [`failed`, i18n._(t`Failed`)],
+                  [`error`, i18n._(t`Error`)],
+                  [`canceled`, i18n._(t`Canceled`)],
+                ],
+              },
+              {
+                name: i18n._(t`Limit`),
+                key: 'job__limit',
+              },
+            ]}
+            toolbarSortColumns={[
+              {
+                name: i18n._(t`Name`),
+                key: 'name',
+              },
+              {
+                name: i18n._(t`ID`),
+                key: 'id',
+              },
               {
                 name: i18n._(t`Finished`),
                 key: 'finished',
-                isSortable: true,
-                isNumeric: true,
               },
             ]}
             renderToolbar={props => (
@@ -143,12 +237,13 @@ class JobList extends Component {
                 showExpandCollapse
                 isAllSelected={isAllSelected}
                 onSelectAll={this.handleSelectAll}
+                qsConfig={QS_CONFIG}
                 additionalControls={[
                   <ToolbarDeleteButton
                     key="delete"
-                    onDelete={this.handleDelete}
+                    onDelete={this.handleJobDelete}
                     itemsToDelete={selected}
-                    itemName={itemName}
+                    pluralizedItemName="Jobs"
                   />,
                 ]}
               />

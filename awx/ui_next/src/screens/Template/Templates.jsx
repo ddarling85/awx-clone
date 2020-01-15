@@ -5,9 +5,10 @@ import { Route, withRouter, Switch } from 'react-router-dom';
 
 import { Config } from '@contexts/Config';
 import Breadcrumbs from '@components/Breadcrumbs/Breadcrumbs';
-
 import { TemplateList } from './TemplateList';
 import Template from './Template';
+import WorkflowJobTemplate from './WorkflowJobTemplate';
+import JobTemplateAdd from './JobTemplateAdd';
 
 class Templates extends Component {
   constructor(props) {
@@ -17,6 +18,7 @@ class Templates extends Component {
     this.state = {
       breadcrumbConfig: {
         '/templates': i18n._(t`Templates`),
+        '/templates/job_template/add': i18n._(t`Create New Job Template`),
       },
     };
   }
@@ -28,6 +30,7 @@ class Templates extends Component {
     }
     const breadcrumbConfig = {
       '/templates': i18n._(t`Templates`),
+      '/templates/job_template/add': i18n._(t`Create New Job Template`),
       [`/templates/${template.type}/${template.id}`]: `${template.name}`,
       [`/templates/${template.type}/${template.id}/details`]: i18n._(
         t`Details`
@@ -35,6 +38,10 @@ class Templates extends Component {
       [`/templates/${template.type}/${template.id}/edit`]: i18n._(
         t`Edit Details`
       ),
+      [`/templates/${template.type}/${template.id}/notifications`]: i18n._(
+        t`Notifications`
+      ),
+      [`/templates/${template.type}/${template.id}/access`]: i18n._(t`Access`),
     };
     this.setState({ breadcrumbConfig });
   };
@@ -47,11 +54,31 @@ class Templates extends Component {
         <Breadcrumbs breadcrumbConfig={breadcrumbConfig} />
         <Switch>
           <Route
-            path={`${match.path}/:templateType/:id`}
+            path={`${match.path}/job_template/add`}
+            render={() => <JobTemplateAdd />}
+          />
+          <Route
+            path={`${match.path}/job_template/:id`}
             render={({ match: newRouteMatch }) => (
               <Config>
                 {({ me }) => (
                   <Template
+                    history={history}
+                    location={location}
+                    setBreadcrumb={this.setBreadCrumbConfig}
+                    me={me || {}}
+                    match={newRouteMatch}
+                  />
+                )}
+              </Config>
+            )}
+          />
+          <Route
+            path={`${match.path}/workflow_job_template/:id`}
+            render={({ match: newRouteMatch }) => (
+              <Config>
+                {({ me }) => (
+                  <WorkflowJobTemplate
                     history={history}
                     location={location}
                     setBreadcrumb={this.setBreadCrumbConfig}

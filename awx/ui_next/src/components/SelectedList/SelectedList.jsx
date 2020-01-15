@@ -23,26 +23,33 @@ class SelectedList extends Component {
     const {
       label,
       selected,
-      showOverflowAfter,
       onRemove,
       displayKey,
       isReadOnly,
+      renderItemChip,
     } = this.props;
+
+    const renderChip =
+      renderItemChip ||
+      (({ item, removeItem }) => (
+        <Chip key={item.id} onClick={removeItem} isReadOnly={isReadOnly}>
+          {item[displayKey]}
+        </Chip>
+      ));
+
     return (
       <Split>
         <SplitLabelItem>{label}</SplitLabelItem>
         <VerticalSeparator />
         <SplitItem>
-          <ChipGroup showOverflowAfter={showOverflowAfter}>
-            {selected.map(item => (
-              <Chip
-                key={item.id}
-                isReadOnly={isReadOnly}
-                onClick={() => onRemove(item)}
-              >
-                {item[displayKey]}
-              </Chip>
-            ))}
+          <ChipGroup numChips={5}>
+            {selected.map(item =>
+              renderChip({
+                item,
+                removeItem: () => onRemove(item),
+                canDelete: !isReadOnly,
+              })
+            )}
           </ChipGroup>
         </SplitItem>
       </Split>
@@ -55,16 +62,16 @@ SelectedList.propTypes = {
   label: PropTypes.string,
   onRemove: PropTypes.func,
   selected: PropTypes.arrayOf(PropTypes.object).isRequired,
-  showOverflowAfter: PropTypes.number,
   isReadOnly: PropTypes.bool,
+  renderItemChip: PropTypes.func,
 };
 
 SelectedList.defaultProps = {
   displayKey: 'name',
   label: 'Selected',
   onRemove: () => null,
-  showOverflowAfter: 5,
   isReadOnly: false,
+  renderItemChip: null,
 };
 
 export default SelectedList;

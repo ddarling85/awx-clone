@@ -11,13 +11,15 @@ pytest==3.6.0
 pytest-cov
 pytest-django
 pytest-pythonpath
-pytest-mock
+pytest-mock==1.11.1
 pytest-timeout
 pytest-xdist<1.28.0
+tox  # for awxkit
 logutils
 jupyter
 matplotlib
 backports.tempfile  # support in unit tests for py32+ tempfile.TemporaryDirectory
 mockldap
 sdb
+gprof2dot
 atomicwrites==1.1.5

@@ -32,12 +32,42 @@ const CodeMirror = styled(ReactCodeMirror)`
       background: var(--pf-c-form-control--invalid--Background);
       border-bottom-width: var(--pf-c-form-control--invalid--BorderBottomWidth);
     }`}
+
+  ${props =>
+    props.options &&
+    props.options.readOnly &&
+    `
+    &,
+    &:hover {
+      --pf-c-form-control--BorderBottomColor: var(--pf-global--BorderColor--300);
+    }
+
+    .CodeMirror-cursors {
+      display: none;
+    }
+
+    .CodeMirror-lines {
+      cursor: default;
+    }
+
+    .CodeMirror-scroll {
+      background-color: var(--pf-c-form-control--disabled--BackgroundColor);
+    }
+  `}
 `;
 
-function CodeMirrorInput({ value, onChange, mode, readOnly, hasErrors, rows }) {
+function CodeMirrorInput({
+  value,
+  onChange,
+  mode,
+  readOnly,
+  hasErrors,
+  rows,
+  className,
+}) {
   return (
     <CodeMirror
-      className="pf-c-form-control"
+      className={`pf-c-form-control ${className}`}
       value={value}
       onBeforeChange={(editor, data, val) => onChange(val)}
       mode={mode}
@@ -53,7 +83,7 @@ function CodeMirrorInput({ value, onChange, mode, readOnly, hasErrors, rows }) {
 }
 CodeMirrorInput.propTypes = {
   value: string.isRequired,
-  onChange: func.isRequired,
+  onChange: func,
   mode: oneOf(['javascript', 'yaml', 'jinja2']).isRequired,
   readOnly: bool,
   hasErrors: bool,
@@ -61,6 +91,7 @@ CodeMirrorInput.propTypes = {
 };
 CodeMirrorInput.defaultProps = {
   readOnly: false,
+  onChange: () => {},
   rows: 6,
   hasErrors: false,
 };

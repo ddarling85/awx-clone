@@ -8,12 +8,14 @@ from unittest.mock import PropertyMock
 
 # Django
 from django.urls import resolve
+from django.http import Http404
+from django.core.handlers.exception import response_for_exception
 from django.contrib.auth.models import User
 from django.core.serializers.json import DjangoJSONEncoder
 from django.db.backends.sqlite3.base import SQLiteCursorWrapper
-from jsonbfield.fields import JSONField
 
 # AWX
+from awx.main.fields import JSONBField
 from awx.main.models.projects import Project
 from awx.main.models.ha import Instance
 
@@ -121,6 +123,22 @@ def project_playbooks():
 
 
 @pytest.fixture
+def run_computed_fields_right_away(request):
+
+    def run_me(inventory_id):
+        i = Inventory.objects.get(id=inventory_id)
+        i.update_computed_fields()
+
+    mocked = mock.patch(
+        'awx.main.signals.update_inventory_computed_fields.delay',
+        new=run_me
+    )
+    mocked.start()
+
+    request.addfinalizer(mocked.stop)
+
+
+@pytest.fixture
 @mock.patch.object(Project, "update", lambda self, **kwargs: None)
 def project(instance, organization):
     prj = Project.objects.create(name="test-proj",
@@ -204,6 +222,13 @@ def organization(instance):
 
 
 @pytest.fixture
+def credentialtype_kube():
+    kube = CredentialType.defaults['kubernetes_bearer_token']()
+    kube.save()
+    return kube
+
+
+@pytest.fixture
 def credentialtype_ssh():
     ssh = CredentialType.defaults['ssh']()
     ssh.save()
@@ -271,14 +296,21 @@ def credentialtype_external():
         }],
         'required': ['url', 'token', 'key'],
     }
-    external_type = CredentialType(
-        kind='external',
-        managed_by_tower=True,
-        name='External Service',
-        inputs=external_type_inputs
-    )
-    external_type.save()
-    return external_type
+
+    class MockPlugin(object):
+        def backend(self, **kwargs):
+            return 'secret'
+
+    with mock.patch('awx.main.models.credential.CredentialType.plugin', new_callable=PropertyMock) as mock_plugin:
+        mock_plugin.return_value = MockPlugin()
+        external_type = CredentialType(
+            kind='external',
+            managed_by_tower=True,
+            name='External Service',
+            inputs=external_type_inputs
+        )
+        external_type.save()
+        yield external_type
 
 
 @pytest.fixture
@@ -337,6 +369,12 @@ def other_external_credential(credentialtype_external):
 
 
 @pytest.fixture
+def kube_credential(credentialtype_kube):
+    return Credential.objects.create(credential_type=credentialtype_kube, name='kube-cred',
+                                     inputs={'host': 'my.cluster', 'bearer_token': 'my-token', 'verify_ssl': False})
+
+
+@pytest.fixture
 def inventory(organization):
     return organization.inventories.create(name="test-inv")
 
@@ -385,7 +423,9 @@ def notification_template(organization):
                                                organization=organization,
                                                notification_type="webhook",
                                                notification_configuration=dict(url="http://localhost",
-                                                                               headers={"Test": "Header"}))
+                                                                               username="",
+                                                                               password="",
+                                                                               headers={"Test": "Header",}))
 
 
 @pytest.fixture
@@ -566,8 +606,12 @@ def _request(verb):
         if 'format' not in kwargs and 'content_type' not in kwargs:
             kwargs['format'] = 'json'
 
-        view, view_args, view_kwargs = resolve(urllib.parse.urlparse(url)[2])
         request = getattr(APIRequestFactory(), verb)(url, **kwargs)
+        request_error = None
+        try:
+            view, view_args, view_kwargs = resolve(urllib.parse.urlparse(url)[2])
+        except Http404 as e:
+            request_error = e
         if isinstance(kwargs.get('cookies', None), dict):
             for key, value in kwargs['cookies'].items():
                 request.COOKIES[key] = value
@@ -576,7 +620,10 @@ def _request(verb):
         if user:
             force_authenticate(request, user=user)
 
-        response = view(request, *view_args, **view_kwargs)
+        if not request_error:
+            response = view(request, *view_args, **view_kwargs)
+        else:
+            response = response_for_exception(request, request_error)
         if middleware:
             middleware.process_response(request, response)
         if expect:
@@ -737,7 +784,7 @@ def get_db_prep_save(self, value, connection, **kwargs):
 
 @pytest.fixture
 def monkeypatch_jsonbfield_get_db_prep_save(mocker):
-    JSONField.get_db_prep_save = get_db_prep_save
+    JSONBField.get_db_prep_save = get_db_prep_save
 
 
 @pytest.fixture

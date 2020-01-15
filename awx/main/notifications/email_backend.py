@@ -1,14 +1,27 @@
 # Copyright (c) 2016 Ansible, Inc.
 # All Rights Reserved.
 
-import json
-
-from django.utils.encoding import smart_text
 from django.core.mail.backends.smtp import EmailBackend
-from django.utils.translation import ugettext_lazy as _
+
+from awx.main.notifications.custom_notification_base import CustomNotificationBase
+
+DEFAULT_MSG = CustomNotificationBase.DEFAULT_MSG
+DEFAULT_BODY = CustomNotificationBase.DEFAULT_BODY
+
+DEFAULT_APPROVAL_RUNNING_MSG = CustomNotificationBase.DEFAULT_APPROVAL_RUNNING_MSG
+DEFAULT_APPROVAL_RUNNING_BODY = CustomNotificationBase.DEFAULT_APPROVAL_RUNNING_BODY
+
+DEFAULT_APPROVAL_APPROVED_MSG = CustomNotificationBase.DEFAULT_APPROVAL_APPROVED_MSG
+DEFAULT_APPROVAL_APPROVED_BODY = CustomNotificationBase.DEFAULT_APPROVAL_APPROVED_BODY
+
+DEFAULT_APPROVAL_TIMEOUT_MSG = CustomNotificationBase.DEFAULT_APPROVAL_TIMEOUT_MSG
+DEFAULT_APPROVAL_TIMEOUT_BODY = CustomNotificationBase.DEFAULT_APPROVAL_TIMEOUT_BODY
+
+DEFAULT_APPROVAL_DENIED_MSG = CustomNotificationBase.DEFAULT_APPROVAL_DENIED_MSG
+DEFAULT_APPROVAL_DENIED_BODY = CustomNotificationBase.DEFAULT_APPROVAL_DENIED_BODY
 
 
-class CustomEmailBackend(EmailBackend):
+class CustomEmailBackend(EmailBackend, CustomNotificationBase):
 
     init_parameters = {"host": {"label": "Host", "type": "string"},
                        "port": {"label": "Port", "type": "int"},
@@ -22,13 +35,14 @@ class CustomEmailBackend(EmailBackend):
     recipient_parameter = "recipients"
     sender_parameter = "sender"
 
+    default_messages = {"started": {"message": DEFAULT_MSG, "body": DEFAULT_BODY},
+                        "success": {"message": DEFAULT_MSG, "body": DEFAULT_BODY},
+                        "error": {"message": DEFAULT_MSG, "body": DEFAULT_BODY},
+                        "workflow_approval": {"running": {"message": DEFAULT_APPROVAL_RUNNING_MSG, "body": DEFAULT_APPROVAL_RUNNING_BODY},
+                                              "approved": {"message": DEFAULT_APPROVAL_APPROVED_MSG, "body": DEFAULT_APPROVAL_APPROVED_BODY},
+                                              "timed_out": {"message": DEFAULT_APPROVAL_TIMEOUT_MSG, "body": DEFAULT_APPROVAL_TIMEOUT_BODY},
+                                              "denied": {"message": DEFAULT_APPROVAL_DENIED_MSG, "body": DEFAULT_APPROVAL_DENIED_BODY}}}
 
     def format_body(self, body):
-        if "body" in body:
-            body_actual = body['body']
-        else:
-            body_actual = smart_text(_("{} #{} had status {}, view details at {}\n\n").format(
-                body['friendly_name'], body['id'], body['status'], body['url'])
-            )
-            body_actual += json.dumps(body, indent=4)
-        return body_actual
+        # leave body unchanged (expect a string)
+        return body

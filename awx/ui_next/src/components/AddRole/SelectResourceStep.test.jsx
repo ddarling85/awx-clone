@@ -6,18 +6,31 @@ import { sleep } from '../../../testUtils/testUtils';
 import SelectResourceStep from './SelectResourceStep';
 
 describe('<SelectResourceStep />', () => {
-  const columns = [{ name: 'Username', key: 'username', isSortable: true }];
+  const searchColumns = [
+    {
+      name: 'Username',
+      key: 'username',
+      isDefault: true,
+    },
+  ];
+
+  const sortColumns = [
+    {
+      name: 'Username',
+      key: 'username',
+    },
+  ];
   afterEach(() => {
     jest.restoreAllMocks();
   });
   test('initially renders without crashing', () => {
     shallow(
       <SelectResourceStep
-        columns={columns}
+        searchColumns={searchColumns}
+        sortColumns={sortColumns}
         displayKey="username"
         onRowClick={() => {}}
         onSearch={() => {}}
-        sortedColumnKey="username"
       />
     );
   });
@@ -34,11 +47,11 @@ describe('<SelectResourceStep />', () => {
     });
     mountWithContexts(
       <SelectResourceStep
-        columns={columns}
+        searchColumns={searchColumns}
+        sortColumns={sortColumns}
         displayKey="username"
         onRowClick={() => {}}
         onSearch={handleSearch}
-        sortedColumnKey="username"
       />
     );
     expect(handleSearch).toHaveBeenCalledWith({
@@ -66,12 +79,12 @@ describe('<SelectResourceStep />', () => {
     });
     const wrapper = await mountWithContexts(
       <SelectResourceStep
-        columns={columns}
+        searchColumns={searchColumns}
+        sortColumns={sortColumns}
         displayKey="username"
         onRowClick={() => {}}
         onSearch={handleSearch}
         selectedResourceRows={selectedResourceRows}
-        sortedColumnKey="username"
       />,
       {
         context: { router: { history, route: { location: history.location } } },
@@ -100,12 +113,12 @@ describe('<SelectResourceStep />', () => {
     };
     const wrapper = mountWithContexts(
       <SelectResourceStep
-        columns={columns}
+        searchColumns={searchColumns}
+        sortColumns={sortColumns}
         displayKey="username"
         onRowClick={handleRowClick}
         onSearch={() => ({ data })}
         selectedResourceRows={[]}
-        sortedColumnKey="username"
       />
     );
     await sleep(0);

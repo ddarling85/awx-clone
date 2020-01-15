@@ -21,12 +21,6 @@
     src: url(/static/assets/OpenSans-Bold.ttf);
 }
 
-/* Bootstrap fix that's causing a right margin to appear
-   whenver a modal is opened */
-body.modal-open {
-  margin-right: 0;
-}
-
 /* Helper Classes */
 .pad-right-sm { padding-right: 10px; }
 .pad-left-md { padding-left: 30px; }
@@ -1595,7 +1589,7 @@ tr td button i {
     padding: 20px 0;
 
     .alert {
-        padding: 10px;
+        padding: 0px;
         margin: 0;
         word-wrap: break-word;
     }
@@ -1979,11 +1973,6 @@ tr td button i {
     color: @default-data-txt !important;
     transition: border-color 0.3s !important;
     box-shadow: none !important;
-}
-
-.select2-container {
-    margin-left: 2px;
-    margin-top: 2px;
 }
 
 .form-control + .select2-container--disabled .select2-selection {

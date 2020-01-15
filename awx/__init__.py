@@ -24,43 +24,32 @@ except ImportError: # pragma: no cover
 import hashlib
 
 try:
-    import django
-    from django.utils.encoding import force_bytes
-    from django.db.backends.base.schema import BaseDatabaseSchemaEditor
-    from django.db.backends.base import schema
+    import django  # noqa: F401
     HAS_DJANGO = True
 except ImportError:
     HAS_DJANGO = False
+else:
+    from django.db.backends.base import schema
+    from django.db.backends.utils import names_digest
 
 
 if HAS_DJANGO is True:
-    # This line exists to make sure we don't regress on FIPS support if we
-    # upgrade Django; if you're upgrading Django and see this error,
-    # update the version check below, and confirm that FIPS still works.
-    if django.__version__ != '1.11.20':
-        raise RuntimeError("Django version other than 1.11.20 detected {}. \
-                Subclassing BaseDatabaseSchemaEditor is known to work for Django 1.11.20 \
-                and may not work in newer Django versions.".format(django.__version__))
 
-
-    class FipsBaseDatabaseSchemaEditor(BaseDatabaseSchemaEditor):
-
-        @classmethod
-        def _digest(cls, *args):
+    # See upgrade blocker note in requirements/README.md
+    try:
+        names_digest('foo', 'bar', 'baz', length=8)
+    except ValueError:
+        def names_digest(*args, length):
             """
-            Generates a 32-bit digest of a set of arguments that can be used to
-            shorten identifying names.
+            Generate a 32-bit digest of a set of arguments that can be used to shorten
+            identifying names.  Support for use in FIPS environments.
             """
-            try:
-                h = hashlib.md5()
-            except ValueError:
-                h = hashlib.md5(usedforsecurity=False)
+            h = hashlib.md5(usedforsecurity=False)
             for arg in args:
-                h.update(force_bytes(arg))
-            return h.hexdigest()[:8]
+                h.update(arg.encode())
+            return h.hexdigest()[:length]
 
-
-    schema.BaseDatabaseSchemaEditor = FipsBaseDatabaseSchemaEditor
+        schema.names_digest = names_digest
 
 
 def find_commands(management_dir):
@@ -80,6 +69,23 @@ def find_commands(management_dir):
     return commands
 
 
+def oauth2_getattribute(self, attr):
+    # Custom method to override
+    # oauth2_provider.settings.OAuth2ProviderSettings.__getattribute__
+    from django.conf import settings
+    val = None
+    if 'migrate' not in sys.argv:
+        # certain Django OAuth Toolkit migrations actually reference
+        # setting lookups for references to model classes (e.g.,
+        # oauth2_settings.REFRESH_TOKEN_MODEL)
+        # If we're doing an OAuth2 setting lookup *while running* a migration,
+        # don't do our usual "Configure Tower in Tower" database setting lookup
+        val = settings.OAUTH2_PROVIDER.get(attr)
+    if val is None:
+        val = object.__getattribute__(self, attr)
+    return val
+
+
 def prepare_env():
     # Update the default settings environment variable based on current mode.
     os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'awx.settings.%s' % MODE)
@@ -91,6 +97,12 @@ def prepare_env():
     # Monkeypatch Django find_commands to also work with .pyc files.
     import django.core.management
     django.core.management.find_commands = find_commands
+
+    # Monkeypatch Oauth2 toolkit settings class to check for settings
+    # in django.conf settings each time, not just once during import
+    import oauth2_provider.settings
+    oauth2_provider.settings.OAuth2ProviderSettings.__getattribute__ = oauth2_getattribute
+
     # Use the AWX_TEST_DATABASE_* environment variables to specify the test
     # database settings to use when management command is run as an external
     # program via unit tests.

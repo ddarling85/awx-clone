@@ -18,29 +18,12 @@
         basePath:  'api/v2/inventories/{{$stateParams.inventory_id}}/groups/',
         layoutClass: 'List-staticColumnLayout--groups',
         actionHolderClass: 'List-actionHolder List-actionHolder--rootGroups',
-        staticColumns: [
-            {
-                field: 'failed_hosts',
-                content: {
-                    label: '',
-                    nosort: true,
-                    mode: 'all',
-                    iconOnly: true,
-                    awToolTip: "{{ group.hosts_status_tip }}",
-                    dataPlacement: "top",
-                    icon: "{{ 'fa icon-job-' + group.hosts_status_class }}",
-                    columnClass: 'status-column'
-                }
-            }
-        ],
-
         fields: {
             name: {
                 label: i18n._('Groups'),
                 key: true,
                 uiSref: "inventories.edit.groups.edit({group_id:group.id})",
                 columnClass: 'col-lg-10 col-md-10 col-sm-10 col-xs-10',
-                class: 'InventoryManage-breakWord',
             }
         },
 
