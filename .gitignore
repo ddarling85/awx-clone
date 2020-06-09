@@ -31,9 +31,11 @@ awx/ui/templates/ui/installing.html
 awx/ui_next/node_modules/
 awx/ui_next/coverage/
 awx/ui_next/build/locales/_build
+rsyslog.pid
 /tower-license
 /tower-license/**
 tools/prometheus/data
+tools/docker-compose/Dockerfile
 
 # Tower setup playbook testing
 setup/test/roles/postgresql

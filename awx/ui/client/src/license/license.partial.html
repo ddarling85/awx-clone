@@ -116,7 +116,7 @@
 							</div>
 						</div>
 					</div>
-					<div class="License-file--middle License-helperText" translate>
+					<div class="License-file--middle License-helperText">
 						<div class="License-separator"></div>
 						<div translate>OR</div>
 						<div class="License-separator"></div>
@@ -137,7 +137,7 @@
 								<div class="input-group Form-mixedInputGroup" ng-if="showPlaceholderPassword">
 									<input class="form-control Form-textInput" type="text" value="ENCRYPTED" disabled />
 									<span class="input-group-btn input-group-append">
-										<button class="btn at-ButtonHollow--default at-Input-button" ng-disabled="!user_is_superuser || newLicense.file" ng-click="replacePassword()" aw-tool-tip="Replace" data-placement="top" data-original-title="Replace">
+										<button aria-label="{{:: strings.get('REPLACE_PASSWORD') }}" class="btn at-ButtonHollow--default at-Input-button" ng-disabled="!user_is_superuser || newLicense.file" ng-click="replacePassword()" aw-tool-tip="Replace" data-placement="top" data-original-title="Replace">
 											<i class="fa fa-undo"></i>
 										</button>
 									</span>
@@ -215,7 +215,7 @@
 										Select a license
 								</div>
 								<div class="Modal-exitHolder">
-										<button class="close Modal-exit" ng-click="cancelLicenseLookup()">
+										<button aria-label="{{:: strings.get('CANCEL_LOOKUP')}}" class="close Modal-exit" ng-click="cancelLicenseLookup()">
 												<i class="fa fa-times-circle"></i>
 										</button>
 								</div>
@@ -256,7 +256,7 @@
 							</div>
 						</div>
 						<div class="Modal-footer">
-								<button ng-click="cancelLicenseLookup()" class="btn Modal-footerButton Modal-defaultButton">CANCEL</button>
+								<button ng-click="cancelLicenseLookup()" class="btn Modal-footerButton Modal-defaultButton" translate>CANCEL</button>
 								<button
 										ng-click="confirmLicenseSelection()"
 										class="btn Modal-footerButton btn-success"

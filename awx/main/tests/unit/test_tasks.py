@@ -126,10 +126,8 @@ def test_send_notifications_list(mock_notifications_filter, mock_job_get, mocker
 @pytest.mark.parametrize("key,value", [
     ('REST_API_TOKEN', 'SECRET'),
     ('SECRET_KEY', 'SECRET'),
-    ('RABBITMQ_PASS', 'SECRET'),
     ('VMWARE_PASSWORD', 'SECRET'),
     ('API_SECRET', 'SECRET'),
-    ('CALLBACK_CONNECTION', 'amqp://tower:password@localhost:5672/tower'),
     ('ANSIBLE_GALAXY_SERVER_PRIMARY_GALAXY_PASSWORD', 'SECRET'),
     ('ANSIBLE_GALAXY_SERVER_PRIMARY_GALAXY_TOKEN', 'SECRET'),
 ])
@@ -178,6 +176,51 @@ def test_openstack_client_config_generation(mocker, source, expected, private_da
                 'project_name': 'demo-project',
                 'username': 'demo',
                 'domain_name': 'my-demo-domain',
+            },
+            'verify': expected,
+            'private': True,
+        }
+    }
+
+
+@pytest.mark.parametrize("source,expected", [
+    (None, True), (False, False), (True, True)
+])
+def test_openstack_client_config_generation_with_project_domain_name(mocker, source, expected, private_data_dir):
+    update = tasks.RunInventoryUpdate()
+    credential_type = CredentialType.defaults['openstack']()
+    inputs = {
+        'host': 'https://keystone.openstack.example.org',
+        'username': 'demo',
+        'password': 'secrete',
+        'project': 'demo-project',
+        'domain': 'my-demo-domain',
+        'project_domain_name': 'project-domain',
+    }
+    if source is not None:
+        inputs['verify_ssl'] = source
+    credential = Credential(pk=1, credential_type=credential_type, inputs=inputs)
+
+    inventory_update = mocker.Mock(**{
+        'source': 'openstack',
+        'source_vars_dict': {},
+        'get_cloud_credential': mocker.Mock(return_value=credential),
+        'get_extra_credentials': lambda x: [],
+        'ansible_virtualenv_path': '/venv/foo'
+    })
+    cloud_config = update.build_private_data(inventory_update, private_data_dir)
+    cloud_credential = yaml.safe_load(
+        cloud_config.get('credentials')[credential]
+    )
+    assert cloud_credential['clouds'] == {
+        'devstack': {
+            'auth': {
+                'auth_url': 'https://keystone.openstack.example.org',
+                'password': 'secrete',
+                'project_name': 'demo-project',
+                'username': 'demo',
+                'domain_name': 'my-demo-domain',
+                'project_domain_name': 'project-domain',
             },
             'verify': expected,
             'private': True,
@@ -1809,8 +1852,9 @@ class TestInventoryUpdateCredentials(TestJobExecution):
         inventory_update.get_cloud_credential = mocker.Mock(return_value=None)
         inventory_update.get_extra_credentials = mocker.Mock(return_value=[])
 
-        private_data_files = task.build_private_data_files(inventory_update, private_data_dir)
-        env = task.build_env(inventory_update, private_data_dir, False, private_data_files)
+        with mocker.patch('awx.main.tasks._get_ansible_version', mocker.MagicMock(return_value='2.7')):
+            private_data_files = task.build_private_data_files(inventory_update, private_data_dir)
+            env = task.build_env(inventory_update, private_data_dir, False, private_data_files)
 
         assert 'AWS_ACCESS_KEY_ID' not in env
         assert 'AWS_SECRET_ACCESS_KEY' not in env
@@ -1917,8 +1961,9 @@ class TestInventoryUpdateCredentials(TestJobExecution):
         inventory_update.get_cloud_credential = get_cred
         inventory_update.get_extra_credentials = mocker.Mock(return_value=[])
 
-        private_data_files = task.build_private_data_files(inventory_update, private_data_dir)
-        env = task.build_env(inventory_update, private_data_dir, False, private_data_files)
+        with mocker.patch('awx.main.tasks._get_ansible_version', mocker.MagicMock(return_value='2.7')):
+            private_data_files = task.build_private_data_files(inventory_update, private_data_dir)
+            env = task.build_env(inventory_update, private_data_dir, False, private_data_files)
 
         safe_env = {}
         credentials = task.build_credentials_list(inventory_update)
@@ -2146,10 +2191,18 @@ class TestInventoryUpdateCredentials(TestJobExecution):
         inventory_update.get_cloud_credential = get_cred
         inventory_update.get_extra_credentials = mocker.Mock(return_value=[])
 
-        inventory_update.source_vars = '{"satellite6_group_patterns": "[a,b,c]", "satellite6_group_prefix": "hey_", "satellite6_want_hostcollections": True}'
+        inventory_update.source_vars = {
+            'satellite6_group_patterns': '[a,b,c]',
+            'satellite6_group_prefix': 'hey_',
+            'satellite6_want_hostcollections': True,
+            'satellite6_want_ansible_ssh_host': True,
+            'satellite6_rich_params': True,
+            'satellite6_want_facts': False
+        }
 
-        private_data_files = task.build_private_data_files(inventory_update, private_data_dir)
-        env = task.build_env(inventory_update, private_data_dir, False, private_data_files)
+        with mocker.patch('awx.main.tasks._get_ansible_version', mocker.MagicMock(return_value='2.7')):
+            private_data_files = task.build_private_data_files(inventory_update, private_data_dir)
+            env = task.build_env(inventory_update, private_data_dir, False, private_data_files)
 
         config = configparser.ConfigParser()
         config.read(env['FOREMAN_INI_PATH'])
@@ -2159,6 +2212,9 @@ class TestInventoryUpdateCredentials(TestJobExecution):
         assert config.get('ansible', 'group_patterns') == '[a,b,c]'
         assert config.get('ansible', 'group_prefix') == 'hey_'
         assert config.get('ansible', 'want_hostcollections') == 'True'
+        assert config.get('ansible', 'want_ansible_ssh_host') == 'True'
+        assert config.get('ansible', 'rich_params') == 'True'
+        assert config.get('ansible', 'want_facts') == 'False'
 
     def test_cloudforms_source(self, inventory_update, private_data_dir, mocker):
         task = tasks.RunInventoryUpdate()
@@ -2371,3 +2427,23 @@ def test_managed_injector_redaction(injector_cls):
             if secret_field_name in template:
                 env[env_name] = 'very_secret_value'
     assert 'very_secret_value' not in str(build_safe_env(env))
+
+
+@mock.patch('logging.getLogger')
+def test_notification_job_not_finished(logging_getLogger, mocker):
+    uj = mocker.MagicMock()
+    uj.finished = False
+    logger = mocker.Mock()
+    logging_getLogger.return_value = logger
+
+    with mocker.patch('awx.main.models.UnifiedJob.objects.get', uj):
+        tasks.handle_success_and_failure_notifications(1)
+        assert logger.warn.called_with(f"Failed to even try to send notifications for job '{uj}' due to job not being in finished state.")
+
+
+def test_notification_job_finished(mocker):
+    uj = mocker.MagicMock(send_notification_templates=mocker.MagicMock(), finished=True)
+
+    with mocker.patch('awx.main.models.UnifiedJob.objects.get', mocker.MagicMock(return_value=uj)):
+        tasks.handle_success_and_failure_notifications(1)
+        uj.send_notification_templates.assert_called()

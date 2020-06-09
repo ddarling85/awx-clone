@@ -1,32 +1,63 @@
 import React from 'react';
 import { act } from 'react-dom/test-utils';
 import { createMemoryHistory } from 'history';
-import { mountWithContexts, waitForElement } from '@testUtils/enzymeHelpers';
-import { sleep } from '@testUtils/testUtils';
+import {
+  mountWithContexts,
+  waitForElement,
+} from '../../../../testUtils/enzymeHelpers';
 import JobTemplateAdd from './JobTemplateAdd';
-import { JobTemplatesAPI, LabelsAPI } from '@api';
+import {
+  CredentialsAPI,
+  CredentialTypesAPI,
+  JobTemplatesAPI,
+  LabelsAPI,
+  ProjectsAPI,
+} from '../../../api';
 
-jest.mock('@api');
+jest.mock('../../../api');
+CredentialsAPI.read.mockResolvedValue({
+  data: {
+    results: [],
+    count: 0,
+  },
+});
+CredentialTypesAPI.loadAllTypes.mockResolvedValue([]);
+ProjectsAPI.readPlaybooks.mockResolvedValue({
+  data: [],
+});
 
 const jobTemplateData = {
-  name: 'Foo',
-  description: 'Baz',
-  job_type: 'run',
-  inventory: 1,
-  project: 2,
-  playbook: 'Bar',
-  forks: 0,
-  limit: '',
-  verbosity: '0',
-  job_slice_count: 1,
-  timeout: 0,
-  job_tags: '',
-  skip_tags: '',
-  diff_mode: false,
   allow_callbacks: false,
   allow_simultaneous: false,
-  use_fact_cache: false,
+  ask_credential_on_launch: false,
+  ask_diff_mode_on_launch: false,
+  ask_inventory_on_launch: false,
+  ask_job_type_on_launch: false,
+  ask_limit_on_launch: false,
+  ask_scm_branch_on_launch: false,
+  ask_skip_tags_on_launch: false,
+  ask_tags_on_launch: false,
+  ask_variables_on_launch: false,
+  ask_verbosity_on_launch: false,
+  become_enabled: false,
+  description: '',
+  diff_mode: false,
+  extra_vars: '---\n',
+  forks: 0,
   host_config_key: '',
+  inventory: 1,
+  job_slice_count: 1,
+  job_tags: '',
+  job_type: 'run',
+  limit: '',
+  name: '',
+  playbook: '',
+  project: { id: 1, summary_fields: { organization: { id: 1 } } },
+  scm_branch: '',
+  skip_tags: '',
+  timeout: 0,
+  use_fact_cache: false,
+  verbosity: '0',
 };
 
 describe('<JobTemplateAdd />', () => {
@@ -100,25 +131,51 @@ describe('<JobTemplateAdd />', () => {
       wrapper = mountWithContexts(<JobTemplateAdd />);
     });
     await waitForElement(wrapper, 'EmptyStateBody', el => el.length === 0);
-    const formik = wrapper.find('Formik').instance();
-    await act(async () => {
-      const changeState = new Promise(resolve => {
-        formik.setState(
-          {
-            values: {
-              ...jobTemplateData,
-              labels: [],
-              instanceGroups: [],
-            },
-          },
-          () => resolve()
-        );
+    act(() => {
+      wrapper.find('input#template-name').simulate('change', {
+        target: { value: 'Bar', name: 'name' },
       });
-      await changeState;
+      wrapper.find('AnsibleSelect#template-job-type').prop('onChange')(
+        null,
+        'check'
+      );
+      wrapper.find('ProjectLookup').invoke('onChange')({
+        id: 2,
+        name: 'project',
+        summary_fields: { organization: { id: 1, name: 'Org Foo' } },
+      });
+      wrapper.update();
+      wrapper
+        .find('PlaybookSelect')
+        .prop('field')
+        .onChange({
+          target: { value: 'Baz', name: 'playbook' },
+        });
     });
-    wrapper.find('form').simulate('submit');
-    await sleep(1);
-    expect(JobTemplatesAPI.create).toHaveBeenCalledWith(jobTemplateData);
+    wrapper.update();
+    act(() => {
+      wrapper.find('InventoryLookup').invoke('onChange')({
+        id: 2,
+        organization: 1,
+      });
+    });
+    wrapper.update();
+    await act(async () => {
+      wrapper.find('form').simulate('submit');
+    });
+    wrapper.update();
+    expect(JobTemplatesAPI.create).toHaveBeenCalledWith({
+      ...jobTemplateData,
+      name: 'Bar',
+      job_type: 'check',
+      project: 2,
+      playbook: 'Baz',
+      inventory: 2,
+      webhook_credential: undefined,
+      webhook_key: '',
+      webhook_service: '',
+      webhook_url: '',
+    });
   });
 
   test('should navigate to job template detail after form submission', async () => {
@@ -128,6 +185,7 @@ describe('<JobTemplateAdd />', () => {
         id: 1,
         type: 'job_template',
         ...jobTemplateData,
+        project: jobTemplateData.project.id,
       },
     });
     let wrapper;
@@ -136,36 +194,41 @@ describe('<JobTemplateAdd />', () => {
         context: { router: { history } },
       });
     });
+    await waitForElement(wrapper, 'EmptyStateBody', el => el.length === 0);
+    act(() => {
+      wrapper.find('input#template-name').simulate('change', {
+        target: { value: 'Foo', name: 'name' },
+      });
+      wrapper.find('AnsibleSelect#template-job-type').prop('onChange')(
+        null,
+        'check'
+      );
+      wrapper.find('ProjectLookup').invoke('onChange')({
+        id: 2,
+        name: 'project',
+        summary_fields: { organization: { id: 1, name: 'Org Foo' } },
+      });
+      wrapper.update();
+      wrapper
+        .find('PlaybookSelect')
+        .prop('field')
+        .onChange({
+          target: { value: 'Bar', name: 'playbook' },
+        });
+    });
+    wrapper.update();
+    act(() => {
+      wrapper.find('InventoryLookup').invoke('onChange')({
+        id: 1,
+        organization: 1,
+      });
+    });
+    wrapper.update();
+    await act(async () => {
+      wrapper.find('form').simulate('submit');
+    });
+    wrapper.update();
 
-    const updatedTemplateData = {
-      name: 'new name',
-      description: 'new description',
-      job_type: 'check',
-    };
-    const labels = [
-      { id: 3, name: 'Foo', isNew: true },
-      { id: 4, name: 'Bar', isNew: true },
-      { id: 5, name: 'Maple' },
-      { id: 6, name: 'Tree' },
-    ];
-    JobTemplatesAPI.update.mockResolvedValue({
-      data: { ...updatedTemplateData },
-    });
-    const formik = wrapper.find('Formik').instance();
-    const changeState = new Promise(resolve => {
-      const values = {
-        ...jobTemplateData,
-        ...updatedTemplateData,
-        labels,
-        instanceGroups: [],
-      };
-      formik.setState({ values }, () => resolve());
-    });
-    await changeState;
-    await wrapper.find('JobTemplateForm').invoke('handleSubmit')(
-      jobTemplateData
-    );
-    await sleep(0);
     expect(history.location.pathname).toEqual(
       '/templates/job_template/1/details'
     );

@@ -1,10 +1,11 @@
 import React from 'react';
-import { mount } from 'enzyme';
-import { ChipGroup } from '../Chip';
+import { mountWithContexts } from '../../../testUtils/enzymeHelpers';
+import ChipGroup from '../ChipGroup';
+
 import SelectedList from './SelectedList';
 
 describe('<SelectedList />', () => {
-  test('initially renders succesfully', () => {
+  test('initially renders successfully', () => {
     const mockSelected = [
       {
         id: 1,
@@ -15,17 +16,18 @@ describe('<SelectedList />', () => {
         name: 'bar',
       },
     ];
-    mount(
+    const wrapper = mountWithContexts(
       <SelectedList
         label="Selectedeeee"
         selected={mockSelected}
         onRemove={() => {}}
       />
     );
+    expect(wrapper.length).toBe(1);
   });
 
   test('showOverflow should set showOverflow on ChipGroup', () => {
-    const wrapper = mount(
+    const wrapper = mountWithContexts(
       <SelectedList label="Selected" selected={[]} onRemove={() => {}} />
     );
     const chipGroup = wrapper.find(ChipGroup);
@@ -41,7 +43,7 @@ describe('<SelectedList />', () => {
         name: 'foo',
       },
     ];
-    const wrapper = mount(
+    const wrapper = mountWithContexts(
       <SelectedList
         label="Selected"
         selected={mockSelected}

@@ -2,10 +2,11 @@ from __future__ import (absolute_import, division, print_function)
 __metaclass__ = type
 
 import io
+import os
 import json
 import datetime
 import importlib
-from contextlib import redirect_stdout
+from contextlib import redirect_stdout, suppress
 from unittest import mock
 import logging
 
@@ -14,7 +15,13 @@ from requests.models import Response
 import pytest
 
 from awx.main.tests.functional.conftest import _request
-from awx.main.models import Organization, Project, Inventory, Credential, CredentialType
+from awx.main.models import Organization, Project, Inventory, JobTemplate, Credential, CredentialType
+
+try:
+    import tower_cli  # noqa
+    HAS_TOWER_CLI = True
+except ImportError:
+    HAS_TOWER_CLI = False
 
 
 logger = logging.getLogger('awx.main.tests')
@@ -40,14 +47,46 @@ def sanitize_dict(din):
         return str(din)  # translation proxies often not string but stringlike
 
 
+@pytest.fixture(autouse=True)
+def collection_path_set(monkeypatch):
+    """Monkey patch sys.path, insert the root of the collection folder
+    so that content can be imported without being fully packaged
+    """
+    base_folder = os.path.abspath(
+        os.path.join(os.path.dirname(__file__), os.pardir, os.pardir)
+    )
+    monkeypatch.syspath_prepend(base_folder)
+
+
 @pytest.fixture
-def run_module(request):
+def collection_import():
+    """These tests run assuming that the awx_collection folder is inserted
+    into the PATH before-hand by collection_path_set.
+    But all imports internally to the collection
+    go through this fixture so that can be changed if needed.
+    For instance, we could switch to fully-qualified import paths.
+    """
+    def rf(path):
+        return importlib.import_module(path)
+    return rf
+
+
+@pytest.fixture
+def run_module(request, collection_import):
     def rf(module_name, module_params, request_user):
 
         def new_request(self, method, url, **kwargs):
             kwargs_copy = kwargs.copy()
             if 'data' in kwargs:
-                kwargs_copy['data'] = json.loads(kwargs['data'])
+                if isinstance(kwargs['data'], dict):
+                    kwargs_copy['data'] = kwargs['data']
+                elif kwargs['data'] is None:
+                    pass
+                elif isinstance(kwargs['data'], str):
+                    kwargs_copy['data'] = json.loads(kwargs['data'])
+                else:
+                    raise RuntimeError('Expected data to be dict or str, got {0}, data: {1}'.format(
+                        type(kwargs['data']), kwargs['data']))
             if 'params' in kwargs and method == 'GET':
                 # query params for GET are handled a bit differently by
                 # tower-cli and python requests as opposed to REST framework APIRequestFactory
@@ -69,6 +108,7 @@ def run_module(request):
             sanitize_dict(py_data)
             resp._content = bytes(json.dumps(django_response.data), encoding='utf8')
             resp.status_code = django_response.status_code
+            resp.headers = {'X-API-Product-Name': 'AWX', 'X-API-Product-Version': 'devel'}
 
             if request.config.getoption('verbose') > 0:
                 logger.info(
@@ -79,12 +119,20 @@ def run_module(request):
 
             return resp
 
+        def new_open(self, method, url, **kwargs):
+            r = new_request(self, method, url, **kwargs)
+            m = mock.MagicMock(read=mock.MagicMock(return_value=r._content),
+                               status=r.status_code,
+                               getheader=mock.MagicMock(side_effect=r.headers.get)
+                               )
+            return m
+
         stdout_buffer = io.StringIO()
         # Requies specific PYTHONPATH, see docs
         # Note that a proper Ansiballz explosion of the modules will have an import path like:
         # ansible_collections.awx.awx.plugins.modules.{}
         # We should consider supporting that in the future
-        resource_module = importlib.import_module('plugins.modules.{0}'.format(module_name))
+        resource_module = collection_import('plugins.modules.{0}'.format(module_name))
 
         if not isinstance(module_params, dict):
             raise RuntimeError('Module params must be dict, got {0}'.format(type(module_params)))
@@ -96,19 +144,54 @@ def run_module(request):
 
         with mock.patch.object(resource_module.TowerModule, '_load_params', new=mock_load_params):
             # Call the test utility (like a mock server) instead of issuing HTTP requests
-            with mock.patch('tower_cli.api.Session.request', new=new_request):
-                # Ansible modules return data to the mothership over stdout
-                with redirect_stdout(stdout_buffer):
+            with mock.patch('ansible.module_utils.urls.Request.open', new=new_open):
+                if HAS_TOWER_CLI:
+                    tower_cli_mgr = mock.patch('tower_cli.api.Session.request', new=new_request)
+                else:
+                    tower_cli_mgr = suppress()
+                with tower_cli_mgr:
                     try:
-                        resource_module.main()
+                        # Ansible modules return data to the mothership over stdout
+                        with redirect_stdout(stdout_buffer):
+                            resource_module.main()
                     except SystemExit:
                         pass  # A system exit indicates successful execution
+                    except Exception:
+                        # dump the stdout back to console for debugging
+                        print(stdout_buffer.getvalue())
+                        raise
 
         module_stdout = stdout_buffer.getvalue().strip()
-        result = json.loads(module_stdout)
+        try:
+            result = json.loads(module_stdout)
+        except Exception as e:
+            raise Exception('Module did not write valid JSON, error: {0}, stdout:\n{1}'.format(str(e), module_stdout))
+        # A module exception should never be a test expectation
+        if 'exception' in result:
+            if "ModuleNotFoundError: No module named 'tower_cli'" in result['exception']:
+                pytest.skip('The tower-cli library is needed to run this test, module no longer supported.')
+            raise Exception('Module encountered error:\n{0}'.format(result['exception']))
         return result
 
     return rf
+
+
+@pytest.fixture
+def survey_spec():
+    return {
+        "spec": [
+            {
+                "index": 0,
+                "question_name": "my question?",
+                "default": "mydef",
+                "variable": "myvar",
+                "type": "text",
+                "required": False
+            }
+        ],
+        "description": "test",
+        "name": "test"
+    }
 
 
 @pytest.fixture
@@ -139,6 +222,16 @@ def inventory(organization):
 
 
 @pytest.fixture
+def job_template(project, inventory):
+    return JobTemplate.objects.create(
+        name='test-jt',
+        project=project,
+        inventory=inventory,
+        playbook='helloworld.yml'
+    )
+
+
+@pytest.fixture
 def machine_credential(organization):
     ssh_type = CredentialType.defaults['ssh']()
     ssh_type.save()
@@ -146,3 +239,29 @@ def machine_credential(organization):
         credential_type=ssh_type, name='machine-cred',
         inputs={'username': 'test_user', 'password': 'pas4word'}
     )
+
+
+@pytest.fixture
+def vault_credential(organization):
+    ct = CredentialType.defaults['vault']()
+    ct.save()
+    return Credential.objects.create(
+        credential_type=ct, name='vault-cred',
+        inputs={'vault_id': 'foo', 'vault_password': 'pas4word'}
+    )
+
+
+@pytest.fixture
+def silence_deprecation():
+    """The deprecation warnings are stored in a global variable
+    they will create cross-test interference. Use this to turn them off.
+    """
+    with mock.patch('ansible.module_utils.basic.AnsibleModule.deprecate') as this_mock:
+        yield this_mock
+
+
+@pytest.fixture(autouse=True)
+def silence_warning():
+    """Warnings use global variable, same as deprecations."""
+    with mock.patch('ansible.module_utils.basic.AnsibleModule.warn') as this_mock:
+        yield this_mock

@@ -1,11 +1,14 @@
 import React from 'react';
 import { act } from 'react-dom/test-utils';
 import { createMemoryHistory } from 'history';
-import { mountWithContexts, waitForElement } from '@testUtils/enzymeHelpers';
+import {
+  mountWithContexts,
+  waitForElement,
+} from '../../../../testUtils/enzymeHelpers';
 import ProjectAdd from './ProjectAdd';
-import { ProjectsAPI, CredentialTypesAPI } from '@api';
+import { ProjectsAPI, CredentialTypesAPI } from '../../../api';
 
-jest.mock('@api');
+jest.mock('../../../api');
 
 describe('<ProjectAdd />', () => {
   let wrapper;
@@ -97,24 +100,7 @@ describe('<ProjectAdd />', () => {
       wrapper = mountWithContexts(<ProjectAdd />);
     });
     await waitForElement(wrapper, 'ContentLoading', el => el.length === 0);
-    const formik = wrapper.find('Formik').instance();
-    await act(async () => {
-      const changeState = new Promise(resolve => {
-        formik.setState(
-          {
-            values: {
-              ...projectData,
-            },
-          },
-          () => resolve()
-        );
-      });
-      await changeState;
-    });
-    await act(async () => {
-      wrapper.find('form').simulate('submit');
-    });
-    wrapper.update();
+    wrapper.find('ProjectForm').invoke('handleSubmit')(projectData);
     expect(ProjectsAPI.create).toHaveBeenCalledTimes(1);
   });
 
@@ -123,7 +109,8 @@ describe('<ProjectAdd />', () => {
       project_local_paths: ['foobar', 'qux'],
       project_base_dir: 'dir/foo/bar',
     };
-    ProjectsAPI.create.mockImplementation(() => Promise.reject(new Error()));
+    const error = new Error('oops');
+    ProjectsAPI.create.mockImplementation(() => Promise.reject(error));
     await act(async () => {
       wrapper = mountWithContexts(<ProjectAdd />, {
         context: { config },
@@ -138,20 +125,7 @@ describe('<ProjectAdd />', () => {
     });
     wrapper.update();
     expect(ProjectsAPI.create).toHaveBeenCalledTimes(1);
-    expect(wrapper.find('ProjectAdd .formSubmitError').length).toBe(1);
-  });
-
-  test('CardHeader close button should navigate to projects list', async () => {
-    const history = createMemoryHistory();
-    await act(async () => {
-      wrapper = mountWithContexts(<ProjectAdd />, {
-        context: { router: { history } },
-      }).find('ProjectAdd CardHeader');
-    });
-    await act(async () => {
-      wrapper.find('CardCloseButton').simulate('click');
-    });
-    expect(history.location.pathname).toEqual('/projects');
+    expect(wrapper.find('ProjectForm').prop('submitError')).toEqual(error);
   });
 
   test('CardBody cancel button should navigate to projects list', async () => {

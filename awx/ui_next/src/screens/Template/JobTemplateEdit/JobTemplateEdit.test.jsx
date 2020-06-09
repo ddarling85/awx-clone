@@ -1,40 +1,61 @@
 import React from 'react';
 import { act } from 'react-dom/test-utils';
 import { createMemoryHistory } from 'history';
-import { sleep } from '@testUtils/testUtils';
-import { mountWithContexts, waitForElement } from '@testUtils/enzymeHelpers';
-import { JobTemplatesAPI, LabelsAPI, ProjectsAPI } from '@api';
+import { sleep } from '../../../../testUtils/testUtils';
+import {
+  mountWithContexts,
+  waitForElement,
+} from '../../../../testUtils/enzymeHelpers';
+import {
+  CredentialsAPI,
+  CredentialTypesAPI,
+  JobTemplatesAPI,
+  LabelsAPI,
+  ProjectsAPI,
+} from '../../../api';
 import JobTemplateEdit from './JobTemplateEdit';
 
-jest.mock('@api');
+jest.mock('../../../api');
 
 const mockJobTemplate = {
-  id: 1,
-  name: 'Foo',
-  description: 'Bar',
-  job_type: 'run',
-  inventory: 2,
-  project: 3,
-  playbook: 'Baz',
-  type: 'job_template',
-  forks: 0,
-  limit: '',
-  verbosity: '0',
-  job_slice_count: 1,
-  timeout: 0,
-  job_tags: '',
-  skip_tags: '',
-  diff_mode: false,
   allow_callbacks: false,
   allow_simultaneous: false,
-  use_fact_cache: false,
+  ask_scm_branch_on_launch: false,
+  ask_diff_mode_on_launch: false,
+  ask_variables_on_launch: false,
+  ask_limit_on_launch: false,
+  ask_tags_on_launch: false,
+  ask_skip_tags_on_launch: false,
+  ask_job_type_on_launch: false,
+  ask_verbosity_on_launch: false,
+  ask_inventory_on_launch: false,
+  ask_credential_on_launch: false,
+  become_enabled: false,
+  description: 'Bar',
+  diff_mode: false,
+  extra_vars: '---',
+  forks: 0,
   host_config_key: '',
+  id: 1,
+  inventory: 2,
+  job_slice_count: 1,
+  job_tags: '',
+  job_type: 'run',
+  limit: '',
+  name: 'Foo',
+  playbook: 'Baz',
+  project: 3,
+  scm_branch: '',
+  skip_tags: '',
   summary_fields: {
     user_capabilities: {
       edit: true,
     },
     labels: {
-      results: [{ name: 'Sushi', id: 1 }, { name: 'Major', id: 2 }],
+      results: [
+        { name: 'Sushi', id: 1 },
+        { name: 'Major', id: 2 },
+      ],
     },
     inventory: {
       id: 2,
@@ -45,9 +66,19 @@ const mockJobTemplate = {
       { id: 2, kind: 'ssh', name: 'Bar' },
     ],
     project: {
-      id: 15,
+      id: 3,
       name: 'Boo',
     },
+  },
+  timeout: 0,
+  type: 'job_template',
+  use_fact_cache: false,
+  verbosity: '0',
+  webhook_credential: null,
+  webhook_key: 'webhook Key',
+  webhook_service: 'gitlab',
+  related: {
+    webhook_receiver: '/api/v2/workflow_job_templates/57/gitlab/',
   },
 };
 
@@ -151,6 +182,13 @@ ProjectsAPI.readPlaybooks.mockResolvedValue({
   data: mockRelatedProjectPlaybooks,
 });
 LabelsAPI.read.mockResolvedValue({ data: { results: [] } });
+CredentialsAPI.read.mockResolvedValue({
+  data: {
+    results: [],
+    count: 0,
+  },
+});
+CredentialTypesAPI.loadAllTypes.mockResolvedValue([]);
 
 describe('<JobTemplateEdit />', () => {
   beforeEach(() => {
@@ -160,6 +198,11 @@ describe('<JobTemplateEdit />', () => {
     });
     JobTemplatesAPI.readInstanceGroups.mockReturnValue({
       data: { results: mockInstanceGroups },
+    });
+    ProjectsAPI.readDetail.mockReturnValue({
+      id: 1,
+      allow_override: true,
+      name: 'foo',
     });
   });
 
@@ -184,47 +227,54 @@ describe('<JobTemplateEdit />', () => {
         <JobTemplateEdit template={mockJobTemplate} />
       );
     });
-    await waitForElement(wrapper, 'JobTemplateForm', e => e.length === 1);
     const updatedTemplateData = {
-      name: 'new name',
-      description: 'new description',
       job_type: 'check',
+      name: 'new name',
+      inventory: 1,
     };
     const labels = [
-      { id: 3, name: 'Foo', isNew: true },
-      { id: 4, name: 'Bar', isNew: true },
+      { id: 3, name: 'Foo' },
+      { id: 4, name: 'Bar' },
       { id: 5, name: 'Maple' },
       { id: 6, name: 'Tree' },
     ];
-    JobTemplatesAPI.update.mockResolvedValue({
-      data: { ...updatedTemplateData },
+    await waitForElement(wrapper, 'EmptyStateBody', el => el.length === 0);
+    act(() => {
+      wrapper.find('input#template-name').simulate('change', {
+        target: { value: 'new name', name: 'name' },
+      });
+      wrapper.find('AnsibleSelect#template-job-type').prop('onChange')(
+        null,
+        'check'
+      );
+      wrapper.find('LabelSelect').invoke('onChange')(labels);
     });
-    const formik = wrapper.find('Formik').instance();
-    const changeState = await act(
-      () =>
-        new Promise(resolve => {
-          const values = {
-            ...mockJobTemplate,
-            ...updatedTemplateData,
-            labels,
-            instanceGroups: [],
-          };
-          formik.setState({ values }, () => resolve());
-        })
-    );
-    await changeState;
+    wrapper.update();
+    act(() => {
+      wrapper.find('InventoryLookup').invoke('onChange')({
+        id: 1,
+        organization: 1,
+      });
+    });
+    wrapper.update();
     await act(async () => {
       wrapper.find('button[aria-label="Save"]').simulate('click');
     });
     await sleep(0);
 
-    expect(JobTemplatesAPI.update).toHaveBeenCalledWith(1, {
+    const expected = {
       ...mockJobTemplate,
+      project: mockJobTemplate.project,
       ...updatedTemplateData,
-    });
+    };
+    delete expected.summary_fields;
+    delete expected.id;
+    delete expected.type;
+    delete expected.related;
+    expected.webhook_url = `${window.location.origin}${mockJobTemplate.related.webhook_receiver}`;
+    expect(JobTemplatesAPI.update).toHaveBeenCalledWith(1, expected);
     expect(JobTemplatesAPI.disassociateLabel).toHaveBeenCalledTimes(2);
-    expect(JobTemplatesAPI.associateLabel).toHaveBeenCalledTimes(2);
-    expect(JobTemplatesAPI.generateLabel).toHaveBeenCalledTimes(2);
+    expect(JobTemplatesAPI.associateLabel).toHaveBeenCalledTimes(4);
   });
 
   test('should navigate to job template detail when cancel is clicked', async () => {
@@ -275,7 +325,10 @@ describe('<JobTemplateEdit />', () => {
           edit: true,
         },
         labels: {
-          results: [{ name: 'Sushi', id: 1 }, { name: 'Major', id: 2 }],
+          results: [
+            { name: 'Sushi', id: 1 },
+            { name: 'Major', id: 2 },
+          ],
         },
         inventory: {
           id: 2,
@@ -285,6 +338,12 @@ describe('<JobTemplateEdit />', () => {
           { id: 1, kind: 'cloud', name: 'Foo' },
           { id: 2, kind: 'ssh', name: 'Bar' },
         ],
+        webhook_credential: {
+          id: 7,
+          name: 'webhook credential',
+          kind: 'github_token',
+          credential_type_id: 12,
+        },
       },
     };
     await act(async () =>

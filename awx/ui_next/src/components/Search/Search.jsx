@@ -1,3 +1,4 @@
+import 'styled-components/macro';
 import React, { Fragment } from 'react';
 import PropTypes from 'prop-types';
 import { withI18n } from '@lingui/react';
@@ -22,9 +23,9 @@ import {
   DataToolbarFilter,
 } from '@patternfly/react-core/dist/umd/experimental';
 import { SearchIcon } from '@patternfly/react-icons';
-import { parseQueryString } from '@util/qs';
-import { QSConfig, SearchColumns } from '@types';
 import styled from 'styled-components';
+import { parseQueryString } from '../../util/qs';
+import { QSConfig, SearchColumns } from '../../types';
 
 const NoOptionDropdown = styled.div`
   align-self: stretch;
@@ -80,17 +81,19 @@ class Search extends React.Component {
     const { searchKey, searchValue } = this.state;
     const { onSearch, qsConfig } = this.props;
 
-    const isNonStringField =
-      qsConfig.integerFields.find(field => field === searchKey) ||
-      qsConfig.dateFields.find(field => field === searchKey);
+    if (searchValue) {
+      const isNonStringField =
+        qsConfig.integerFields.find(field => field === searchKey) ||
+        qsConfig.dateFields.find(field => field === searchKey);
 
-    const actualSearchKey = isNonStringField
-      ? searchKey
-      : `${searchKey}__icontains`;
+      const actualSearchKey = isNonStringField
+        ? searchKey
+        : `${searchKey}__icontains`;
 
-    onSearch(actualSearchKey, searchValue);
+      onSearch(actualSearchKey, searchValue);
 
-    this.setState({ searchValue: '' });
+      this.setState({ searchValue: '' });
+    }
   }
 
   handleSearchInputChange(searchValue) {
@@ -148,6 +151,16 @@ class Search extends React.Component {
       return paramsArr.filter(key => defaultParamsKeys.indexOf(key) === -1);
     };
 
+    const getLabelFromValue = (value, colKey) => {
+      const currentSearchColumn = columns.find(({ key }) => key === colKey);
+      if (currentSearchColumn?.options?.length) {
+        return currentSearchColumn.options.find(
+          ([optVal]) => optVal === value
+        )[1];
+      }
+      return value.toString();
+    };
+
     const getChipsByKey = () => {
       const queryParams = parseQueryString(qsConfig, location.search);
 
@@ -173,10 +186,16 @@ class Search extends React.Component {
 
         if (Array.isArray(queryParams[key])) {
           queryParams[key].forEach(val =>
-            queryParamsByKey[columnKey].chips.push(val.toString())
+            queryParamsByKey[columnKey].chips.push({
+              key: `${key}:${val}`,
+              node: getLabelFromValue(val, columnKey),
+            })
           );
         } else {
-          queryParamsByKey[columnKey].chips.push(queryParams[key].toString());
+          queryParamsByKey[columnKey].chips.push({
+            key: `${key}:${queryParams[key]}`,
+            node: getLabelFromValue(queryParams[key], columnKey),
+          });
         }
       });
 
@@ -204,7 +223,6 @@ class Search extends React.Component {
               }
               isOpen={isSearchDropdownOpen}
               dropdownItems={searchDropdownItems}
-              style={{ width: '100%', maxWidth: '100px' }}
             />
           ) : (
             <NoOptionDropdown>{searchColumnName}</NoOptionDropdown>
@@ -214,8 +232,9 @@ class Search extends React.Component {
           ({ key, name, options, isBoolean, booleanLabels = {} }) => (
             <DataToolbarFilter
               chips={chipsByKey[key] ? chipsByKey[key].chips : []}
-              deleteChip={(unusedKey, val) => {
-                onRemove(chipsByKey[key].key, val);
+              deleteChip={(unusedKey, chip) => {
+                const [columnKey, ...value] = chip.key.split(':');
+                onRemove(columnKey, value.join(':'));
               }}
               categoryName={chipsByKey[key] ? chipsByKey[key].label : key}
               key={key}
@@ -230,7 +249,10 @@ class Search extends React.Component {
                     onSelect={(event, selection) =>
                       this.handleFilterDropdownSelect(key, event, selection)
                     }
-                    selections={chipsByKey[key].chips}
+                    selections={chipsByKey[key].chips.map(chip => {
+                      const [, ...value] = chip.key.split(':');
+                      return value.join(':');
+                    })}
                     isExpanded={isFilterDropdownOpen}
                     placeholderText={`Filter By ${name}`}
                   >
@@ -277,13 +299,16 @@ class Search extends React.Component {
                       onChange={this.handleSearchInputChange}
                       onKeyDown={this.handleTextKeyDown}
                     />
-                    <Button
-                      variant={ButtonVariant.control}
-                      aria-label={i18n._(t`Search submit button`)}
-                      onClick={this.handleSearch}
-                    >
-                      <SearchIcon />
-                    </Button>
+                    <div css={!searchValue && `cursor:not-allowed`}>
+                      <Button
+                        variant={ButtonVariant.control}
+                        isDisabled={!searchValue}
+                        aria-label={i18n._(t`Search submit button`)}
+                        onClick={this.handleSearch}
+                      >
+                        <SearchIcon />
+                      </Button>
+                    </div>
                   </InputGroup>
                 )}
             </DataToolbarFilter>

@@ -1,13 +1,16 @@
 import React from 'react';
 import { act } from 'react-dom/test-utils';
 import { createMemoryHistory } from 'history';
-import { mountWithContexts, waitForElement } from '@testUtils/enzymeHelpers';
-import { sleep } from '@testUtils/testUtils';
+import {
+  mountWithContexts,
+  waitForElement,
+} from '../../../../testUtils/enzymeHelpers';
+import { sleep } from '../../../../testUtils/testUtils';
 
-import { InventoriesAPI, CredentialTypesAPI } from '@api';
+import { InventoriesAPI, CredentialTypesAPI } from '../../../api';
 import InventoryEdit from './InventoryEdit';
 
-jest.mock('@api');
+jest.mock('../../../api');
 
 const mockInventory = {
   id: 1,
@@ -75,6 +78,7 @@ InventoriesAPI.readInstanceGroups.mockResolvedValue({
 describe('<InventoryEdit />', () => {
   let wrapper;
   let history;
+
   beforeEach(async () => {
     history = createMemoryHistory({ initialEntries: ['/inventories'] });
     await act(async () => {
@@ -83,6 +87,7 @@ describe('<InventoryEdit />', () => {
       });
     });
   });
+
   afterEach(() => {
     wrapper.unmount();
   });
@@ -95,15 +100,20 @@ describe('<InventoryEdit />', () => {
     expect(InventoriesAPI.readInstanceGroups).toBeCalledWith(1);
   });
 
-  test('handleCancel returns the user to the inventories list', async () => {
+  test('handleCancel returns the user to inventory detail', async () => {
     await waitForElement(wrapper, 'isLoading', el => el.length === 0);
-    wrapper.find('CardCloseButton').simulate('click');
-    expect(history.location.pathname).toEqual('/inventories');
+    wrapper.find('Button[aria-label="Cancel"]').simulate('click');
+    expect(history.location.pathname).toEqual(
+      '/inventories/inventory/1/details'
+    );
   });
 
   test('handleSubmit should post to the api', async () => {
     await waitForElement(wrapper, 'isLoading', el => el.length === 0);
-    const instanceGroups = [{ name: 'Bizz', id: 2 }, { name: 'Buzz', id: 3 }];
+    const instanceGroups = [
+      { name: 'Bizz', id: 2 },
+      { name: 'Buzz', id: 3 },
+    ];
     wrapper.find('InventoryForm').prop('onSubmit')({
       name: 'Foo',
       id: 13,

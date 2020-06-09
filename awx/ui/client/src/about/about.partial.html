@@ -2,7 +2,7 @@
     <div class="modal-dialog About-modalDialog">
         <div class="modal-content">
             <div class="modal-header About-modalHeader">
-                <button data-dismiss="modal" type="button" class="close About-close">
+                <button aria-label="{{:: $root.appStrings.get('CLOSE') }}" data-dismiss="modal" type="button" class="close About-close">
                     <span class="fa fa-times-circle"></span>
                 </button>
             </div>
@@ -19,7 +19,11 @@
 </pre>
                 </div>
                 <div class="About-modalFooter">
-                    <img class="About-brandImg img-responsive" src="/static/assets/logo-login.svg" />
+                    <img
+                        ng-attr-aria-label="{{ BRAND_NAME === 'Tower' ? appStrings.get('logos.TOWER_LOGO') : appStrings.get('logos.AWX_LOGO') }}"
+                        class="About-brandImg img-responsive"
+                        src="/static/assets/logo-login.svg"
+                    />
                     <p class="About-footerText">
                       <span class="About-ansibleVersion">
                           Ansible {{ ansible_version }}

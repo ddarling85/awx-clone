@@ -8,7 +8,7 @@ from __future__ import absolute_import, division, print_function
 __metaclass__ = type
 
 
-ANSIBLE_METADATA = {'status': ['preview'],
+ANSIBLE_METADATA = {'status': ['deprecated'],
                     'supported_by': 'community',
                     'metadata_version': '1.1'}
 
@@ -16,12 +16,17 @@ ANSIBLE_METADATA = {'status': ['preview'],
 DOCUMENTATION = '''
 ---
 module: tower_workflow_template
+deprecated:
+  removed_in: "14.0.0"
+  why: Deprecated in favor of C(_workflow_job_template) and C(_workflow_job_template_node) modules.
+  alternative: Use M(tower_workflow_job_template) and M(_workflow_job_template_node) instead.
 author: "Adrien Fleury (@fleu42)"
-version_added: "2.7"
 short_description: create, update, or destroy Ansible Tower workflow template.
 description:
-    - Create, update, or destroy Ansible Tower workflows. See
-      U(https://www.ansible.com/tower) for an overview.
+    - A tower-cli based module for CRUD actions on workflow job templates.
+    - Enables use of the old schema functionality.
+    - Not updated for new features, convert to the modules for
+      workflow_job_template and workflow_job_template node instead.
 options:
     allow_simultaneous:
       description:
@@ -31,12 +36,10 @@ options:
       description:
         - Prompt user for (extra_vars) on launch.
       type: bool
-      version_added: "2.9"
     ask_inventory:
       description:
         - Prompt user for inventory on launch.
       type: bool
-      version_added: "2.9"
     description:
       description:
         - The description to use for the workflow.
@@ -44,11 +47,10 @@ options:
     extra_vars:
       description:
         - Extra variables used by Ansible in YAML or key=value format.
-      type: str
+      type: dict
     inventory:
       description:
         - Name of the inventory to use for the job template.
-      version_added: "2.9"
       type: str
     name:
       description:
@@ -65,7 +67,8 @@ options:
           The schema is a JSON- or YAML-formatted string defining the
           hierarchy structure that connects the nodes. Refer to Tower
           documentation for more information.
-      type: str
+      type: list
+      elements: dict
     survey_enabled:
       description:
         - Setting that variable will prompt the user for job type on the
@@ -74,14 +77,18 @@ options:
     survey:
       description:
         - The definition of the survey associated to the workflow.
-      type: str
+      type: dict
     state:
       description:
         - Desired state of the resource.
       default: "present"
       choices: ["present", "absent"]
       type: str
-extends_documentation_fragment: awx.awx.auth
+
+requirements:
+- ansible-tower-cli >= 3.0.2
+
+extends_documentation_fragment: awx.awx.auth_legacy
 '''
 
 
@@ -107,6 +114,8 @@ from ..module_utils.ansible_tower import (
     tower_check_mode
 )
 
+import json
+
 try:
     import tower_cli
     import tower_cli.exceptions as exc
@@ -118,16 +127,16 @@ except ImportError:
 def main():
     argument_spec = dict(
         name=dict(required=True),
-        description=dict(required=False),
-        extra_vars=dict(required=False),
-        organization=dict(required=False),
-        allow_simultaneous=dict(type='bool', required=False),
-        schema=dict(required=False),
-        survey=dict(required=False),
-        survey_enabled=dict(type='bool', required=False),
-        inventory=dict(required=False),
-        ask_inventory=dict(type='bool', required=False),
-        ask_extra_vars=dict(type='bool', required=False),
+        description=dict(),
+        extra_vars=dict(type='dict'),
+        organization=dict(),
+        allow_simultaneous=dict(type='bool'),
+        schema=dict(type='list', elements='dict'),
+        survey=dict(type='dict'),
+        survey_enabled=dict(type='bool'),
+        inventory=dict(),
+        ask_inventory=dict(type='bool'),
+        ask_extra_vars=dict(type='bool'),
         state=dict(choices=['present', 'absent'], default='present'),
     )
 
@@ -135,6 +144,12 @@ def main():
         argument_spec=argument_spec,
         supports_check_mode=False
     )
+
+    module.deprecate(msg=(
+        "This module is replaced by the combination of tower_workflow_job_template and "
+        "tower_workflow_job_template_node. This uses the old tower-cli and wll be "
+        "removed in 2022."
+    ), version='awx.awx:14.0.0')
 
     name = module.params.get('name')
     state = module.params.get('state')
@@ -183,10 +198,15 @@ def main():
         if module.params.get('ask_inventory'):
             params['ask_inventory_on_launch'] = module.params.get('ask_inventory')
 
-        for key in ('allow_simultaneous', 'extra_vars', 'inventory',
+        for key in ('allow_simultaneous', 'inventory',
                     'survey_enabled', 'description'):
             if module.params.get(key):
                 params[key] = module.params.get(key)
+
+        # Special treatment for tower-cli extra_vars
+        extra_vars = module.params.get('extra_vars')
+        if extra_vars:
+            params['extra_vars'] = [json.dumps(extra_vars)]
 
         try:
             if state == 'present':
@@ -194,7 +214,7 @@ def main():
                 result = wfjt_res.modify(**params)
                 json_output['id'] = result['id']
                 if schema:
-                    wfjt_res.schema(result['id'], schema)
+                    wfjt_res.schema(result['id'], json.dumps(schema))
             elif state == 'absent':
                 params['fail_on_missing'] = False
                 result = wfjt_res.delete(**params)

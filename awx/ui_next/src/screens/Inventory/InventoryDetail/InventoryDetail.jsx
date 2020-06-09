@@ -1,37 +1,42 @@
-import React, { useState, useEffect } from 'react';
+import React, { useCallback, useEffect } from 'react';
 import { Link, useHistory } from 'react-router-dom';
 import { withI18n } from '@lingui/react';
 import { t } from '@lingui/macro';
-import { Button } from '@patternfly/react-core';
-import { CardBody, CardActionsRow } from '@components/Card';
-import { DetailList, Detail, UserDateDetail } from '@components/DetailList';
-import { ChipGroup, Chip } from '@components/Chip';
-import { VariablesDetail } from '@components/CodeMirrorInput';
-import DeleteButton from '@components/DeleteButton';
-import ContentError from '@components/ContentError';
-import ContentLoading from '@components/ContentLoading';
-import { InventoriesAPI } from '@api';
+import { Button, Chip } from '@patternfly/react-core';
+import { CardBody, CardActionsRow } from '../../../components/Card';
+import {
+  DetailList,
+  Detail,
+  UserDateDetail,
+} from '../../../components/DetailList';
+import { VariablesDetail } from '../../../components/CodeMirrorInput';
+import DeleteButton from '../../../components/DeleteButton';
+import ContentError from '../../../components/ContentError';
+import ContentLoading from '../../../components/ContentLoading';
+import ChipGroup from '../../../components/ChipGroup';
+import { InventoriesAPI } from '../../../api';
+import useRequest from '../../../util/useRequest';
 import { Inventory } from '../../../types';
 
 function InventoryDetail({ inventory, i18n }) {
-  const [instanceGroups, setInstanceGroups] = useState([]);
-  const [hasContentLoading, setHasContentLoading] = useState(true);
-  const [contentError, setContentError] = useState(null);
   const history = useHistory();
 
+  const {
+    result: instanceGroups,
+    isLoading,
+    error,
+    request: fetchInstanceGroups,
+  } = useRequest(
+    useCallback(async () => {
+      const { data } = await InventoriesAPI.readInstanceGroups(inventory.id);
+      return data.results;
+    }, [inventory.id]),
+    []
+  );
+
   useEffect(() => {
-    (async () => {
-      setHasContentLoading(true);
-      try {
-        const { data } = await InventoriesAPI.readInstanceGroups(inventory.id);
-        setInstanceGroups(data.results);
-      } catch (err) {
-        setContentError(err);
-      } finally {
-        setHasContentLoading(false);
-      }
-    })();
-  }, [inventory.id]);
+    fetchInstanceGroups();
+  }, [fetchInstanceGroups]);
 
   const deleteInventory = async () => {
     await InventoriesAPI.destroy(inventory.id);
@@ -43,18 +48,22 @@ function InventoryDetail({ inventory, i18n }) {
     user_capabilities: userCapabilities,
   } = inventory.summary_fields;
 
-  if (hasContentLoading) {
+  if (isLoading) {
     return <ContentLoading />;
   }
 
-  if (contentError) {
-    return <ContentError error={contentError} />;
+  if (error) {
+    return <ContentError error={error} />;
   }
 
   return (
     <CardBody>
       <DetailList>
-        <Detail label={i18n._(t`Name`)} value={inventory.name} />
+        <Detail
+          label={i18n._(t`Name`)}
+          value={inventory.name}
+          dataCy="inventory-detail-name"
+        />
         <Detail label={i18n._(t`Activity`)} value="Coming soon" />
         <Detail label={i18n._(t`Description`)} value={inventory.description} />
         <Detail label={i18n._(t`Type`)} value={i18n._(t`Inventory`)} />
@@ -70,7 +79,7 @@ function InventoryDetail({ inventory, i18n }) {
           fullWidth
           label={i18n._(t`Instance Groups`)}
           value={
-            <ChipGroup numChips={5}>
+            <ChipGroup numChips={5} totalChips={instanceGroups.length}>
               {instanceGroups.map(ig => (
                 <Chip key={ig.id} isReadOnly>
                   {ig.name}

@@ -13,16 +13,17 @@ import { SearchIcon } from '@patternfly/react-icons';
 import {
   Button,
   ButtonVariant,
+  Chip,
   InputGroup as PFInputGroup,
   Modal,
 } from '@patternfly/react-core';
 import { withI18n } from '@lingui/react';
 import { t } from '@lingui/macro';
 import styled from 'styled-components';
+import ChipGroup from '../ChipGroup';
 
 import reducer, { initReducer } from './shared/reducer';
-import { ChipGroup, Chip } from '../Chip';
-import { QSConfig } from '@types';
+import { QSConfig } from '../../types';
 
 const SearchButton = styled(Button)`
   ::after {
@@ -55,6 +56,7 @@ function Lookup(props) {
     header,
     onChange,
     onBlur,
+    isLoading,
     value,
     multiple,
     required,
@@ -123,11 +125,12 @@ function Lookup(props) {
           id={id}
           onClick={() => dispatch({ type: 'TOGGLE_MODAL' })}
           variant={ButtonVariant.tertiary}
+          isDisabled={isLoading}
         >
           <SearchIcon />
         </SearchButton>
         <ChipHolder className="pf-c-form-control">
-          <ChipGroup numChips={5}>
+          <ChipGroup numChips={5} totalChips={items.length}>
             {items.map(item =>
               renderItemChip({
                 item,
@@ -139,7 +142,8 @@ function Lookup(props) {
         </ChipHolder>
       </InputGroup>
       <Modal
-        className="awx-c-modal"
+        isFooterLeftAligned
+        isLarge
         title={i18n._(t`Select ${header || i18n._(t`Items`)}`)}
         isOpen={isModalOpen}
         onClose={closeModal}
@@ -148,9 +152,7 @@ function Lookup(props) {
             key="select"
             variant="primary"
             onClick={save}
-            style={
-              required && selectedItems.length === 0 ? { display: 'none' } : {}
-            }
+            isDisabled={required && selectedItems.length === 0}
           >
             {i18n._(t`Select`)}
           </Button>,

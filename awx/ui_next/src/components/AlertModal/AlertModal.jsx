@@ -1,41 +1,79 @@
+import 'styled-components/macro';
 import React from 'react';
-
-import { Modal } from '@patternfly/react-core';
-
+import { Modal, Title } from '@patternfly/react-core';
 import {
-  ExclamationTriangleIcon,
-  ExclamationCircleIcon,
-  InfoCircleIcon,
   CheckCircleIcon,
+  ExclamationCircleIcon,
+  ExclamationTriangleIcon,
+  InfoCircleIcon,
+  TimesCircleIcon,
 } from '@patternfly/react-icons';
+import styled from 'styled-components';
 
-const getIcon = variant => {
-  let icon;
-  if (variant === 'warning') {
-    icon = <ExclamationTriangleIcon className="at-c-alertModal__icon" />;
-  } else if (variant === 'danger') {
-    icon = <ExclamationCircleIcon className="at-c-alertModal__icon" />;
+const Header = styled.div`
+  display: flex;
+  svg {
+    margin-right: 16px;
   }
-  if (variant === 'info') {
-    icon = <InfoCircleIcon className="at-c-alertModal__icon" />;
-  }
-  if (variant === 'success') {
-    icon = <CheckCircleIcon className="at-c-alertModal__icon" />;
-  }
-  return icon;
-};
+`;
 
-export default ({ variant, children, ...props }) => {
-  const { isOpen = null } = props;
-  props.isOpen = Boolean(isOpen);
+export default function AlertModal({
+  isOpen = null,
+  title,
+  variant,
+  children,
+  ...props
+}) {
+  const variantIcons = {
+    danger: (
+      <ExclamationCircleIcon
+        size="lg"
+        css="color: var(--pf-global--danger-color--100)"
+      />
+    ),
+    error: (
+      <TimesCircleIcon
+        size="lg"
+        css="color: var(--pf-global--danger-color--100)"
+      />
+    ),
+    info: (
+      <InfoCircleIcon
+        size="lg"
+        css="color: var(--pf-global--info-color--100)"
+      />
+    ),
+    success: (
+      <CheckCircleIcon
+        size="lg"
+        css="color: var(--pf-global--success-color--100)"
+      />
+    ),
+    warning: (
+      <ExclamationTriangleIcon
+        size="lg"
+        css="color: var(--pf-global--warning-color--100)"
+      />
+    ),
+  };
+
+  const customHeader = (
+    <Header>
+      {variant ? variantIcons[variant] : null}
+      <Title size="2xl">{title}</Title>
+    </Header>
+  );
+
   return (
     <Modal
-      className={`awx-c-modal${variant &&
-        ` at-c-alertModal at-c-alertModal--${variant}`}`}
+      header={customHeader}
+      isFooterLeftAligned
+      isOpen={Boolean(isOpen)}
+      isSmall
+      title={title}
       {...props}
     >
       {children}
-      {getIcon(variant)}
     </Modal>
   );
-};
+}

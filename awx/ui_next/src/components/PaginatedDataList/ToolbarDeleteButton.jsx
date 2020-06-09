@@ -9,26 +9,9 @@ import {
   checkPropTypes,
 } from 'prop-types';
 import { Button, Tooltip } from '@patternfly/react-core';
-import { TrashAltIcon } from '@patternfly/react-icons';
-import styled from 'styled-components';
 import { withI18n } from '@lingui/react';
 import { t } from '@lingui/macro';
 import AlertModal from '../AlertModal';
-
-const DeleteButton = styled(Button)`
-  padding: 5px 8px;
-
-  &:hover {
-    background-color: #d9534f;
-    color: white;
-  }
-
-  &[disabled] {
-    color: var(--pf-c-button--m-plain--Color);
-    pointer-events: initial;
-    cursor: not-allowed;
-  }
-`;
 
 const requireNameOrUsername = props => {
   const { name, username } = props;
@@ -137,6 +120,7 @@ class ToolbarDeleteButton extends React.Component {
   render() {
     const { itemsToDelete, pluralizedItemName, i18n } = this.props;
     const { isModalOpen } = this.state;
+    const modalTitle = i18n._(t`Delete ${pluralizedItemName}?`);
 
     const isDisabled =
       itemsToDelete.length === 0 || itemsToDelete.some(cannotDelete);
@@ -148,20 +132,20 @@ class ToolbarDeleteButton extends React.Component {
       <Fragment>
         <Tooltip content={this.renderTooltip()} position="top">
           <div>
-            <DeleteButton
-              variant="plain"
+            <Button
+              variant="danger"
               aria-label={i18n._(t`Delete`)}
               onClick={this.handleConfirmDelete}
               isDisabled={isDisabled}
             >
-              <TrashAltIcon />
-            </DeleteButton>
+              {i18n._(t`Delete`)}
+            </Button>
           </div>
         </Tooltip>
         {isModalOpen && (
           <AlertModal
             variant="danger"
-            title={pluralizedItemName}
+            title={modalTitle}
             isOpen={isModalOpen}
             onClose={this.handleCancelDelete}
             actions={[
@@ -183,15 +167,13 @@ class ToolbarDeleteButton extends React.Component {
               </Button>,
             ]}
           >
-            {i18n._(t`Are you sure you want to delete:`)}
-            <br />
+            <div>{i18n._(t`This action will delete the following:`)}</div>
             {itemsToDelete.map(item => (
               <span key={item.id}>
                 <strong>{item.name || item.username}</strong>
                 <br />
               </span>
             ))}
-            <br />
           </AlertModal>
         )}
       </Fragment>

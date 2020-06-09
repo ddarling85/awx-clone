@@ -1,11 +1,11 @@
-localhost ansible_connection=local ansible_python_interpreter="/usr/bin/env python"
+localhost ansible_connection=local ansible_python_interpreter="/usr/bin/env python3"
 
 [all:vars]
 
 # Remove these lines if you want to run a local image build
 # Otherwise the setup playbook will install the official Ansible images. Versions may
 # be selected based on: latest, 1, 1.0, 1.0.0, 1.0.0.123
-# by default the base will be used to search for ansible/awx_web and ansible/awx_task
+# by default the base will be used to search for ansible/awx
 dockerhub_base=ansible
 
 # Openshift Install
@@ -20,7 +20,6 @@ dockerhub_base=ansible
 # Kubernetes Install
 # kubernetes_context=test-cluster
 # kubernetes_namespace=awx
-# tiller_namespace=kube-system
 # Optional Kubernetes Variables
 # pg_image_registry=docker.io
 # pg_serviceaccount=awx
@@ -39,7 +38,7 @@ dockerhub_base=ansible
 # kubernetes_ingress_tls_secret=awx-cert
 
 # Kubernetes and Openshift Install Resource Requests
-# These are the request and limit values for a pod's container for task/web/rabbitmq/memcached/management.
+# These are the request and limit values for a pod's container for task/web/redis/memcached/management.
 # The total amount of requested resources for a pod is the sum of all
 # resources requested by all containers in the pod
 # A cpu_request of 1500 is 1.5 cores for the container to start out with.
@@ -53,8 +52,8 @@ dockerhub_base=ansible
 # task_mem_limit=4
 # web_cpu_limit=1000
 # web_mem_limit=2
-# rabbitmq_cpu_limit=1000
-# rabbitmq_mem_limit=3
+# redis_cpu_limit=1000
+# redis_mem_limit=3
 # memcached_cpu_limit=1000
 # memcached_mem_limit=2
 # management_cpu_limit=2000
@@ -68,6 +67,8 @@ postgres_data_dir="~/.awx/pgdocker"
 host_port=80
 host_port_ssl=443
 #ssl_certificate=
+# Optional key file
+#ssl_certificate_key=
 docker_compose_dir="~/.awx/awxcompose"
 
 # Required for Openshift when building the image on your own
@@ -79,10 +80,6 @@ docker_compose_dir="~/.awx/awxcompose"
 # docker_registry_repository=awx
 # docker_registry_username=developer
 
-
-# Docker_image will not attempt to push to remote if the image already exists locally
-# Set this to true to delete images from docker on the build host so that they are pushed to the remote repository
-# docker_remove_local_images=False
 
 # Set pg_hostname if you have an external postgres server, otherwise
 # a new postgres service will be created
@@ -99,10 +96,13 @@ pg_port=5432
 # containerized postgres deployment on OpenShift
 # pg_admin_password=postgrespass
 
+<<<<<<< HEAD
 # RabbitMQ Configuration
 rabbitmq_password=rabbitmqUserpass
 rabbitmq_erlang_cookie=CookieRabbitMQ
 
+=======
+>>>>>>> 442d539ff89ecfdd6cf7fb706d4e86f25aa96a8e
 # Use a local distribution build container image for building the AWX package
 # This is helpful if you don't want to bother installing the build-time dependencies as
 # it is taken care of already.
@@ -153,6 +153,8 @@ secret_key=ed638a877937437c0ff491d3ec8d93b52e8364332cc5ca850cfd243054c4b246
 # CA Trust directory. If you need to provide custom CA certificates, supplying
 # this variable causes this directory on the host to be bind mounted over
 # /etc/pki/ca-trust in the awx_task and awx_web containers.
+# If you are deploying on openshift or kubernetes, set the variable to /etc/pki/ca-trust instead,
+# as the awx_web and awx_task containers will not run the `update-ca-trust` command.
 #ca_trust_dir=/etc/pki/ca-trust/source/anchors
 
 # Include /etc/nginx/awx_extra.conf
@@ -160,3 +162,6 @@ secret_key=ed638a877937437c0ff491d3ec8d93b52e8364332cc5ca850cfd243054c4b246
 # which makes include "optional" - i.e. not fail
 # if file is absent
 #extra_nginx_include="/etc/nginx/awx_extra[.]conf"
+
+# Docker compose explicit subnet. Set to avoid overlapping your existing LAN networks.
+#docker_compose_subnet="172.17.0.1/16"

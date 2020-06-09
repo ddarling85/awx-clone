@@ -1,34 +1,40 @@
 import React, { useState } from 'react';
-import { useHistory, useParams } from 'react-router-dom';
-import { CardBody } from '@components/Card';
-import InventoryHostForm from '../shared/InventoryHostForm';
-import { InventoriesAPI } from '@api';
+import { useHistory } from 'react-router-dom';
+import { CardBody } from '../../../components/Card';
+import HostForm from '../../../components/HostForm';
 
-function InventoryHostAdd() {
+import { HostsAPI } from '../../../api';
+
+function InventoryHostAdd({ inventory }) {
   const [formError, setFormError] = useState(null);
+  const hostsUrl = `/inventories/inventory/${inventory.id}/hosts`;
   const history = useHistory();
-  const { id } = useParams();
 
-  const handleSubmit = async values => {
+  const handleSubmit = async formData => {
     try {
-      const { data: response } = await InventoriesAPI.createHost(id, values);
-      history.push(`/inventories/inventory/${id}/hosts/${response.id}/details`);
+      const values = {
+        ...formData,
+        inventory: inventory.id,
+      };
+      const { data: response } = await HostsAPI.create(values);
+      history.push(`${hostsUrl}/${response.id}/details`);
     } catch (error) {
       setFormError(error);
     }
   };
 
   const handleCancel = () => {
-    history.push(`/inventories/inventory/${id}/hosts`);
+    history.push(hostsUrl);
   };
 
   return (
     <CardBody>
-      <InventoryHostForm
+      <HostForm
         handleSubmit={handleSubmit}
         handleCancel={handleCancel}
+        isInventoryVisible={false}
+        submitError={formError}
       />
-      {formError ? <div className="formSubmitError">error</div> : ''}
     </CardBody>
   );
 }

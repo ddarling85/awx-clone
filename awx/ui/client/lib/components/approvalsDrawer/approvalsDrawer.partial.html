@@ -10,7 +10,7 @@
                 </span>
             </div>
             <div class="at-ApprovalsDrawer--exit">
-                <button class="close" ng-click="closeApprovals()">
+                <button aria-label="{{:: vm.strings.get('approvals.CLOSE_APPROVALS') }}" class="close" ng-click="closeApprovals()">
                 <i class="fa fa-times-circle"></i>
                 </button>
             </div>
@@ -29,7 +29,7 @@
                     <div class="at-Row-container">
                         <div class="at-Row-container">
                             <at-row-item
-                                header-value="{{ approval.summary_fields.source_workflow_job.name }}"
+                                header-value="{{ approval.summary_fields.source_workflow_job.id }} - {{ approval.summary_fields.source_workflow_job.name }}"
                                 header-state="workflowResults({id: {{approval.summary_fields.source_workflow_job.id}}})">
                             </at-row-item>
                         </div>
@@ -80,7 +80,7 @@
             collection="vm.approvals"
             dataset="vm.dataset"
             iterator="template"
-            base-path="unified_job_templates"
+            base-path="workflow_approvals"
             query-set="vm.queryset"
             hide-view-per-page="true">
         </paginate>

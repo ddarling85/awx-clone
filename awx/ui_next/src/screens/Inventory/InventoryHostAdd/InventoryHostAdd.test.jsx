@@ -1,102 +1,70 @@
 import React from 'react';
-import { Route } from 'react-router-dom';
 import { act } from 'react-dom/test-utils';
 import { createMemoryHistory } from 'history';
-import { mountWithContexts, waitForElement } from '@testUtils/enzymeHelpers';
+import { mountWithContexts } from '../../../../testUtils/enzymeHelpers';
 import InventoryHostAdd from './InventoryHostAdd';
-import { InventoriesAPI } from '@api';
+import mockHost from '../shared/data.host.json';
+import { HostsAPI } from '../../../api';
 
-jest.mock('@api');
+jest.mock('../../../api');
+
+HostsAPI.create.mockResolvedValue({
+  data: {
+    ...mockHost,
+  },
+});
 
 describe('<InventoryHostAdd />', () => {
   let wrapper;
   let history;
 
-  const mockHostData = {
-    name: 'new name',
-    description: 'new description',
-    inventory: 1,
-    variables: '---\nfoo: bar',
-  };
-
-  beforeEach(async () => {
-    history = createMemoryHistory({
-      initialEntries: ['/inventories/inventory/1/hosts/add'],
-    });
-
+  beforeAll(async () => {
+    history = createMemoryHistory();
     await act(async () => {
-      wrapper = mountWithContexts(
-        <Route
-          path="/inventories/inventory/:id/hosts/add"
-          component={() => <InventoryHostAdd />}
-        />,
-        {
-          context: {
-            router: { history, route: { location: history.location } },
-          },
-        }
-      );
+      wrapper = mountWithContexts(<InventoryHostAdd inventory={{ id: 3 }} />, {
+        context: { router: { history } },
+      });
     });
-    await waitForElement(wrapper, 'ContentLoading', el => el.length === 0);
   });
 
-  afterEach(() => {
+  afterAll(() => {
+    jest.clearAllMocks();
     wrapper.unmount();
   });
 
   test('handleSubmit should post to api', async () => {
-    InventoriesAPI.createHost.mockResolvedValue({
-      data: { ...mockHostData },
-    });
-
-    const formik = wrapper.find('Formik').instance();
     await act(async () => {
-      const changeState = new Promise(resolve => {
-        formik.setState(
-          {
-            values: {
-              ...mockHostData,
-            },
-          },
-          () => resolve()
-        );
-      });
-      await changeState;
+      wrapper.find('HostForm').prop('handleSubmit')(mockHost);
     });
-    await act(async () => {
-      wrapper.find('form').simulate('submit');
-    });
-    wrapper.update();
-    expect(InventoriesAPI.createHost).toHaveBeenCalledWith('1', mockHostData);
+    expect(HostsAPI.create).toHaveBeenCalledWith(mockHost);
   });
 
-  test('handleSubmit should throw an error', async () => {
-    InventoriesAPI.createHost.mockImplementationOnce(() =>
-      Promise.reject(new Error())
+  test('should navigate to hosts list when cancel is clicked', () => {
+    wrapper.find('button[aria-label="Cancel"]').invoke('onClick')();
+    expect(history.location.pathname).toEqual('/inventories/inventory/3/hosts');
+  });
+
+  test('successful form submission should trigger redirect', async () => {
+    await act(async () => {
+      wrapper.find('HostForm').invoke('handleSubmit')(mockHost);
+    });
+    expect(wrapper.find('FormSubmitError').length).toBe(0);
+    expect(history.location.pathname).toEqual(
+      '/inventories/inventory/3/hosts/2/details'
     );
-    const formik = wrapper.find('Formik').instance();
-    await act(async () => {
-      const changeState = new Promise(resolve => {
-        formik.setState(
-          {
-            values: {
-              ...mockHostData,
-            },
-          },
-          () => resolve()
-        );
-      });
-      await changeState;
-    });
-    await act(async () => {
-      wrapper.find('form').simulate('submit');
-    });
-    wrapper.update();
-    expect(wrapper.find('InventoryHostAdd .formSubmitError').length).toBe(1);
   });
 
-  test('should navigate to inventory hosts list when cancel is clicked', async () => {
-    wrapper.find('button[aria-label="Cancel"]').simulate('click');
-    expect(history.location.pathname).toEqual('/inventories/inventory/1/hosts');
+  test('failed form submission should show an error message', async () => {
+    const error = {
+      response: {
+        data: { detail: 'An error occurred' },
+      },
+    };
+    HostsAPI.create.mockImplementationOnce(() => Promise.reject(error));
+    await act(async () => {
+      wrapper.find('HostForm').invoke('handleSubmit')(mockHost);
+    });
+    wrapper.update();
+    expect(wrapper.find('FormSubmitError').length).toBe(1);
   });
 });

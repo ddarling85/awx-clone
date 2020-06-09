@@ -4,6 +4,7 @@
 # Python
 import json
 import logging
+from uuid import uuid4
 from copy import copy
 from urllib.parse import urljoin
 
@@ -79,6 +80,11 @@ class WorkflowNodeBase(CreatedModifiedModel, LaunchTimeConfig):
         symmetrical=False,
         related_name='%(class)ss_always',
     )
+    all_parents_must_converge = models.BooleanField(
+        default=False,
+        help_text=_("If enabled then the node will only run if all of the parent nodes "
+                    "have met the criteria to reach this node")
+    )
     unified_job_template = models.ForeignKey(
         'UnifiedJobTemplate',
         related_name='%(class)ss',
@@ -102,7 +108,7 @@ class WorkflowNodeBase(CreatedModifiedModel, LaunchTimeConfig):
         '''
         return ['workflow_job', 'unified_job_template',
                 'extra_data', 'survey_passwords',
-                'inventory', 'credentials', 'char_prompts']
+                'inventory', 'credentials', 'char_prompts', 'all_parents_must_converge']
 
     def create_workflow_job_node(self, **kwargs):
         '''
@@ -116,6 +122,7 @@ class WorkflowNodeBase(CreatedModifiedModel, LaunchTimeConfig):
                 create_kwargs[field_name] = kwargs[field_name]
             elif hasattr(self, field_name):
                 create_kwargs[field_name] = getattr(self, field_name)
+        create_kwargs['identifier'] = self.identifier
         new_node = WorkflowJobNode.objects.create(**create_kwargs)
         if self.pk:
             allowed_creds = self.credentials.all()
@@ -130,7 +137,7 @@ class WorkflowJobTemplateNode(WorkflowNodeBase):
     FIELDS_TO_PRESERVE_AT_COPY = [
         'unified_job_template', 'workflow_job_template', 'success_nodes', 'failure_nodes',
         'always_nodes', 'credentials', 'inventory', 'extra_data', 'survey_passwords',
-        'char_prompts'
+        'char_prompts', 'all_parents_must_converge', 'identifier'
     ]
     REENCRYPTION_BLACKLIST_AT_COPY = ['extra_data', 'survey_passwords']
 
@@ -139,6 +146,21 @@ class WorkflowJobTemplateNode(WorkflowNodeBase):
         related_name='workflow_job_template_nodes',
         on_delete=models.CASCADE,
     )
+    identifier = models.CharField(
+        max_length=512,
+        default=uuid4,
+        blank=False,
+        help_text=_(
+            'An identifier for this node that is unique within its workflow. '
+            'It is copied to workflow job nodes corresponding to this node.'),
+    )
+
+    class Meta:
+        app_label = 'main'
+        unique_together = (("identifier", "workflow_job_template"),)
+        indexes = [
+            models.Index(fields=['identifier']),
+        ]
 
     def get_absolute_url(self, request=None):
         return reverse('api:workflow_job_template_node_detail', kwargs={'pk': self.pk}, request=request)
@@ -208,6 +230,18 @@ class WorkflowJobNode(WorkflowNodeBase):
                     "semantics will mark this True if the node is in a path that will "
                     "decidedly not be ran. A value of False means the node may not run."),
     )
+    identifier = models.CharField(
+        max_length=512,
+        blank=True,  # blank denotes pre-migration job nodes
+        help_text=_('An identifier coresponding to the workflow job template node that this node was created from.'),
+    )
+
+    class Meta:
+        app_label = 'main'
+        indexes = [
+            models.Index(fields=["identifier", "workflow_job"]),
+            models.Index(fields=['identifier']),
+        ]
 
     def get_absolute_url(self, request=None):
         return reverse('api:workflow_job_node_detail', kwargs={'pk': self.pk}, request=request)
@@ -330,7 +364,7 @@ class WorkflowJobOptions(LaunchTimeConfigBase):
     @classmethod
     def _get_unified_job_field_names(cls):
         r = set(f.name for f in WorkflowJobOptions._meta.fields) | set(
-            ['name', 'description', 'survey_passwords', 'labels', 'limit', 'scm_branch']
+            ['name', 'description', 'organization', 'survey_passwords', 'labels', 'limit', 'scm_branch']
         )
         r.remove('char_prompts')  # needed due to copying launch config to launch config
         return r
@@ -371,19 +405,12 @@ class WorkflowJobTemplate(UnifiedJobTemplate, WorkflowJobOptions, SurveyJobTempl
 
     SOFT_UNIQUE_TOGETHER = [('polymorphic_ctype', 'name', 'organization')]
     FIELDS_TO_PRESERVE_AT_COPY = [
-        'labels', 'instance_groups', 'workflow_job_template_nodes', 'credentials', 'survey_spec'
+        'labels', 'organization', 'instance_groups', 'workflow_job_template_nodes', 'credentials', 'survey_spec'
     ]
 
     class Meta:
         app_label = 'main'
 
-    organization = models.ForeignKey(
-        'Organization',
-        blank=True,
-        null=True,
-        on_delete=models.SET_NULL,
-        related_name='workflows',
-    )
     ask_inventory_on_launch = AskForField(
         blank=True,
         default=False,
@@ -744,6 +771,8 @@ class WorkflowApproval(UnifiedJob, JobNotificationMixin):
 
     def signal_start(self, **kwargs):
         can_start = super(WorkflowApproval, self).signal_start(**kwargs)
+        self.started = self.created
+        self.save(update_fields=['started'])
         self.send_approval_notification('running')
         return can_start
 

@@ -2,17 +2,19 @@ import React, { useState } from 'react';
 import PropTypes from 'prop-types';
 import { withI18n } from '@lingui/react';
 import { t } from '@lingui/macro';
-import { Formik, Field } from 'formik';
+import { Formik, useField } from 'formik';
 import { Form, FormGroup } from '@patternfly/react-core';
-import AnsibleSelect from '@components/AnsibleSelect';
-import FormActionGroup from '@components/FormActionGroup/FormActionGroup';
-import FormField, { PasswordField } from '@components/FormField';
-import FormRow from '@components/FormRow';
-import OrganizationLookup from '@components/Lookup/OrganizationLookup';
-import { required, requiredEmail } from '@util/validators';
+import AnsibleSelect from '../../../components/AnsibleSelect';
+import FormActionGroup from '../../../components/FormActionGroup/FormActionGroup';
+import FormField, {
+  PasswordField,
+  FormSubmitError,
+} from '../../../components/FormField';
+import OrganizationLookup from '../../../components/Lookup/OrganizationLookup';
+import { required, requiredEmail } from '../../../util/validators';
+import { FormColumnLayout } from '../../../components/FormLayout';
 
-function UserForm(props) {
-  const { user, handleCancel, handleSubmit, i18n } = props;
+function UserFormFields({ user, i18n }) {
   const [organization, setOrganization] = useState(null);
 
   const userTypeOptions = [
@@ -36,6 +38,100 @@ function UserForm(props) {
     },
   ];
 
+  const organizationFieldArr = useField({
+    name: 'organization',
+    validate: !user.id
+      ? required(i18n._(t`Select a value for this field`), i18n)
+      : () => undefined,
+  });
+  const organizationMeta = organizationFieldArr[1];
+  const organizationHelpers = organizationFieldArr[2];
+
+  const [userTypeField, userTypeMeta] = useField('user_type');
+
+  return (
+    <>
+      <FormField
+        id="user-username"
+        label={i18n._(t`Username`)}
+        name="username"
+        type="text"
+        validate={required(null, i18n)}
+        isRequired
+      />
+      <FormField
+        id="user-email"
+        label={i18n._(t`Email`)}
+        name="email"
+        validate={requiredEmail(i18n)}
+        isRequired
+      />
+      <PasswordField
+        id="user-password"
+        label={i18n._(t`Password`)}
+        name="password"
+        validate={
+          !user.id
+            ? required(i18n._(t`This field must not be blank`), i18n)
+            : () => undefined
+        }
+        isRequired={!user.id}
+      />
+      <PasswordField
+        id="user-confirm-password"
+        label={i18n._(t`Confirm Password`)}
+        name="confirm_password"
+        validate={
+          !user.id
+            ? required(i18n._(t`This field must not be blank`), i18n)
+            : () => undefined
+        }
+        isRequired={!user.id}
+      />
+      <FormField
+        id="user-first-name"
+        label={i18n._(t`First Name`)}
+        name="first_name"
+        type="text"
+      />
+      <FormField
+        id="user-last-name"
+        label={i18n._(t`Last Name`)}
+        name="last_name"
+        type="text"
+      />
+      {!user.id && (
+        <OrganizationLookup
+          helperTextInvalid={organizationMeta.error}
+          isValid={!organizationMeta.touched || !organizationMeta.error}
+          onBlur={() => organizationHelpers.setTouched()}
+          onChange={value => {
+            organizationHelpers.setValue(value.id);
+            setOrganization(value);
+          }}
+          value={organization}
+          required
+        />
+      )}
+      <FormGroup
+        fieldId="user-type"
+        helperTextInvalid={userTypeMeta.error}
+        isRequired
+        isValid={!userTypeMeta.touched || !userTypeMeta.error}
+        label={i18n._(t`User Type`)}
+      >
+        <AnsibleSelect
+          isValid={!userTypeMeta.touched || !userTypeMeta.error}
+          id="user-type"
+          data={userTypeOptions}
+          {...userTypeField}
+        />
+      </FormGroup>
+    </>
+  );
+}
+
+function UserForm({ user, handleCancel, handleSubmit, submitError, i18n }) {
   const handleValidateAndSubmit = (values, { setErrors }) => {
     if (values.password !== values.confirm_password) {
       setErrors({
@@ -49,8 +145,8 @@ function UserForm(props) {
       if (!values.password || values.password === '') {
         delete values.password;
       }
-      delete values.confirm_password;
-      handleSubmit(values);
+      const { confirm_password, ...submitValues } = values;
+      handleSubmit(submitValues);
     }
   };
 
@@ -76,119 +172,20 @@ function UserForm(props) {
         user_type: userType,
       }}
       onSubmit={handleValidateAndSubmit}
-      render={formik => (
-        <Form
-          autoComplete="off"
-          onSubmit={formik.handleSubmit}
-          css="padding: 0 24px"
-        >
-          <FormRow>
-            <FormField
-              id="user-username"
-              label={i18n._(t`Username`)}
-              name="username"
-              type="text"
-              validate={required(null, i18n)}
-              isRequired
+    >
+      {formik => (
+        <Form autoComplete="off" onSubmit={formik.handleSubmit}>
+          <FormColumnLayout>
+            <UserFormFields user={user} i18n={i18n} />
+            <FormSubmitError error={submitError} />
+            <FormActionGroup
+              onCancel={handleCancel}
+              onSubmit={formik.handleSubmit}
             />
-            <FormField
-              id="user-email"
-              label={i18n._(t`Email`)}
-              name="email"
-              validate={requiredEmail(i18n)}
-              isRequired
-            />
-            <PasswordField
-              id="user-password"
-              label={i18n._(t`Password`)}
-              name="password"
-              validate={
-                !user.id
-                  ? required(i18n._(t`This field must not be blank`), i18n)
-                  : () => undefined
-              }
-              isRequired={!user.id}
-            />
-            <PasswordField
-              id="user-confirm-password"
-              label={i18n._(t`Confirm Password`)}
-              name="confirm_password"
-              validate={
-                !user.id
-                  ? required(i18n._(t`This field must not be blank`), i18n)
-                  : () => undefined
-              }
-              isRequired={!user.id}
-            />
-          </FormRow>
-          <FormRow>
-            <FormField
-              id="user-first-name"
-              label={i18n._(t`First Name`)}
-              name="first_name"
-              type="text"
-            />
-            <FormField
-              id="user-last-name"
-              label={i18n._(t`Last Name`)}
-              name="last_name"
-              type="text"
-            />
-            {!user.id && (
-              <Field
-                name="organization"
-                validate={required(
-                  i18n._(t`Select a value for this field`),
-                  i18n
-                )}
-                render={({ form }) => (
-                  <OrganizationLookup
-                    helperTextInvalid={form.errors.organization}
-                    isValid={
-                      !form.touched.organization || !form.errors.organization
-                    }
-                    onBlur={() => form.setFieldTouched('organization')}
-                    onChange={value => {
-                      form.setFieldValue('organization', value.id);
-                      setOrganization(value);
-                    }}
-                    value={organization}
-                    required
-                  />
-                )}
-              />
-            )}
-            <Field
-              name="user_type"
-              render={({ form, field }) => {
-                const isValid =
-                  !form.touched.user_type || !form.errors.user_type;
-                return (
-                  <FormGroup
-                    fieldId="user-type"
-                    helperTextInvalid={form.errors.user_type}
-                    isRequired
-                    isValid={isValid}
-                    label={i18n._(t`User Type`)}
-                  >
-                    <AnsibleSelect
-                      isValid={isValid}
-                      id="user-type"
-                      data={userTypeOptions}
-                      {...field}
-                    />
-                  </FormGroup>
-                );
-              }}
-            />
-          </FormRow>
-          <FormActionGroup
-            onCancel={handleCancel}
-            onSubmit={formik.handleSubmit}
-          />
+          </FormColumnLayout>
         </Form>
       )}
-    />
+    </Formik>
   );
 }
 

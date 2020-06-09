@@ -169,7 +169,7 @@ class AnsibleInventoryLoader(object):
             self.tmp_private_dir = build_proot_temp_dir()
             logger.debug("Using fresh temporary directory '{}' for isolation.".format(self.tmp_private_dir))
             kwargs['proot_temp_dir'] = self.tmp_private_dir
-            kwargs['proot_show_paths'] = [functioning_dir(self.source)]
+            kwargs['proot_show_paths'] = [functioning_dir(self.source), settings.AWX_ANSIBLE_COLLECTIONS_PATHS]
         logger.debug("Running from `{}` working directory.".format(cwd))
 
         if self.venv_path != settings.ANSIBLE_VENV_PATH:
@@ -496,12 +496,6 @@ class Command(BaseCommand):
             group_names = all_group_names[offset:(offset + self._batch_size)]
             for group_pk in groups_qs.filter(name__in=group_names).values_list('pk', flat=True):
                 del_group_pks.discard(group_pk)
-        if self.inventory_source.deprecated_group_id in del_group_pks:  # TODO: remove in 3.3
-            logger.warning(
-                'Group "%s" from v1 API is not deleted by overwrite',
-                self.inventory_source.deprecated_group.name
-            )
-            del_group_pks.discard(self.inventory_source.deprecated_group_id)
         # Now delete all remaining groups in batches.
         all_del_pks = sorted(list(del_group_pks))
         for offset in range(0, len(all_del_pks), self._batch_size):
@@ -534,12 +528,6 @@ class Command(BaseCommand):
         # Set of all host pks managed by this inventory source
         all_source_host_pks = self._existing_host_pks()
         for db_group in db_groups.all():
-            if self.inventory_source.deprecated_group_id == db_group.id:  # TODO: remove in 3.3
-                logger.debug(
-                    'Group "%s" from v1 API child group/host connections preserved',
-                    db_group.name
-                )
-                continue
             # Delete child group relationships not present in imported data.
             db_children = db_group.children
             db_children_name_pk_map = dict(db_children.values_list('name', 'pk'))
@@ -661,11 +649,12 @@ class Command(BaseCommand):
             if group_name in existing_group_names:
                 continue
             mem_group = self.all_group.all_groups[group_name]
+            group_desc = mem_group.variables.pop('_awx_description', 'imported')
             group = self.inventory.groups.update_or_create(
                 name=group_name,
                 defaults={
                     'variables':json.dumps(mem_group.variables),
-                    'description':'imported'
+                    'description':group_desc
                 }
             )[0]
             logger.debug('Group "%s" added', group.name)
@@ -788,8 +777,9 @@ class Command(BaseCommand):
         # Create any new hosts.
         for mem_host_name in sorted(mem_host_names_to_update):
             mem_host = self.all_group.all_hosts[mem_host_name]
-            host_attrs = dict(variables=json.dumps(mem_host.variables),
-                              description='imported')
+            import_vars = mem_host.variables
+            host_desc = import_vars.pop('_awx_description', 'imported')
+            host_attrs = dict(variables=json.dumps(import_vars), description=host_desc)
             enabled = self._get_enabled(mem_host.variables)
             if enabled is not None:
                 host_attrs['enabled'] = enabled
@@ -1006,12 +996,6 @@ class Command(BaseCommand):
         except re.error:
             raise CommandError('invalid regular expression for --host-filter')
 
-        '''
-        TODO: Remove this deprecation when we remove support for rax.py
-        '''
-        if self.source == "rax.py":
-            logger.info("Rackspace inventory sync is Deprecated in Tower 3.1.0 and support for Rackspace will be removed in a future release.")
-
         begin = time.time()
         self.load_inventory_from_database()
 
@@ -1096,7 +1080,7 @@ class Command(BaseCommand):
                             if settings.SQL_DEBUG:
                                 logger.warning('update computed fields took %d queries',
                                                len(connection.queries) - queries_before2)
-                        # Check if the license is valid. 
+                        # Check if the license is valid.
                         # If the license is not valid, a CommandError will be thrown,
                         # and inventory update will be marked as invalid.
                         # with transaction.atomic() will roll back the changes.

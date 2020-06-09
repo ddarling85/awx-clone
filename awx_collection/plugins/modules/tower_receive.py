@@ -9,15 +9,18 @@ __metaclass__ = type
 
 
 ANSIBLE_METADATA = {'metadata_version': '1.1',
-                    'status': ['preview'],
+                    'status': ['deprecated'],
                     'supported_by': 'community'}
 
 
 DOCUMENTATION = '''
 ---
 module: tower_receive
+deprecated:
+  removed_in: "14.0.0"
+  why: Deprecated in favor of upcoming C(_export) module.
+  alternative: Once published, use M(tower_export) instead.
 author: "John Westcott IV (@john-westcott-iv)"
-version_added: "2.8"
 short_description: Receive assets from Ansible Tower.
 description:
     - Receive assets from Ansible Tower. See
@@ -33,56 +36,67 @@ options:
         - List of organization names to export
       default: []
       type: list
+      elements: str
     user:
       description:
         - List of user names to export
       default: []
       type: list
+      elements: str
     team:
       description:
         - List of team names to export
       default: []
       type: list
+      elements: str
     credential_type:
       description:
         - List of credential type names to export
       default: []
       type: list
+      elements: str
     credential:
       description:
         - List of credential names to export
       default: []
       type: list
+      elements: str
     notification_template:
       description:
         - List of notification template names to export
       default: []
       type: list
+      elements: str
     inventory_script:
       description:
         - List of inventory script names to export
       default: []
       type: list
+      elements: str
     inventory:
       description:
         - List of inventory names to export
       default: []
       type: list
+      elements: str
     project:
       description:
         - List of project names to export
       default: []
       type: list
+      elements: str
     job_template:
       description:
         - List of job template names to export
       default: []
       type: list
+      elements: str
     workflow:
       description:
         - List of workflow names to export
       default: []
       type: list
+      elements: str
 
 requirements:
   - "ansible-tower-cli >= 3.3.0"
@@ -90,7 +104,7 @@ requirements:
 notes:
   - Specifying a name of "all" for any asset type will export all items of that asset type.
 
-extends_documentation_fragment: awx.awx.auth
+extends_documentation_fragment: awx.awx.auth_legacy
 '''
 
 EXAMPLES = '''
@@ -136,20 +150,22 @@ except ImportError:
 def main():
     argument_spec = dict(
         all=dict(type='bool', default=False),
-        credential=dict(type='list', default=[]),
-        credential_type=dict(type='list', default=[]),
-        inventory=dict(type='list', default=[]),
-        inventory_script=dict(type='list', default=[]),
-        job_template=dict(type='list', default=[]),
-        notification_template=dict(type='list', default=[]),
-        organization=dict(type='list', default=[]),
-        project=dict(type='list', default=[]),
-        team=dict(type='list', default=[]),
-        user=dict(type='list', default=[]),
-        workflow=dict(type='list', default=[]),
+        credential=dict(type='list', default=[], elements='str'),
+        credential_type=dict(type='list', default=[], elements='str'),
+        inventory=dict(type='list', default=[], elements='str'),
+        inventory_script=dict(type='list', default=[], elements='str'),
+        job_template=dict(type='list', default=[], elements='str'),
+        notification_template=dict(type='list', default=[], elements='str'),
+        organization=dict(type='list', default=[], elements='str'),
+        project=dict(type='list', default=[], elements='str'),
+        team=dict(type='list', default=[], elements='str'),
+        user=dict(type='list', default=[], elements='str'),
+        workflow=dict(type='list', default=[], elements='str'),
     )
 
     module = TowerModule(argument_spec=argument_spec, supports_check_mode=False)
+
+    module.deprecate(msg="This module is deprecated and will be replaced by the AWX CLI export command.", version="awx.awx:14.0.0")
 
     if not HAS_TOWER_CLI:
         module.fail_json(msg='ansible-tower-cli required for this module')

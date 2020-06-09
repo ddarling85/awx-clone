@@ -1,3 +1,4 @@
+import 'styled-components/macro';
 import React, { useState, useEffect, useRef } from 'react';
 import { bool } from 'prop-types';
 import styled from 'styled-components';
@@ -19,7 +20,7 @@ function ExpandingContainer({ isExpanded, children }) {
   });
   useEffect(() => {
     setContentHeight(ref.current.scrollHeight);
-  }, [setContentHeight]);
+  }, [setContentHeight, children]);
   const height = isExpanded ? contentHeight : '0';
   return (
     <Container

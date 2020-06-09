@@ -1,6 +1,5 @@
 import functools
-
-from six import with_metaclass
+import json
 
 from .stdout import monitor, monitor_workflow
 from .utils import CustomRegistryMeta, color_enabled
@@ -23,7 +22,7 @@ class CustomActionRegistryMeta(CustomRegistryMeta):
         return ' '.join([self.resource, self.action])
 
 
-class CustomAction(with_metaclass(CustomActionRegistryMeta)):
+class CustomAction(metaclass=CustomActionRegistryMeta):
     """Base class for defining a custom action for a resource."""
 
     def __init__(self, page):
@@ -89,6 +88,8 @@ class Launchable(object):
             )
             if status:
                 response.json['status'] = status
+                if status in ('failed', 'error'):
+                    setattr(response, 'rc', 1)
         return response
 
     def perform(self, **kwargs):
@@ -539,5 +540,53 @@ class SettingsModify(CustomAction):
 
     def perform(self, key, value):
         self.page.endpoint = self.page.endpoint + 'all/'
-        resp = self.page.patch(**{key: value})
+        patch_value = value
+        if self.is_json(value):
+            patch_value = json.loads(value)
+        resp = self.page.patch(**{key: patch_value})
         return resp.from_json({'key': key, 'value': resp[key]})
+
+    def is_json(self, data):
+        try:
+            json.loads(data)
+        except json.decoder.JSONDecodeError:
+            return False
+        return True
+
+
+class HasMonitor(object):
+
+    action = 'monitor'
+
+    def add_arguments(self, parser, resource_options_parser):
+        from .options import pk_or_name
+        parser.choices[self.action].add_argument(
+            'id',
+            type=functools.partial(
+                pk_or_name, None, self.resource, page=self.page
+            ),
+            help=''
+        )
+
+    def perform(self, **kwargs):
+        response = self.page.get()
+        mon = monitor_workflow if response.type == 'workflow_job' else monitor
+        if not response.failed and response.status != 'successful':
+            status = mon(
+                response,
+                self.page.connection.session,
+            )
+            if status:
+                response.json['status'] = status
+                if status in ('failed', 'error'):
+                    setattr(response, 'rc', 1)
+        else:
+            return 'Unable to monitor finished job'
+
+
+class JobMonitor(HasMonitor, CustomAction):
+    resource = 'jobs'
+
+
+class WorkflowJobMonitor(HasMonitor, CustomAction):
+    resource = 'workflow_jobs'

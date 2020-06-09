@@ -1,12 +1,22 @@
 import React from 'react';
 import { act } from 'react-dom/test-utils';
 import { createMemoryHistory } from 'history';
-import { InventoriesAPI } from '@api';
-import { mountWithContexts, waitForElement } from '@testUtils/enzymeHelpers';
+import { InventoriesAPI } from '../../api';
+import {
+  mountWithContexts,
+  waitForElement,
+} from '../../../testUtils/enzymeHelpers';
 import mockInventory from './shared/data.inventory.json';
 import Inventory from './Inventory';
 
-jest.mock('@api');
+jest.mock('../../api');
+jest.mock('react-router-dom', () => ({
+  ...jest.requireActual('react-router-dom'),
+  useRouteMatch: () => ({
+    url: '/inventories/1',
+    params: { id: 1 },
+  }),
+}));
 
 InventoriesAPI.readDetail.mockResolvedValue({
   data: mockInventory,
@@ -17,9 +27,7 @@ describe('<Inventory />', () => {
 
   test('initially renders succesfully', async () => {
     await act(async () => {
-      wrapper = mountWithContexts(
-        <Inventory setBreadcrumb={() => {}} match={{ params: { id: 1 } }} />
-      );
+      wrapper = mountWithContexts(<Inventory setBreadcrumb={() => {}} />);
     });
     await waitForElement(wrapper, 'ContentLoading', el => el.length === 0);
     await waitForElement(wrapper, '.pf-c-tabs__item', el => el.length === 6);

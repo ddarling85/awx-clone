@@ -8,25 +8,26 @@ There are two named-URL-related Tower configuration settings available under `/a
 `NAMED_URL_FORMATS` is a *read only* key-value pair list of all available named URL identifier formats. A typical `NAMED_URL_FORMATS` looks like this:
 ```
 "NAMED_URL_FORMATS": {
-    "job_templates": "<name>",
-    "workflow_job_templates": "<name>",
+    "job_templates": "<name>++<organization.name>",
+    "workflow_job_templates": "<name>++<organization.name>",
+    "workflow_job_template_nodes": "<identifier>++<workflow_job_template.name>++<organization.name>",
     "inventories": "<name>++<organization.name>",
     "users": "<username>",
-    "custom_inventory_scripts": "<name>++<organization.name>",
+    "applications": "<name>++<organization.name>",
+    "inventory_scripts": "<name>++<organization.name>",
     "labels": "<name>++<organization.name>",
     "credential_types": "<name>+<kind>",
     "notification_templates": "<name>++<organization.name>",
     "instances": "<hostname>",
     "instance_groups": "<name>",
     "hosts": "<name>++<inventory.name>++<organization.name>",
-    "system_job_templates": "<name>",
     "groups": "<name>++<inventory.name>++<organization.name>",
     "organizations": "<name>",
     "credentials": "<name>++<credential_type.name>+<credential_type.kind>++<organization.name>",
     "teams": "<name>++<organization.name>",
-    "inventory_sources": "<name>",
-    "projects": "<name>"
-}
+    "inventory_sources": "<name>++<inventory.name>++<organization.name>",
+    "projects": "<name>++<organization.name>"
+},
 ```
 For each item in `NAMED_URL_FORMATS`, the key is the API name of the resource to have named URL, the value is a string indicating how to form a human-readable unique identifiers for that resource. A typical procedure of composing named URL for a specific resource object using `NAMED_URL_FORMATS` is given below:
 
@@ -78,6 +79,15 @@ Module `awx.main.utils.named_url_graph` stands at the core of named URL implemen
 
 `generate_graph` will run only once for each Tower WSGI process. This is guaranteed by putting the function call inside `__init__` of `URLModificationMiddleware`. When an incoming request enters `URLModificationMiddleware`, the part of its URL path that could contain a valid named URL identifier is extracted and processed to find (possible) corresponding resource objects. The internal process is basically crawling against part of the named URL graph. If the object is found, the identifier part of the URL path is converted to the object's primary key. Going forward, Tower can treat the request with the old-styled URL.
 
+## Job Template Organization Changes
+
+The `organization` field was added as a read-only field to job templates, derived from its project organization.
+This changed the named URL of job templates, to be compatible with multiple job templates with the same
+name, but in different organizations.
+
+To avoid making a backward-incompatible change, using the old named URL is still supported.
+That means that you can still reference job templates by the `"job_templates": "<name>"` scheme.
+If multiple job templates with the same name exist, the oldest one will be returned.
 
 ## Acceptance Criteria
 

@@ -2,12 +2,6 @@ import os
 import glob
 import shutil
 from setuptools import setup, find_packages, Command
-try:  # for pip >= 10
-    from pip._internal.req import parse_requirements
-except ImportError:  # for pip <= 9.0.3
-    from pip.req import parse_requirements
-
-requirements = [str(r.req) for r in parse_requirements('requirements.txt', session=False)]
 
 
 def get_version():
@@ -66,8 +60,11 @@ setup(
         'clean': CleanCommand,
     },
     include_package_data=True,
-    install_requires=requirements,
-    python_requires=">=2.7,!=3.0.*,!=3.1.*,!=3.2.*,!=3.3.*,!=3.4.*",
+    install_requires=[
+        'PyYAML',
+        'requests',
+    ],
+    python_requires=">=3.6",
     extras_require={
         'formatting': ['jq'],
         'websockets': ['websocket-client>0.54.0'],

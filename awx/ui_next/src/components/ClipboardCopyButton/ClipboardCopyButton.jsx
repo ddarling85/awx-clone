@@ -3,18 +3,6 @@ import PropTypes from 'prop-types';
 import { Button, Tooltip } from '@patternfly/react-core';
 import { CopyIcon } from '@patternfly/react-icons';
 
-import styled from 'styled-components';
-
-const CopyButton = styled(Button)`
-  padding: 2px 4px;
-  margin-left: 8px;
-  border: none;
-  &:hover {
-    background-color: #0066cc;
-    color: white;
-  }
-`;
-
 export const clipboardCopyFunc = (event, text) => {
   const clipboard = event.currentTarget.parentElement;
   const el = document.createElement('input');
@@ -52,7 +40,13 @@ class ClipboardCopyButton extends React.Component {
   };
 
   render() {
-    const { clickTip, entryDelay, exitDelay, hoverTip } = this.props;
+    const {
+      copyTip,
+      entryDelay,
+      exitDelay,
+      copiedSuccessTip,
+      isDisabled,
+    } = this.props;
     const { copied } = this.state;
 
     return (
@@ -60,27 +54,29 @@ class ClipboardCopyButton extends React.Component {
         entryDelay={entryDelay}
         exitDelay={exitDelay}
         trigger="mouseenter focus click"
-        content={copied ? clickTip : hoverTip}
+        content={copied ? copiedSuccessTip : copyTip}
       >
-        <CopyButton
+        <Button
+          isDisabled={isDisabled}
           variant="plain"
           onClick={this.handleCopyClick}
-          aria-label={hoverTip}
+          aria-label={copyTip}
         >
           <CopyIcon />
-        </CopyButton>
+        </Button>
       </Tooltip>
     );
   }
 }
 
 ClipboardCopyButton.propTypes = {
-  clickTip: PropTypes.string.isRequired,
+  copyTip: PropTypes.string.isRequired,
   entryDelay: PropTypes.number,
   exitDelay: PropTypes.number,
-  hoverTip: PropTypes.string.isRequired,
+  copiedSuccessTip: PropTypes.string.isRequired,
   stringToCopy: PropTypes.string.isRequired,
   switchDelay: PropTypes.number,
+  isDisabled: PropTypes.bool.isRequired,
 };
 
 ClipboardCopyButton.defaultProps = {

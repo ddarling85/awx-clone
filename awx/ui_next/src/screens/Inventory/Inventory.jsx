@@ -1,26 +1,38 @@
 import React, { useEffect, useState } from 'react';
 import { t } from '@lingui/macro';
 import { withI18n } from '@lingui/react';
-import { Card, PageSection } from '@patternfly/react-core';
-import { Switch, Route, Redirect, withRouter, Link } from 'react-router-dom';
-import { TabbedCardHeader } from '@components/Card';
-import CardCloseButton from '@components/CardCloseButton';
-import ContentError from '@components/ContentError';
-import RoutedTabs from '@components/RoutedTabs';
-import { ResourceAccessList } from '@components/ResourceAccessList';
-import InventoryDetail from './InventoryDetail';
-import InventoryHosts from './InventoryHosts';
-import InventoryHostAdd from './InventoryHostAdd';
-import InventoryGroups from './InventoryGroups';
-import InventoryCompletedJobs from './InventoryCompletedJobs';
-import InventorySources from './InventorySources';
-import { InventoriesAPI } from '@api';
-import InventoryEdit from './InventoryEdit';
+import {
+  Switch,
+  Route,
+  Redirect,
+  Link,
+  useLocation,
+  useRouteMatch,
+} from 'react-router-dom';
 
-function Inventory({ history, i18n, location, match, setBreadcrumb }) {
+import { Card, CardActions, PageSection } from '@patternfly/react-core';
+import { TabbedCardHeader } from '../../components/Card';
+import CardCloseButton from '../../components/CardCloseButton';
+import ContentError from '../../components/ContentError';
+import ContentLoading from '../../components/ContentLoading';
+import JobList from '../../components/JobList';
+import RoutedTabs from '../../components/RoutedTabs';
+import { ResourceAccessList } from '../../components/ResourceAccessList';
+import InventoryDetail from './InventoryDetail';
+import InventoryEdit from './InventoryEdit';
+import InventoryGroups from './InventoryGroups';
+import InventoryHosts from './InventoryHosts/InventoryHosts';
+import InventorySources from './InventorySources';
+import { InventoriesAPI } from '../../api';
+
+function Inventory({ i18n, setBreadcrumb }) {
   const [contentError, setContentError] = useState(null);
   const [hasContentLoading, setHasContentLoading] = useState(true);
   const [inventory, setInventory] = useState(null);
+  const location = useLocation();
+  const match = useRouteMatch({
+    path: '/inventories/inventory/:id',
+  });
 
   useEffect(() => {
     async function fetchData() {
@@ -36,7 +48,7 @@ function Inventory({ history, i18n, location, match, setBreadcrumb }) {
     }
 
     fetchData();
-  }, [match.params.id, setBreadcrumb]);
+  }, [match.params.id, location.pathname, setBreadcrumb]);
 
   const tabsArray = [
     { name: i18n._(t`Details`), link: `${match.url}/details`, id: 0 },
@@ -51,27 +63,22 @@ function Inventory({ history, i18n, location, match, setBreadcrumb }) {
     },
   ];
 
-  let cardHeader = hasContentLoading ? null : (
-    <TabbedCardHeader>
-      <RoutedTabs history={history} tabsArray={tabsArray} />
-      <CardCloseButton linkTo="/inventories" />
-    </TabbedCardHeader>
-  );
-
-  if (
-    location.pathname.endsWith('edit') ||
-    location.pathname.endsWith('add') ||
-    location.pathname.includes('groups/')
-  ) {
-    cardHeader = null;
-  }
-
-  if (!hasContentLoading && contentError) {
+  if (hasContentLoading) {
     return (
       <PageSection>
-        <Card className="awx-c-card">
+        <Card>
+          <ContentLoading />
+        </Card>
+      </PageSection>
+    );
+  }
+
+  if (contentError) {
+    return (
+      <PageSection>
+        <Card>
           <ContentError error={contentError}>
-            {contentError.response.status === 404 && (
+            {contentError.response?.status === 404 && (
               <span>
                 {i18n._(`Inventory not found.`)}{' '}
                 <Link to="/inventories">{i18n._(`View all Inventories.`)}</Link>
@@ -85,8 +92,17 @@ function Inventory({ history, i18n, location, match, setBreadcrumb }) {
 
   return (
     <PageSection>
-      <Card className="awx-c-card">
-        {cardHeader}
+      <Card>
+        {['edit', 'add', 'groups/', 'hosts/', 'sources/'].some(name =>
+          location.pathname.includes(name)
+        ) ? null : (
+          <TabbedCardHeader>
+            <RoutedTabs tabsArray={tabsArray} />
+            <CardActions>
+              <CardCloseButton linkTo="/inventories" />
+            </CardActions>
+          </TabbedCardHeader>
+        )}
         <Switch>
           <Redirect
             from="/inventories/inventory/:id"
@@ -94,82 +110,64 @@ function Inventory({ history, i18n, location, match, setBreadcrumb }) {
             exact
           />
           {inventory && [
+            <Route path="/inventories/inventory/:id/details" key="details">
+              <InventoryDetail
+                inventory={inventory}
+                hasInventoryLoading={hasContentLoading}
+              />
+            </Route>,
+            <Route path="/inventories/inventory/:id/edit" key="edit">
+              <InventoryEdit inventory={inventory} />
+            </Route>,
+            <Route path="/inventories/inventory/:id/hosts" key="hosts">
+              <InventoryHosts
+                inventory={inventory}
+                setBreadcrumb={setBreadcrumb}
+              />
+            </Route>,
+            <Route path="/inventories/inventory/:id/access" key="access">
+              <ResourceAccessList
+                resource={inventory}
+                apiModel={InventoriesAPI}
+              />
+            </Route>,
+            <Route path="/inventories/inventory/:id/groups" key="groups">
+              <InventoryGroups
+                inventory={inventory}
+                setBreadcrumb={setBreadcrumb}
+              />
+            </Route>,
+            <Route path="/inventories/inventory/:id/sources" key="sources">
+              <InventorySources
+                inventory={inventory}
+                setBreadcrumb={setBreadcrumb}
+              />
+            </Route>,
             <Route
-              key="details"
-              path="/inventories/inventory/:id/details"
-              render={() => (
-                <InventoryDetail
-                  match={match}
-                  hasInventoryLoading={hasContentLoading}
-                  inventory={inventory}
-                />
-              )}
-            />,
-            <Route
-              key="edit"
-              path="/inventories/inventory/:id/edit"
-              render={() => <InventoryEdit inventory={inventory} />}
-            />,
-            <Route
-              key="host-add"
-              path="/inventories/inventory/:id/hosts/add"
-              render={() => <InventoryHostAdd />}
-            />,
-            <Route
-              key="access"
-              path="/inventories/inventory/:id/access"
-              render={() => (
-                <ResourceAccessList
-                  resource={inventory}
-                  apiModel={InventoriesAPI}
-                />
-              )}
-            />,
-            <Route
-              key="groups"
-              path="/inventories/inventory/:id/groups"
-              render={() => (
-                <InventoryGroups
-                  location={location}
-                  match={match}
-                  history={history}
-                  setBreadcrumb={setBreadcrumb}
-                  inventory={inventory}
-                />
-              )}
-            />,
-            <Route
-              key="hosts"
-              path="/inventories/inventory/:id/hosts"
-              render={() => <InventoryHosts />}
-            />,
-            <Route
-              key="sources"
-              path="/inventories/inventory/:id/sources"
-              render={() => <InventorySources inventory={inventory} />}
-            />,
-            <Route
-              key="completed_jobs"
               path="/inventories/inventory/:id/completed_jobs"
-              render={() => <InventoryCompletedJobs inventory={inventory} />}
-            />,
-            <Route
-              key="not-found"
-              path="*"
-              render={() =>
-                !hasContentLoading && (
-                  <ContentError isNotFound>
-                    {match.params.id && (
-                      <Link
-                        to={`/inventories/inventory/${match.params.id}/details`}
-                      >
-                        {i18n._(`View Inventory Details`)}
-                      </Link>
-                    )}
-                  </ContentError>
-                )
-              }
-            />,
+              key="completed_jobs"
+            >
+              <JobList
+                defaultParams={{
+                  or__job__inventory: inventory.id,
+                  or__adhoccommand__inventory: inventory.id,
+                  or__inventoryupdate__inventory_source__inventory:
+                    inventory.id,
+                  or__workflowjob__inventory: inventory.id,
+                }}
+              />
+            </Route>,
+            <Route path="*" key="not-found">
+              <ContentError isNotFound>
+                {match.params.id && (
+                  <Link
+                    to={`/inventories/inventory/${match.params.id}/details`}
+                  >
+                    {i18n._(`View Inventory Details`)}
+                  </Link>
+                )}
+              </ContentError>
+            </Route>,
           ]}
         </Switch>
       </Card>
@@ -178,4 +176,4 @@ function Inventory({ history, i18n, location, match, setBreadcrumb }) {
 }
 
 export { Inventory as _Inventory };
-export default withI18n()(withRouter(Inventory));
+export default withI18n()(Inventory);

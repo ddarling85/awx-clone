@@ -3,14 +3,16 @@ import { withRouter } from 'react-router-dom';
 import { withI18n } from '@lingui/react';
 import { t } from '@lingui/macro';
 
-import { TeamsAPI, UsersAPI } from '@api';
-import AddResourceRole from '@components/AddRole/AddResourceRole';
-import AlertModal from '@components/AlertModal';
-import DataListToolbar from '@components/DataListToolbar';
-import PaginatedDataList, {
-  ToolbarAddButton,
-} from '@components/PaginatedDataList';
-import { getQSConfig, encodeQueryString, parseQueryString } from '@util/qs';
+import { TeamsAPI, UsersAPI } from '../../api';
+import AddResourceRole from '../AddRole/AddResourceRole';
+import AlertModal from '../AlertModal';
+import DataListToolbar from '../DataListToolbar';
+import PaginatedDataList, { ToolbarAddButton } from '../PaginatedDataList';
+import {
+  getQSConfig,
+  encodeQueryString,
+  parseQueryString,
+} from '../../util/qs';
 
 import DeleteRoleConfirmationModal from './DeleteRoleConfirmationModal';
 import ResourceAccessListItem from './ResourceAccessListItem';
@@ -160,7 +162,7 @@ class ResourceAccessList extends React.Component {
           hasContentLoading={hasContentLoading}
           items={accessRecords}
           itemCount={itemCount}
-          pluralizedItemName="Roles"
+          pluralizedItemName={i18n._(t`Roles`)}
           qsConfig={QS_CONFIG}
           toolbarSearchColumns={[
             {
@@ -203,7 +205,7 @@ class ResourceAccessList extends React.Component {
                         onClick={this.handleAddOpen}
                       />,
                     ]
-                  : null
+                  : []
               }
             />
           )}
@@ -232,7 +234,7 @@ class ResourceAccessList extends React.Component {
         )}
         <AlertModal
           isOpen={hasDeletionError}
-          variant="danger"
+          variant="error"
           title={i18n._(t`Error!`)}
           onClose={this.handleDeleteErrorClose}
         >

@@ -1,7 +1,7 @@
 import pytest
 from unittest import mock
 
-from awx.main.models import AdHocCommand, InventoryUpdate, Job, JobTemplate, ProjectUpdate
+from awx.main.models import AdHocCommand, InventoryUpdate, JobTemplate, ProjectUpdate
 from awx.main.models.ha import Instance, InstanceGroup
 from awx.main.tasks import apply_cluster_membership_policies
 from awx.api.versioning import reverse
@@ -297,7 +297,10 @@ class TestInstanceGroupOrdering:
         assert ad_hoc.preferred_instance_groups == [ig_inv, ig_org]
 
     def test_inventory_update_instance_groups(self, instance_group_factory, inventory_source, default_instance_group):
-        iu = InventoryUpdate.objects.create(inventory_source=inventory_source)
+        iu = InventoryUpdate.objects.create(
+            inventory_source=inventory_source,
+            source=inventory_source.source
+        )
         assert iu.preferred_instance_groups == [default_instance_group]
         ig_org = instance_group_factory("OrgIstGrp", [default_instance_group.instances.first()])
         ig_inv = instance_group_factory("InvIstGrp", [default_instance_group.instances.first()])
@@ -310,7 +313,7 @@ class TestInstanceGroupOrdering:
         assert iu.preferred_instance_groups == [ig_inv, ig_org]
 
     def test_project_update_instance_groups(self, instance_group_factory, project, default_instance_group):
-        pu = ProjectUpdate.objects.create(project=project)
+        pu = ProjectUpdate.objects.create(project=project, organization=project.organization)
         assert pu.preferred_instance_groups == [default_instance_group]
         ig_org = instance_group_factory("OrgIstGrp", [default_instance_group.instances.first()])
         ig_tmp = instance_group_factory("TmpIstGrp", [default_instance_group.instances.first()])
@@ -321,7 +324,7 @@ class TestInstanceGroupOrdering:
 
     def test_job_instance_groups(self, instance_group_factory, inventory, project, default_instance_group):
         jt = JobTemplate.objects.create(inventory=inventory, project=project)
-        job = Job.objects.create(inventory=inventory, job_template=jt, project=project)
+        job = jt.create_unified_job()
         assert job.preferred_instance_groups == [default_instance_group]
         ig_org = instance_group_factory("OrgIstGrp", [default_instance_group.instances.first()])
         ig_inv = instance_group_factory("InvIstGrp", [default_instance_group.instances.first()])

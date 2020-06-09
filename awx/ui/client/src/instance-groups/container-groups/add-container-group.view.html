@@ -2,12 +2,12 @@
 <a class="containerGroups-messageBar-link" href="https://docs.ansible.com/ansible-tower/latest/html/administration/external_execution_envs.html#container-groups" target="_blank" style="color: white">
   <div class="Section-messageBar">
       <i class="Section-messageBar-warning fa fa-warning"></i>
-      <span class="Section-messageBar-text">This feature is currently in tech preview and is subject to change in a future release.  Click here for documentation.</span>
+      <span class="Section-messageBar-text">{{:: vm.strings.get('state.TECH_PREVIEW_MESSAGE_BAR') }}</span>
   </div>
 </a>
 <at-panel>
   <at-panel-heading title="{{:: vm.panelTitle }}">
-    <a class="Panel-docsLink" ng-href="{{ vm.docs.url }}" target="_blank" aw-tool-tip="{{:: vm.docs.help_text }}">
+    <a aria-label="{{:: vm.docs.help_text }}" class="Panel-docsLink" ng-href="{{ vm.docs.url }}" target="_blank" aw-tool-tip="{{:: vm.docs.help_text }}">
       <i class="fa fa-book"></i>
     </a>
   </at-panel-heading>
