@@ -13,6 +13,7 @@ function TemplatesStrings (BaseString) {
         ADD_DD_JT_LABEL: t.s('Job Template'),
         ADD_DD_WF_LABEL: t.s('Workflow Template'),
         OPEN_WORKFLOW_VISUALIZER: t.s('Click here to open the workflow visualizer'),
+        ROW_ITEM_LABEL_ORGANIZATION: t.s('Organization'),
         ROW_ITEM_LABEL_DESCRIPTION: t.s('Description'),
         ROW_ITEM_LABEL_ACTIVITY: t.s('Activity'),
         ROW_ITEM_LABEL_INVENTORY: t.s('Inventory'),
@@ -20,6 +21,7 @@ function TemplatesStrings (BaseString) {
         ROW_ITEM_LABEL_CREDENTIALS: t.s('Credentials'),
         ROW_ITEM_LABEL_MODIFIED: t.s('Last Modified'),
         ROW_ITEM_LABEL_RAN: t.s('Last Ran'),
+        ADD: t.s('Add a new template')
     };
 
     ns.prompt = {
@@ -153,7 +155,10 @@ function TemplatesStrings (BaseString) {
         TIMED_OUT: t.s('APPROVAL TIMED OUT'),
         TIMEOUT: t.s('Timeout'),
         APPROVED: t.s('APPROVED'),
-        DENIED: t.s('DENIED')
+        DENIED: t.s('DENIED'),
+        CONVERGENCE: t.s('Convergence'),
+        ALL: t.s('All'),
+        ANY: t.s('Any'),
     };
 }
 

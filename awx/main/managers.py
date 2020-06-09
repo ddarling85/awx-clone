@@ -3,6 +3,7 @@
 
 import sys
 import logging
+import os
 
 from django.db import models
 from django.conf import settings
@@ -78,8 +79,7 @@ class HostManager(models.Manager):
                 self.core_filters = {}
 
                 qs = qs & q
-                unique_by_name = qs.order_by('name', 'pk').distinct('name')
-                return qs.filter(pk__in=unique_by_name)
+                return qs.order_by('name', 'pk').distinct('name')
         return qs
 
 
@@ -115,21 +115,45 @@ class InstanceManager(models.Manager):
             return node[0]
         raise RuntimeError("No instance found with the current cluster host id")
 
-    def register(self, uuid=None, hostname=None):
+    def register(self, uuid=None, hostname=None, ip_address=None):
         if not uuid:
             uuid = settings.SYSTEM_UUID
         if not hostname:
             hostname = settings.CLUSTER_HOST_ID
         with advisory_lock('instance_registration_%s' % hostname):
+            if settings.AWX_AUTO_DEPROVISION_INSTANCES:
+                # detect any instances with the same IP address.
+                # if one exists, set it to None
+                inst_conflicting_ip = self.filter(ip_address=ip_address).exclude(hostname=hostname)
+                if inst_conflicting_ip.exists():
+                    for other_inst in inst_conflicting_ip:
+                        other_hostname = other_inst.hostname
+                        other_inst.ip_address = None
+                        other_inst.save(update_fields=['ip_address'])
+                        logger.warning("IP address {0} conflict detected, ip address unset for host {1}.".format(ip_address, other_hostname))
+
             instance = self.filter(hostname=hostname)
             if instance.exists():
-                return (False, instance[0])
-            instance = self.create(uuid=uuid, hostname=hostname, capacity=0)
+                instance = instance.get()
+                if instance.ip_address != ip_address:
+                    instance.ip_address = ip_address
+                    instance.save(update_fields=['ip_address'])
+                    return (True, instance)
+                else:
+                    return (False, instance)
+            instance = self.create(uuid=uuid,
+                                   hostname=hostname,
+                                   ip_address=ip_address,
+                                   capacity=0)
         return (True, instance)
 
     def get_or_register(self):
         if settings.AWX_AUTO_DEPROVISION_INSTANCES:
-            return self.register()
+            from awx.main.management.commands.register_queue import RegisterQueue
+            pod_ip = os.environ.get('MY_POD_IP')
+            registered = self.register(ip_address=pod_ip)
+            RegisterQueue('tower', None, 100, 0, []).register()
+            return registered
         else:
             return (False, self.me())
 

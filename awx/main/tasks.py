@@ -26,12 +26,12 @@ import urllib.parse as urlparse
 
 # Django
 from django.conf import settings
-from django.db import transaction, DatabaseError, IntegrityError
+from django.db import transaction, DatabaseError, IntegrityError, ProgrammingError, connection
 from django.db.models.fields.related import ForeignKey
 from django.utils.timezone import now, timedelta
 from django.utils.encoding import smart_str
 from django.contrib.auth.models import User
-from django.utils.translation import ugettext_lazy as _
+from django.utils.translation import ugettext_lazy as _, gettext_noop
 from django.core.cache import cache
 from django.core.exceptions import ObjectDoesNotExist
 
@@ -52,13 +52,14 @@ import ansible_runner
 from awx import __version__ as awx_application_version
 from awx.main.constants import CLOUD_PROVIDERS, PRIVILEGE_ESCALATION_METHODS, STANDARD_INVENTORY_UPDATE_ENV, GALAXY_SERVER_FIELDS
 from awx.main.access import access_registry
+from awx.main.redact import UriCleaner
 from awx.main.models import (
     Schedule, TowerScheduleState, Instance, InstanceGroup,
     UnifiedJob, Notification,
     Inventory, InventorySource, SmartInventoryMembership,
     Job, AdHocCommand, ProjectUpdate, InventoryUpdate, SystemJob,
     JobEvent, ProjectUpdateEvent, InventoryUpdateEvent, AdHocCommandEvent, SystemJobEvent,
-    build_safe_env
+    build_safe_env, enforce_bigint_pk_migration
 )
 from awx.main.constants import ACTIVE_STATES
 from awx.main.exceptions import AwxTaskError
@@ -66,12 +67,13 @@ from awx.main.queue import CallbackQueueDispatcher
 from awx.main.isolated import manager as isolated_manager
 from awx.main.dispatch.publish import task
 from awx.main.dispatch import get_local_queuename, reaper
-from awx.main.utils import (get_ssh_version, update_scm_url,
+from awx.main.utils import (update_scm_url,
                             ignore_inventory_computed_fields,
                             ignore_inventory_group_removal, extract_ansible_vars, schedule_task_manager,
                             get_awx_version)
 from awx.main.utils.ansible import read_ansible_config
 from awx.main.utils.common import _get_ansible_version, get_custom_venv_choices
+from awx.main.utils.external_logging import reconfigure_rsyslog
 from awx.main.utils.safe_yaml import safe_dump, sanitize_jinja
 from awx.main.utils.reload import stop_local_services
 from awx.main.utils.pglock import advisory_lock
@@ -134,6 +136,15 @@ def dispatch_startup():
     if Instance.objects.me().is_controller():
         awx_isolated_heartbeat()
 
+    # at process startup, detect the need to migrate old event records from int
+    # to bigint; at *some point* in the future, once certain versions of AWX
+    # and Tower fall out of use/support, we can probably just _assume_ that
+    # everybody has moved to bigint, and remove this code entirely
+    enforce_bigint_pk_migration()
+
+    # Update Tower's rsyslog.conf file based on loggins settings in the db
+    reconfigure_rsyslog()
+
 
 def inform_cluster_of_shutdown():
     try:
@@ -150,7 +161,7 @@ def inform_cluster_of_shutdown():
         logger.exception('Encountered problem with normal shutdown signal.')
 
 
-@task()
+@task(queue=get_local_queuename)
 def apply_cluster_membership_policies():
     started_waiting = time.time()
     with advisory_lock('cluster_policy_lock', wait=True):
@@ -263,7 +274,7 @@ def apply_cluster_membership_policies():
         logger.debug('Cluster policy computation finished in {} seconds'.format(time.time() - started_compute))
 
 
-@task(queue='tower_broadcast_all', exchange_type='fanout')
+@task(queue='tower_broadcast_all')
 def handle_setting_changes(setting_keys):
     orig_len = len(setting_keys)
     for i in range(orig_len):
@@ -273,8 +284,14 @@ def handle_setting_changes(setting_keys):
     logger.debug('cache delete_many(%r)', cache_keys)
     cache.delete_many(cache_keys)
 
+    if any([
+        setting.startswith('LOG_AGGREGATOR')
+        for setting in setting_keys
+    ]):
+        reconfigure_rsyslog()
 
-@task(queue='tower_broadcast_all', exchange_type='fanout')
+
+@task(queue='tower_broadcast_all')
 def delete_project_files(project_path):
     # TODO: possibly implement some retry logic
     lock_file = project_path + '.lock'
@@ -292,7 +309,7 @@ def delete_project_files(project_path):
             logger.exception('Could not remove lock file {}'.format(lock_file))
 
 
-@task(queue='tower_broadcast_all', exchange_type='fanout')
+@task(queue='tower_broadcast_all')
 def profile_sql(threshold=1, minutes=1):
     if threshold == 0:
         cache.delete('awx-profile-sql-threshold')
@@ -306,7 +323,7 @@ def profile_sql(threshold=1, minutes=1):
         logger.error('SQL QUERIES >={}s ENABLED FOR {} MINUTE(S)'.format(threshold, minutes))
 
 
-@task()
+@task(queue=get_local_queuename)
 def send_notifications(notification_list, job_id=None):
     if not isinstance(notification_list, list):
         raise TypeError("notification_list should be of type list")
@@ -335,19 +352,36 @@ def send_notifications(notification_list, job_id=None):
                 logger.exception('Error saving notification {} result.'.format(notification.id))
 
 
-@task()
+@task(queue=get_local_queuename)
 def gather_analytics():
+    from awx.conf.models import Setting
+    from rest_framework.fields import DateTimeField
     if not settings.INSIGHTS_TRACKING_STATE:
         return
-    try:
-        tgz = analytics.gather()
-        if not tgz:
-            return
-        logger.debug('gathered analytics: {}'.format(tgz))
-        analytics.ship(tgz)
-    finally:
-        if os.path.exists(tgz):
-            os.remove(tgz)
+    if not (settings.AUTOMATION_ANALYTICS_URL and settings.REDHAT_USERNAME and settings.REDHAT_PASSWORD):
+        logger.debug('Not gathering analytics, configuration is invalid')
+        return
+    last_gather = Setting.objects.filter(key='AUTOMATION_ANALYTICS_LAST_GATHER').first()
+    if last_gather:
+        last_time = DateTimeField().to_internal_value(last_gather.value)
+    else:
+        last_time = None
+    gather_time = now()
+    if not last_time or ((gather_time - last_time).total_seconds() > settings.AUTOMATION_ANALYTICS_GATHER_INTERVAL):
+        with advisory_lock('gather_analytics_lock', wait=False) as acquired:
+            if acquired is False:
+                logger.debug('Not gathering analytics, another task holds lock')
+                return
+            try:
+                tgz = analytics.gather()
+                if not tgz:
+                    return
+                logger.info('gathered analytics: {}'.format(tgz))
+                analytics.ship(tgz)
+                settings.AUTOMATION_ANALYTICS_LAST_GATHER = gather_time
+            finally:
+                if os.path.exists(tgz):
+                    os.remove(tgz)
 
 
 @task(queue=get_local_queuename)
@@ -474,10 +508,10 @@ def awx_isolated_heartbeat():
     # Slow pass looping over isolated IGs and their isolated instances
     if len(isolated_instance_qs) > 0:
         logger.debug("Managing isolated instances {}.".format(','.join([inst.hostname for inst in isolated_instance_qs])))
-        isolated_manager.IsolatedManager().health_check(isolated_instance_qs)
+        isolated_manager.IsolatedManager(CallbackQueueDispatcher.dispatch).health_check(isolated_instance_qs)
 
 
-@task()
+@task(queue=get_local_queuename)
 def awx_periodic_scheduler():
     with advisory_lock('awx_periodic_scheduler_lock', wait=False) as acquired:
         if acquired is False:
@@ -499,7 +533,7 @@ def awx_periodic_scheduler():
 
         invalid_license = False
         try:
-            access_registry[Job](None).check_license()
+            access_registry[Job](None).check_license(quiet=True)
         except PermissionDenied as e:
             invalid_license = e
 
@@ -527,14 +561,15 @@ def awx_periodic_scheduler():
                 continue
             if not can_start:
                 new_unified_job.status = 'failed'
-                new_unified_job.job_explanation = "Scheduled job could not start because it was not in the right state or required manual credentials"
+                new_unified_job.job_explanation = gettext_noop("Scheduled job could not start because it \
+                    was not in the right state or required manual credentials")
                 new_unified_job.save(update_fields=['status', 'job_explanation'])
                 new_unified_job.websocket_emit_status("failed")
             emit_channel_notification('schedules-changed', dict(id=schedule.id, group_name="schedules"))
         state.save()
 
 
-@task()
+@task(queue=get_local_queuename)
 def handle_work_success(task_actual):
     try:
         instance = UnifiedJob.get_instance_by_type(task_actual['type'], task_actual['id'])
@@ -547,7 +582,7 @@ def handle_work_success(task_actual):
     schedule_task_manager()
 
 
-@task()
+@task(queue=get_local_queuename)
 def handle_work_error(task_id, *args, **kwargs):
     subtasks = kwargs.get('subtasks', None)
     logger.debug('Executing error task id %s, subtasks: %s' % (task_id, str(subtasks)))
@@ -569,7 +604,7 @@ def handle_work_error(task_id, *args, **kwargs):
                 first_instance = instance
                 first_instance_type = each_task['type']
 
-            if instance.celery_task_id != task_id and not instance.cancel_flag:
+            if instance.celery_task_id != task_id and not instance.cancel_flag and not instance.status == 'successful':
                 instance.status = 'failed'
                 instance.failed = True
                 if not instance.job_explanation:
@@ -587,7 +622,26 @@ def handle_work_error(task_id, *args, **kwargs):
         pass
 
 
-@task()
+@task(queue=get_local_queuename)
+def handle_success_and_failure_notifications(job_id):
+    uj = UnifiedJob.objects.get(pk=job_id)
+    retries = 0
+    while retries < 5:
+        if uj.finished:
+            uj.send_notification_templates('succeeded' if uj.status == 'successful' else 'failed')
+            return
+        else:
+            # wait a few seconds to avoid a race where the
+            # events are persisted _before_ the UJ.status
+            # changes from running -> successful
+            retries += 1
+            time.sleep(1)
+            uj = UnifiedJob.objects.get(pk=job_id)
+
+    logger.warn(f"Failed to even try to send notifications for job '{uj}' due to job not being in finished state.")
+
+
+@task(queue=get_local_queuename)
 def update_inventory_computed_fields(inventory_id):
     '''
     Signal handler and wrapper around inventory.update_computed_fields to
@@ -629,7 +683,7 @@ def update_smart_memberships_for_inventory(smart_inventory):
     return False
 
 
-@task()
+@task(queue=get_local_queuename)
 def update_host_smart_inventory_memberships():
     smart_inventories = Inventory.objects.filter(kind='smart', host_filter__isnull=False, pending_deletion=False)
     changed_inventories = set([])
@@ -645,7 +699,49 @@ def update_host_smart_inventory_memberships():
         smart_inventory.update_computed_fields()
 
 
-@task()
+@task(queue=get_local_queuename)
+def migrate_legacy_event_data(tblname):
+    if 'event' not in tblname:
+        return
+    with advisory_lock(f'bigint_migration_{tblname}', wait=False) as acquired:
+        if acquired is False:
+            return
+        chunk = settings.JOB_EVENT_MIGRATION_CHUNK_SIZE
+
+        def _remaining():
+            try:
+                cursor.execute(f'SELECT MAX(id) FROM _old_{tblname};')
+                return cursor.fetchone()[0]
+            except ProgrammingError:
+                # the table is gone (migration is unnecessary)
+                return None
+
+        with connection.cursor() as cursor:
+            total_rows = _remaining()
+            while total_rows:
+                with transaction.atomic():
+                    cursor.execute(
+                        f'INSERT INTO {tblname} SELECT * FROM _old_{tblname} ORDER BY id DESC LIMIT {chunk} RETURNING id;'
+                    )
+                    last_insert_pk = cursor.fetchone()
+                    if last_insert_pk is None:
+                        # this means that the SELECT from the old table was
+                        # empty, and there was nothing to insert (so we're done)
+                        break
+                    last_insert_pk = last_insert_pk[0]
+                    cursor.execute(
+                        f'DELETE FROM _old_{tblname} WHERE id IN (SELECT id FROM _old_{tblname} ORDER BY id DESC LIMIT {chunk});'
+                    )
+                logger.warn(
+                    f'migrated int -> bigint rows to {tblname} from _old_{tblname}; # ({last_insert_pk} rows remaining)'
+                )
+
+            if _remaining() is None:
+                cursor.execute(f'DROP TABLE IF EXISTS _old_{tblname}')
+                logger.warn(f'{tblname} primary key migration to bigint has finished')
+
+
+@task(queue=get_local_queuename)
 def delete_inventory(inventory_id, user_id, retries=5):
     # Delete inventory as user
     if user_id is None:
@@ -805,21 +901,14 @@ class BaseTask(object):
         private_data = self.build_private_data(instance, private_data_dir)
         private_data_files = {'credentials': {}}
         if private_data is not None:
-            ssh_ver = get_ssh_version()
-            ssh_too_old = True if ssh_ver == "unknown" else Version(ssh_ver) < Version("6.0")
-            openssh_keys_supported = ssh_ver != "unknown" and Version(ssh_ver) >= Version("6.5")
             for credential, data in private_data.get('credentials', {}).items():
-                # Bail out now if a private key was provided in OpenSSH format
-                # and we're running an earlier version (<6.5).
-                if 'OPENSSH PRIVATE KEY' in data and not openssh_keys_supported:
-                    raise RuntimeError(OPENSSH_KEY_ERROR)
                 # OpenSSH formatted keys must have a trailing newline to be
                 # accepted by ssh-add.
                 if 'OPENSSH PRIVATE KEY' in data and not data.endswith('\n'):
                     data += '\n'
                 # For credentials used with ssh-add, write to a named pipe which
                 # will be read then closed, instead of leaving the SSH key on disk.
-                if credential and credential.credential_type.namespace in ('ssh', 'scm') and not ssh_too_old:
+                if credential and credential.credential_type.namespace in ('ssh', 'scm'):
                     try:
                         os.mkdir(os.path.join(private_data_dir, 'env'))
                     except OSError as e:
@@ -1130,7 +1219,27 @@ class BaseTask(object):
             else:
                 event_data['host_name'] = ''
                 event_data['host_id'] = ''
-        should_write_event = False
+            if event_data.get('event') == 'playbook_on_stats':
+                event_data['host_map'] = self.host_map
+
+        if isinstance(self, RunProjectUpdate):
+            # it's common for Ansible's SCM modules to print
+            # error messages on failure that contain the plaintext
+            # basic auth credentials (username + password)
+            # it's also common for the nested event data itself (['res']['...'])
+            # to contain unredacted text on failure
+            # this is a _little_ expensive to filter
+            # with regex, but project updates don't have many events,
+            # so it *should* have a negligible performance impact
+            task = event_data.get('event_data', {}).get('task_action')
+            try:
+                if task in ('git', 'hg', 'svn'):
+                    event_data_json = json.dumps(event_data)
+                    event_data_json = UriCleaner.remove_sensitive(event_data_json)
+                    event_data = json.loads(event_data_json)
+            except json.JSONDecodeError:
+                pass
+
         event_data.setdefault(self.event_data_key, self.instance.id)
         self.dispatcher.dispatch(event_data)
         self.event_ct += 1
@@ -1142,13 +1251,17 @@ class BaseTask(object):
             self.instance.artifacts = event_data['event_data']['artifact_data']
             self.instance.save(update_fields=['artifacts'])
 
-        return should_write_event
+        return False
 
     def cancel_callback(self):
         '''
         Ansible runner callback to tell the job when/if it is canceled
         '''
-        self.instance = self.update_model(self.instance.pk)
+        unified_job_id = self.instance.pk
+        self.instance = self.update_model(unified_job_id)
+        if not self.instance:
+            logger.error('unified job {} was deleted while running, canceling'.format(unified_job_id))
+            return True
         if self.instance.cancel_flag or self.instance.status == 'canceled':
             cancel_wait = (now() - self.instance.modified).seconds if self.instance.modified else 0
             if cancel_wait > 5:
@@ -1309,7 +1422,6 @@ class BaseTask(object):
                 'status_handler': self.status_handler,
                 'settings': {
                     'job_timeout': self.get_instance_timeout(self.instance),
-                    'pexpect_timeout': getattr(settings, 'PEXPECT_TIMEOUT', 5),
                     'suppress_ansible_output': True,
                     **process_isolation_params,
                     **resource_profiling_params,
@@ -1338,6 +1450,7 @@ class BaseTask(object):
                 if not params[v]:
                     del params[v]
 
+            self.dispatcher = CallbackQueueDispatcher()
             if self.instance.is_isolated() or containerized:
                 module_args = None
                 if 'module_args' in params:
@@ -1352,6 +1465,7 @@ class BaseTask(object):
 
                 ansible_runner.utils.dump_artifacts(params)
                 isolated_manager_instance = isolated_manager.IsolatedManager(
+                    self.event_handler,
                     canceled_callback=lambda: self.update_model(self.instance.pk).cancel_flag,
                     check_callback=self.check_handler,
                     pod_manager=pod_manager
@@ -1361,11 +1475,9 @@ class BaseTask(object):
                                                            params.get('playbook'),
                                                            params.get('module'),
                                                            module_args,
-                                                           event_data_key=self.event_data_key,
                                                            ident=str(self.instance.pk))
-                self.event_ct = len(isolated_manager_instance.handled_events)
+                self.finished_callback(None)
             else:
-                self.dispatcher = CallbackQueueDispatcher()
                 res = ansible_runner.interface.run(**params)
                 status = res.status
                 rc = res.rc
@@ -1443,7 +1555,7 @@ class BaseTask(object):
 
 
 
-@task()
+@task(queue=get_local_queuename)
 class RunJob(BaseTask):
     '''
     Run a job using ansible-playbook.
@@ -1660,7 +1772,7 @@ class RunJob(BaseTask):
             if settings.MAX_FORKS > 0 and job.forks > settings.MAX_FORKS:
                 logger.warning(f'Maximum number of forks ({settings.MAX_FORKS}) exceeded.')
                 args.append('--forks=%d' % settings.MAX_FORKS)
-            else: 
+            else:
                 args.append('--forks=%d' % job.forks)
         if job.force_handlers:
             args.append('--force-handlers')
@@ -1773,7 +1885,7 @@ class RunJob(BaseTask):
                 current_revision = git_repo.head.commit.hexsha
                 if desired_revision == current_revision:
                     job_revision = desired_revision
-                    logger.info('Skipping project sync for {} because commit is locally available'.format(job.log_format))
+                    logger.debug('Skipping project sync for {} because commit is locally available'.format(job.log_format))
                 else:
                     sync_needs = all_sync_needs
             except (ValueError, BadGitName):
@@ -1872,10 +1984,11 @@ class RunJob(BaseTask):
         except Inventory.DoesNotExist:
             pass
         else:
-            update_inventory_computed_fields.delay(inventory.id)
+            if inventory is not None:
+                update_inventory_computed_fields.delay(inventory.id)
 
 
-@task()
+@task(queue=get_local_queuename)
 class RunProjectUpdate(BaseTask):
 
     model = ProjectUpdate
@@ -1961,28 +2074,34 @@ class RunProjectUpdate(BaseTask):
         if settings.GALAXY_IGNORE_CERTS:
             env['ANSIBLE_GALAXY_IGNORE'] = True
         # Set up the public Galaxy server, if enabled
+        galaxy_configured = False
         if settings.PUBLIC_GALAXY_ENABLED:
-            galaxy_servers = [settings.PUBLIC_GALAXY_SERVER]
+            galaxy_servers = [settings.PUBLIC_GALAXY_SERVER]  # static setting
         else:
+            galaxy_configured = True
             galaxy_servers = []
         # Set up fallback Galaxy servers, if configured
         if settings.FALLBACK_GALAXY_SERVERS:
+            galaxy_configured = True
             galaxy_servers = settings.FALLBACK_GALAXY_SERVERS + galaxy_servers
         # Set up the primary Galaxy server, if configured
         if settings.PRIMARY_GALAXY_URL:
+            galaxy_configured = True
             galaxy_servers = [{'id': 'primary_galaxy'}] + galaxy_servers
             for key in GALAXY_SERVER_FIELDS:
                 value = getattr(settings, 'PRIMARY_GALAXY_{}'.format(key.upper()))
                 if value:
                     galaxy_servers[0][key] = value
-        for server in galaxy_servers:
-            for key in GALAXY_SERVER_FIELDS:
-                if not server.get(key):
-                    continue
-                env_key = ('ANSIBLE_GALAXY_SERVER_{}_{}'.format(server.get('id', 'unnamed'), key)).upper()
-                env[env_key] = server[key]
-        # now set the precedence of galaxy servers
-        env['ANSIBLE_GALAXY_SERVER_LIST'] = ','.join([server.get('id', 'unnamed') for server in galaxy_servers])
+        if galaxy_configured:
+            for server in galaxy_servers:
+                for key in GALAXY_SERVER_FIELDS:
+                    if not server.get(key):
+                        continue
+                    env_key = ('ANSIBLE_GALAXY_SERVER_{}_{}'.format(server.get('id', 'unnamed'), key)).upper()
+                    env[env_key] = server[key]
+            if galaxy_servers:
+                # now set the precedence of galaxy servers
+                env['ANSIBLE_GALAXY_SERVER_LIST'] = ','.join([server.get('id', 'unnamed') for server in galaxy_servers])
         return env
 
     def _build_scm_url_extra_vars(self, project_update):
@@ -2235,7 +2354,7 @@ class RunProjectUpdate(BaseTask):
             # force option is necessary because remote refs are not counted, although no information is lost
             git_repo.delete_head(tmp_branch_name, force=True)
         else:
-            copy_tree(project_path, destination_folder)
+            copy_tree(project_path, destination_folder, preserve_symlinks=1)
 
     def post_run_hook(self, instance, status):
         # To avoid hangs, very important to release lock even if errors happen here
@@ -2284,7 +2403,7 @@ class RunProjectUpdate(BaseTask):
         return getattr(settings, 'AWX_PROOT_ENABLED', False)
 
 
-@task()
+@task(queue=get_local_queuename)
 class RunInventoryUpdate(BaseTask):
 
     model = InventoryUpdate
@@ -2293,7 +2412,7 @@ class RunInventoryUpdate(BaseTask):
 
     @property
     def proot_show_paths(self):
-        return [self.get_path_to('..', 'plugins', 'inventory')]
+        return [self.get_path_to('..', 'plugins', 'inventory'), settings.AWX_ANSIBLE_COLLECTIONS_PATHS]
 
     def build_private_data(self, inventory_update, private_data_dir):
         """
@@ -2552,7 +2671,7 @@ class RunInventoryUpdate(BaseTask):
             )
 
 
-@task()
+@task(queue=get_local_queuename)
 class RunAdHocCommand(BaseTask):
     '''
     Run an ad hoc command using ansible.
@@ -2623,9 +2742,12 @@ class RunAdHocCommand(BaseTask):
         env['ANSIBLE_LOAD_CALLBACK_PLUGINS'] = '1'
         env['ANSIBLE_SFTP_BATCH_MODE'] = 'False'
 
-        # Specify empty SSH args (should disable ControlPersist entirely for
-        # ad hoc commands).
-        env.setdefault('ANSIBLE_SSH_ARGS', '')
+        # Create a directory for ControlPath sockets that is unique to each
+        # ad hoc command and visible inside the proot environment (when enabled).
+        cp_dir = os.path.join(private_data_dir, 'cp')
+        if not os.path.exists(cp_dir):
+            os.mkdir(cp_dir, 0o700)
+        env['ANSIBLE_SSH_CONTROL_PATH'] = cp_dir
 
         return env
 
@@ -2742,7 +2864,7 @@ class RunAdHocCommand(BaseTask):
             isolated_manager_instance.cleanup()
 
 
-@task()
+@task(queue=get_local_queuename)
 class RunSystemJob(BaseTask):
 
     model = SystemJob
@@ -2816,11 +2938,16 @@ def _reconstruct_relationships(copy_mapping):
         new_obj.save()
 
 
-@task()
+@task(queue=get_local_queuename)
 def deep_copy_model_obj(
     model_module, model_name, obj_pk, new_obj_pk,
-    user_pk, sub_obj_list, permission_check_func=None
+    user_pk, uuid, permission_check_func=None
 ):
+    sub_obj_list = cache.get(uuid)
+    if sub_obj_list is None:
+        logger.error('Deep copy {} from {} to {} failed unexpectedly.'.format(model_name, obj_pk, new_obj_pk))
+        return
+
     logger.debug('Deep copy {} from {} to {}.'.format(model_name, obj_pk, new_obj_pk))
     from awx.api.generics import CopyAPIView
     from awx.main.signals import disable_activity_stream

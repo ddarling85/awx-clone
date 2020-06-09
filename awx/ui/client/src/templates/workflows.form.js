@@ -210,6 +210,7 @@ export default ['NotificationsList', 'i18n', function(NotificationsList, i18n) {
                             class="input-group-btn input-group-prepend"
                         >
                             <button
+                                aria-label="${i18n._('Rotate Webhook Key')}"
                                 type="button"
                                 class="btn Form-lookupButton"
                                 ng-click="handleWebhookKeyButtonClick()"
@@ -294,7 +295,7 @@ export default ['NotificationsList', 'i18n', function(NotificationsList, i18n) {
                             label: i18n._('Add'),
                             awToolTip: i18n._('Add a permission'),
                             actionClass: 'at-Button--add',
-                            actionId: 'button-add',
+                            actionId: 'button-add--permission',
                             ngShow: '(workflow_job_template_obj.summary_fields.user_capabilities.edit || canAddOrEdit)'
                         }
                     },

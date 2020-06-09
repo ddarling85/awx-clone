@@ -1,14 +1,18 @@
 import React from 'react';
 import { act } from 'react-dom/test-utils';
 import { createMemoryHistory } from 'history';
-import { mountWithContexts, waitForElement } from '@testUtils/enzymeHelpers';
+import {
+  mountWithContexts,
+  waitForElement,
+} from '../../../../testUtils/enzymeHelpers';
 import TeamAdd from './TeamAdd';
-import { TeamsAPI } from '@api';
+import { TeamsAPI } from '../../../api';
 
-jest.mock('@api');
+jest.mock('../../../api');
 
 describe('<TeamAdd />', () => {
   test('handleSubmit should post to api', async () => {
+    TeamsAPI.create.mockResolvedValueOnce({ data: {} });
     const wrapper = mountWithContexts(<TeamAdd />);
     const updatedTeamData = {
       name: 'new name',
@@ -28,17 +32,6 @@ describe('<TeamAdd />', () => {
     });
     await act(async () => {
       wrapper.find('button[aria-label="Cancel"]').invoke('onClick')();
-    });
-    expect(history.location.pathname).toEqual('/teams');
-  });
-
-  test('should navigate to teams list when close (x) is clicked', async () => {
-    const history = createMemoryHistory({});
-    const wrapper = mountWithContexts(<TeamAdd />, {
-      context: { router: { history } },
-    });
-    await act(async () => {
-      wrapper.find('button[aria-label="Close"]').invoke('onClick')();
     });
     expect(history.location.pathname).toEqual('/teams');
   });

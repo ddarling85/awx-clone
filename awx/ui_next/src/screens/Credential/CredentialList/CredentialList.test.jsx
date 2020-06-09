@@ -1,11 +1,14 @@
 import React from 'react';
 import { act } from 'react-dom/test-utils';
-import { CredentialsAPI } from '@api';
-import { mountWithContexts, waitForElement } from '@testUtils/enzymeHelpers';
+import { CredentialsAPI } from '../../../api';
+import {
+  mountWithContexts,
+  waitForElement,
+} from '../../../../testUtils/enzymeHelpers';
 import { CredentialList } from '.';
-import mockCredentials from '../shared';
+import { mockCredentials } from '../shared';
 
-jest.mock('@api');
+jest.mock('../../../api');
 
 describe('<CredentialList />', () => {
   let wrapper;
@@ -54,44 +57,44 @@ describe('<CredentialList />', () => {
 
   test('should check and uncheck the row item', async () => {
     expect(
-      wrapper.find('PFDataListCheck[id="select-credential-1"]').props().checked
+      wrapper.find('DataListCheck[id="select-credential-1"]').props().checked
     ).toBe(false);
     await act(async () => {
       wrapper
-        .find('PFDataListCheck[id="select-credential-1"]')
+        .find('DataListCheck[id="select-credential-1"]')
         .invoke('onChange')(true);
     });
     wrapper.update();
     expect(
-      wrapper.find('PFDataListCheck[id="select-credential-1"]').props().checked
+      wrapper.find('DataListCheck[id="select-credential-1"]').props().checked
     ).toBe(true);
     await act(async () => {
       wrapper
-        .find('PFDataListCheck[id="select-credential-1"]')
+        .find('DataListCheck[id="select-credential-1"]')
         .invoke('onChange')(false);
     });
     wrapper.update();
     expect(
-      wrapper.find('PFDataListCheck[id="select-credential-1"]').props().checked
+      wrapper.find('DataListCheck[id="select-credential-1"]').props().checked
     ).toBe(false);
   });
 
   test('should check all row items when select all is checked', async () => {
-    wrapper.find('PFDataListCheck').forEach(el => {
+    wrapper.find('DataListCheck').forEach(el => {
       expect(el.props().checked).toBe(false);
     });
     await act(async () => {
       wrapper.find('Checkbox#select-all').invoke('onChange')(true);
     });
     wrapper.update();
-    wrapper.find('PFDataListCheck').forEach(el => {
+    wrapper.find('DataListCheck').forEach(el => {
       expect(el.props().checked).toBe(true);
     });
     await act(async () => {
       wrapper.find('Checkbox#select-all').invoke('onChange')(false);
     });
     wrapper.update();
-    wrapper.find('PFDataListCheck').forEach(el => {
+    wrapper.find('DataListCheck').forEach(el => {
       expect(el.props().checked).toBe(false);
     });
   });
@@ -102,7 +105,7 @@ describe('<CredentialList />', () => {
 
     await act(async () => {
       wrapper
-        .find('PFDataListCheck[id="select-credential-3"]')
+        .find('DataListCheck[id="select-credential-3"]')
         .invoke('onChange')();
     });
     wrapper.update();
@@ -119,7 +122,7 @@ describe('<CredentialList />', () => {
     );
     await act(async () => {
       wrapper
-        .find('PFDataListCheck[id="select-credential-2"]')
+        .find('DataListCheck[id="select-credential-2"]')
         .invoke('onChange')();
     });
     wrapper.update();
@@ -128,7 +131,7 @@ describe('<CredentialList />', () => {
     });
     await waitForElement(
       wrapper,
-      'Modal',
+      'Modal[aria-label="Deletion Error"]',
       el => el.props().isOpen === true && el.props().title === 'Error!'
     );
     await act(async () => {

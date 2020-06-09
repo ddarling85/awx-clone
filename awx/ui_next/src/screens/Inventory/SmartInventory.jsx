@@ -1,17 +1,17 @@
 import React, { Component } from 'react';
 import { t } from '@lingui/macro';
 import { withI18n } from '@lingui/react';
-import { Card, PageSection } from '@patternfly/react-core';
+import { Card, CardActions, PageSection } from '@patternfly/react-core';
 import { Switch, Route, Redirect, withRouter, Link } from 'react-router-dom';
-import { TabbedCardHeader } from '@components/Card';
-import CardCloseButton from '@components/CardCloseButton';
-import ContentError from '@components/ContentError';
-import RoutedTabs from '@components/RoutedTabs';
-import { ResourceAccessList } from '@components/ResourceAccessList';
+import { TabbedCardHeader } from '../../components/Card';
+import CardCloseButton from '../../components/CardCloseButton';
+import ContentError from '../../components/ContentError';
+import JobList from '../../components/JobList';
+import RoutedTabs from '../../components/RoutedTabs';
+import { ResourceAccessList } from '../../components/ResourceAccessList';
 import SmartInventoryDetail from './SmartInventoryDetail';
 import SmartInventoryHosts from './SmartInventoryHosts';
-import SmartInventoryCompletedJobs from './SmartInventoryCompletedJobs';
-import { InventoriesAPI } from '@api';
+import { InventoriesAPI } from '../../api';
 import SmartInventoryEdit from './SmartInventoryEdit';
 
 class SmartInventory extends Component {
@@ -60,7 +60,7 @@ class SmartInventory extends Component {
   }
 
   render() {
-    const { history, i18n, location, match } = this.props;
+    const { i18n, location, match } = this.props;
     const { contentError, hasContentLoading, inventory } = this.state;
 
     const tabsArray = [
@@ -76,8 +76,10 @@ class SmartInventory extends Component {
 
     let cardHeader = hasContentLoading ? null : (
       <TabbedCardHeader>
-        <RoutedTabs history={history} tabsArray={tabsArray} />
-        <CardCloseButton linkTo="/inventories" />
+        <RoutedTabs tabsArray={tabsArray} />
+        <CardActions>
+          <CardCloseButton linkTo="/inventories" />
+        </CardActions>
       </TabbedCardHeader>
     );
 
@@ -88,7 +90,7 @@ class SmartInventory extends Component {
     if (!hasContentLoading && contentError) {
       return (
         <PageSection>
-          <Card className="awx-c-card">
+          <Card>
             <ContentError error={contentError}>
               {contentError.response.status === 404 && (
                 <span>
@@ -105,7 +107,7 @@ class SmartInventory extends Component {
     }
     return (
       <PageSection>
-        <Card className="awx-c-card">
+        <Card>
           {cardHeader}
           <Switch>
             <Redirect
@@ -117,58 +119,54 @@ class SmartInventory extends Component {
               <Route
                 key="details"
                 path="/inventories/smart_inventory/:id/details"
-                render={() => (
-                  <SmartInventoryDetail
-                    match={match}
-                    hasSmartInventoryLoading={hasContentLoading}
-                    inventory={inventory}
-                  />
-                )}
-              />,
-              <Route
-                key="edit"
-                path="/inventories/smart_inventory/:id/edit"
-                render={() => <SmartInventoryEdit inventory={inventory} />}
-              />,
+              >
+                <SmartInventoryDetail
+                  hasSmartInventoryLoading={hasContentLoading}
+                  inventory={inventory}
+                />
+              </Route>,
+              <Route key="edit" path="/inventories/smart_inventory/:id/edit">
+                <SmartInventoryEdit inventory={inventory} />
+              </Route>,
               <Route
                 key="access"
                 path="/inventories/smart_inventory/:id/access"
-                render={() => (
-                  <ResourceAccessList
-                    resource={inventory}
-                    apiModel={InventoriesAPI}
-                  />
-                )}
-              />,
-              <Route
-                key="hosts"
-                path="/inventories/smart_inventory/:id/hosts"
-                render={() => <SmartInventoryHosts inventory={inventory} />}
-              />,
+              >
+                <ResourceAccessList
+                  resource={inventory}
+                  apiModel={InventoriesAPI}
+                />
+              </Route>,
+              <Route key="hosts" path="/inventories/smart_inventory/:id/hosts">
+                <SmartInventoryHosts inventory={inventory} />
+              </Route>,
               <Route
                 key="completed_jobs"
                 path="/inventories/smart_inventory/:id/completed_jobs"
-                render={() => (
-                  <SmartInventoryCompletedJobs inventory={inventory} />
+              >
+                <JobList
+                  defaultParams={{
+                    or__job__inventory: inventory.id,
+                    or__adhoccommand__inventory: inventory.id,
+                    or__inventoryupdate__inventory_source__inventory:
+                      inventory.id,
+                    or__workflowjob__inventory: inventory.id,
+                  }}
+                />
+              </Route>,
+              <Route key="not-found" path="*">
+                {!hasContentLoading && (
+                  <ContentError isNotFound>
+                    {match.params.id && (
+                      <Link
+                        to={`/inventories/smart_inventory/${match.params.id}/details`}
+                      >
+                        {i18n._(`View Inventory Details`)}
+                      </Link>
+                    )}
+                  </ContentError>
                 )}
-              />,
-              <Route
-                key="not-found"
-                path="*"
-                render={() =>
-                  !hasContentLoading && (
-                    <ContentError isNotFound>
-                      {match.params.id && (
-                        <Link
-                          to={`/inventories/smart_inventory/${match.params.id}/details`}
-                        >
-                          {i18n._(`View Inventory Details`)}
-                        </Link>
-                      )}
-                    </ContentError>
-                  )
-                }
-              />,
+              </Route>,
             ]}
           </Switch>
         </Card>

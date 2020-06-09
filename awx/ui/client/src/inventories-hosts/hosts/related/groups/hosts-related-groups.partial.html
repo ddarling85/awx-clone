@@ -5,6 +5,7 @@
                   <div class="Modal-title ng-binding">
                       <span translate>Disassociate Host</span>
                       <a href="" id="awp-promote" href=""
+                          aria-label="{{'Show help text' | translate }}"
                           aw-pop-over="<dl><dt>Disassociate</dt><dd>Disassociation will remove a host from a group but the host will remain in the inventory.</dd></dl>" aw-tool-tip="Click for help"
                           data-placement="right"
                           data-container="body"
@@ -14,7 +15,7 @@
                       </a>
                   </div>
                   <div class="Modal-exitHolder">
-                      <button class="close Modal-exit" data-target="#host-disassociate-modal" data-dismiss="modal" aria-hidden="true"><i class="fa fa-times-circle"></i></button>
+                      <button aria-label="{{strings.get('CLOSE')}}" class="close Modal-exit" data-target="#host-disassociate-modal" data-dismiss="modal"><i class="fa fa-times-circle"></i></button>
                   </div>
             </div>
             <div class="Modal-body">

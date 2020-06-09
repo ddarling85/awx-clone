@@ -89,8 +89,8 @@ class SimpleDAG(object):
                 run_status(n['node_object']),
                 color
             )
-        for label, edges in self.node_from_edges_by_label.iteritems():
-            for from_node, to_nodes in edges.iteritems():
+        for label, edges in self.node_from_edges_by_label.items():
+            for from_node, to_nodes in edges.items():
                 for to_node in to_nodes:
                     doc += "%s -> %s [ label=\"%s\" ];\n" % (
                         run_status(self.nodes[from_node]['node_object']),
@@ -123,7 +123,7 @@ class SimpleDAG(object):
         self.root_nodes.discard(to_obj_ord)
 
         if from_obj_ord is None and to_obj_ord is None:
-            raise LookupError("From object {} and to object not found".format(from_obj, to_obj))
+            raise LookupError("From object {} and to object {} not found".format(from_obj, to_obj))
         elif from_obj_ord is None:
             raise LookupError("From object not found {}".format(from_obj))
         elif to_obj_ord is None:
@@ -140,36 +140,36 @@ class SimpleDAG(object):
     def find_ord(self, obj):
         return self.node_obj_to_node_index.get(obj, None)
 
-    def _get_dependencies_by_label(self, node_index, label):
+    def _get_children_by_label(self, node_index, label):
         return [self.nodes[index] for index in
                 self.node_from_edges_by_label.get(label, {})
                                              .get(node_index, [])]
 
-    def get_dependencies(self, obj, label=None):
+    def get_children(self, obj, label=None):
         this_ord = self.find_ord(obj)
         nodes = []
         if label:
-            return self._get_dependencies_by_label(this_ord, label)
+            return self._get_children_by_label(this_ord, label)
         else:
             nodes = []
-            for l in self.node_from_edges_by_label.keys():
-                nodes.extend(self._get_dependencies_by_label(this_ord, l))
+            for label_obj in self.node_from_edges_by_label.keys():
+                nodes.extend(self._get_children_by_label(this_ord, label_obj))
             return nodes
 
-    def _get_dependents_by_label(self, node_index, label):
+    def _get_parents_by_label(self, node_index, label):
         return [self.nodes[index] for index in
                 self.node_to_edges_by_label.get(label, {})
                                            .get(node_index, [])]
 
-    def get_dependents(self, obj, label=None):
+    def get_parents(self, obj, label=None):
         this_ord = self.find_ord(obj)
         nodes = []
         if label:
-            return self._get_dependents_by_label(this_ord, label)
+            return self._get_parents_by_label(this_ord, label)
         else:
             nodes = []
-            for l in self.node_to_edges_by_label.keys():
-                nodes.extend(self._get_dependents_by_label(this_ord, l))
+            for label_obj in self.node_to_edges_by_label.keys():
+                nodes.extend(self._get_parents_by_label(this_ord, label_obj))
             return nodes
 
     def get_root_nodes(self):
@@ -188,7 +188,7 @@ class SimpleDAG(object):
         while stack:
             node_obj = stack.pop()
 
-            children = [node['node_object'] for node in self.get_dependencies(node_obj)]
+            children = [node['node_object'] for node in self.get_children(node_obj)]
             children_to_add = list(filter(lambda node_obj: node_obj not in node_objs_visited, children))
 
             if children_to_add:
@@ -212,7 +212,7 @@ class SimpleDAG(object):
             if obj.id in obj_ids_processed:
                 return
 
-            for child in self.get_dependencies(obj):
+            for child in self.get_children(obj):
                 visit(child)
             obj_ids_processed.add(obj.id)
             nodes_sorted.appendleft(node)

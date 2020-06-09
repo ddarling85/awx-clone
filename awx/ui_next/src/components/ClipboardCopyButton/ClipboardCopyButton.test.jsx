@@ -1,5 +1,5 @@
 import React from 'react';
-import { mountWithContexts } from '@testUtils/enzymeHelpers';
+import { mountWithContexts } from '../../../testUtils/enzymeHelpers';
 import ClipboardCopyButton from './ClipboardCopyButton';
 
 document.execCommand = jest.fn();
@@ -13,6 +13,7 @@ describe('ClipboardCopyButton', () => {
         clickTip="foo"
         hoverTip="bar"
         stringToCopy="foobar!"
+        isDisabled={false}
       />
     );
     expect(wrapper).toHaveLength(1);
@@ -23,6 +24,7 @@ describe('ClipboardCopyButton', () => {
         clickTip="foo"
         hoverTip="bar"
         stringToCopy="foobar!"
+        isDisabled={false}
       />
     ).find('ClipboardCopyButton');
     expect(wrapper.state('copied')).toBe(false);
@@ -32,5 +34,16 @@ describe('ClipboardCopyButton', () => {
     jest.runAllTimers();
     wrapper.update();
     expect(wrapper.state('copied')).toBe(false);
+  });
+  test('should render disabled button', () => {
+    const wrapper = mountWithContexts(
+      <ClipboardCopyButton
+        clickTip="foo"
+        hoverTip="bar"
+        stringToCopy="foobar!"
+        isDisabled
+      />
+    );
+    expect(wrapper.find('Button').prop('isDisabled')).toBe(true);
   });
 });

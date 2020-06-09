@@ -1,14 +1,15 @@
-import React, { Component, Fragment } from 'react';
+import React, { Component } from 'react';
 import { withI18n } from '@lingui/react';
 import { t } from '@lingui/macro';
 import { Route, withRouter, Switch } from 'react-router-dom';
 
-import { Config } from '@contexts/Config';
-import Breadcrumbs from '@components/Breadcrumbs/Breadcrumbs';
+import { Config } from '../../contexts/Config';
+import Breadcrumbs from '../../components/Breadcrumbs/Breadcrumbs';
 import { TemplateList } from './TemplateList';
 import Template from './Template';
 import WorkflowJobTemplate from './WorkflowJobTemplate';
 import JobTemplateAdd from './JobTemplateAdd';
+import WorkflowJobTemplateAdd from './WorkflowJobTemplateAdd';
 
 class Templates extends Component {
   constructor(props) {
@@ -19,11 +20,14 @@ class Templates extends Component {
       breadcrumbConfig: {
         '/templates': i18n._(t`Templates`),
         '/templates/job_template/add': i18n._(t`Create New Job Template`),
+        '/templates/workflow_job_template/add': i18n._(
+          t`Create New Workflow Template`
+        ),
       },
     };
   }
 
-  setBreadCrumbConfig = template => {
+  setBreadCrumbConfig = (template, schedule) => {
     const { i18n } = this.props;
     if (!template) {
       return;
@@ -31,6 +35,9 @@ class Templates extends Component {
     const breadcrumbConfig = {
       '/templates': i18n._(t`Templates`),
       '/templates/job_template/add': i18n._(t`Create New Job Template`),
+      '/templates/workflow_job_template/add': i18n._(
+        t`Create New Workflow Template`
+      ),
       [`/templates/${template.type}/${template.id}`]: `${template.name}`,
       [`/templates/${template.type}/${template.id}/details`]: i18n._(
         t`Details`
@@ -38,10 +45,32 @@ class Templates extends Component {
       [`/templates/${template.type}/${template.id}/edit`]: i18n._(
         t`Edit Details`
       ),
+      [`/templates/${template.type}/${template.id}/access`]: i18n._(t`Access`),
       [`/templates/${template.type}/${template.id}/notifications`]: i18n._(
         t`Notifications`
       ),
-      [`/templates/${template.type}/${template.id}/access`]: i18n._(t`Access`),
+      [`/templates/${template.type}/${template.id}/completed_jobs`]: i18n._(
+        t`Completed Jobs`
+      ),
+      [`/templates/${template.type}/${template.id}/survey`]: i18n._(t`Survey`),
+      [`/templates/${template.type}/${template.id}/survey/add`]: i18n._(
+        t`Add Question`
+      ),
+      [`/templates/${template.type}/${template.id}/survey/edit`]: i18n._(
+        t`Edit Question`
+      ),
+      [`/templates/${template.type}/${template.id}/schedules`]: i18n._(
+        t`Schedules`
+      ),
+      [`/templates/${template.type}/${template.id}/schedules/add`]: i18n._(
+        t`Create New Schedule`
+      ),
+      [`/templates/${template.type}/${template.id}/schedules/${schedule &&
+        schedule.id}`]: `${schedule && schedule.name}`,
+      [`/templates/${template.type}/${template.id}/schedules/${schedule &&
+        schedule.id}/details`]: i18n._(t`Schedule Details`),
+      [`/templates/${template.type}/${template.id}/schedules/${schedule &&
+        schedule.id}/edit`]: i18n._(t`Edit Details`),
     };
     this.setState({ breadcrumbConfig });
   };
@@ -50,13 +79,15 @@ class Templates extends Component {
     const { match, history, location } = this.props;
     const { breadcrumbConfig } = this.state;
     return (
-      <Fragment>
+      <>
         <Breadcrumbs breadcrumbConfig={breadcrumbConfig} />
         <Switch>
-          <Route
-            path={`${match.path}/job_template/add`}
-            render={() => <JobTemplateAdd />}
-          />
+          <Route path={`${match.path}/job_template/add`}>
+            <JobTemplateAdd />
+          </Route>
+          <Route path={`${match.path}/workflow_job_template/add`}>
+            <WorkflowJobTemplateAdd />
+          </Route>
           <Route
             path={`${match.path}/job_template/:id`}
             render={({ match: newRouteMatch }) => (
@@ -79,7 +110,6 @@ class Templates extends Component {
               <Config>
                 {({ me }) => (
                   <WorkflowJobTemplate
-                    history={history}
                     location={location}
                     setBreadcrumb={this.setBreadCrumbConfig}
                     me={me || {}}
@@ -89,9 +119,11 @@ class Templates extends Component {
               </Config>
             )}
           />
-          <Route path={`${match.path}`} render={() => <TemplateList />} />
+          <Route path={`${match.path}`}>
+            <TemplateList />
+          </Route>
         </Switch>
-      </Fragment>
+      </>
     );
   }
 }

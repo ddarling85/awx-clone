@@ -6,7 +6,7 @@ import pytest
 # AWX
 from awx.api.serializers import JobTemplateSerializer
 from awx.api.versioning import reverse
-from awx.main.models import Job, JobTemplate, CredentialType, WorkflowJobTemplate
+from awx.main.models import Job, JobTemplate, CredentialType, WorkflowJobTemplate, Organization, Project
 from awx.main.migrations import _save_password_keys as save_password_keys
 
 # Django
@@ -30,35 +30,19 @@ def test_create(post, project, machine_credential, inventory, alice, grant_proje
         project.use_role.members.add(alice)
     if grant_inventory:
         inventory.use_role.members.add(alice)
+    project.organization.job_template_admin_role.members.add(alice)
 
-    r = post(reverse('api:job_template_list'), {
-        'name': 'Some name',
-        'project': project.id,
-        'inventory': inventory.id,
-        'playbook': 'helloworld.yml',
-    }, alice)
-    assert r.status_code == expect
-
-
-@pytest.mark.django_db
-def test_extra_credential_creation(get, post, organization_factory, job_template_factory, credentialtype_aws):
-    objs = organization_factory("org", superusers=['admin'])
-    jt = job_template_factory("jt", organization=objs.organization,
-                              inventory='test_inv', project='test_proj').job_template
-
-    url = reverse('api:job_template_extra_credentials_list', kwargs={'pk': jt.pk})
-    response = post(url, {
-        'name': 'My Cred',
-        'credential_type': credentialtype_aws.pk,
-        'inputs': {
-            'username': 'bob',
-            'password': 'secret',
-        }
-    }, objs.superusers.admin)
-    assert response.status_code == 201
-
-    response = get(url, user=objs.superusers.admin)
-    assert response.data.get('count') == 1
+    post(
+        url=reverse('api:job_template_list'),
+        data={
+            'name': 'Some name',
+            'project': project.id,
+            'inventory': inventory.id,
+            'playbook': 'helloworld.yml'
+        },
+        user=alice,
+        expect=expect
+    )
 
 
 @pytest.mark.django_db
@@ -83,109 +67,23 @@ def test_invalid_credential_kind_xfail(get, post, organization_factory, job_temp
 
 
 @pytest.mark.django_db
-def test_extra_credential_unique_type_xfail(get, post, organization_factory, job_template_factory, credentialtype_aws):
-    objs = organization_factory("org", superusers=['admin'])
-    jt = job_template_factory("jt", organization=objs.organization,
-                              inventory='test_inv', project='test_proj').job_template
-
-    url = reverse('api:job_template_extra_credentials_list', kwargs={'pk': jt.pk})
-    response = post(url, {
-        'name': 'My Cred',
-        'credential_type': credentialtype_aws.pk,
-        'inputs': {
-            'username': 'bob',
-            'password': 'secret',
-        }
-    }, objs.superusers.admin)
-    assert response.status_code == 201
-
-    response = get(url, user=objs.superusers.admin)
-    assert response.data.get('count') == 1
-
-    # this request should fail because you can't assign the same type (aws)
-    # twice
-    response = post(url, {
-        'name': 'My Cred',
-        'credential_type': credentialtype_aws.pk,
-        'inputs': {
-            'username': 'joe',
-            'password': 'another-secret',
-        }
-    }, objs.superusers.admin)
-    assert response.status_code == 400
-
-    response = get(url, user=objs.superusers.admin)
-    assert response.data.get('count') == 1
-
-
-@pytest.mark.django_db
 def test_create_with_forks_exceeding_maximum_xfail(alice, post, project, inventory, settings):
     project.use_role.members.add(alice)
     inventory.use_role.members.add(alice)
     settings.MAX_FORKS = 10
-    response = post(reverse('api:job_template_list'), {
-        'name': 'Some name',
-        'project': project.id,
-        'inventory': inventory.id,
-        'playbook': 'helloworld.yml',
-        'forks': 11,
-    }, alice)
-    assert response.status_code == 400
+    response = post(
+        url=reverse('api:job_template_list'),
+        data={
+            'name': 'Some name',
+            'project': project.id,
+            'inventory': inventory.id,
+            'playbook': 'helloworld.yml',
+            'forks': 11,
+        },
+        user=alice,
+        expect=400
+    )
     assert 'Maximum number of forks (10) exceeded' in str(response.data)
-
-
-@pytest.mark.django_db
-def test_attach_extra_credential(get, post, organization_factory, job_template_factory, credential):
-    objs = organization_factory("org", superusers=['admin'])
-    jt = job_template_factory("jt", organization=objs.organization,
-                              inventory='test_inv', project='test_proj').job_template
-
-    url = reverse('api:job_template_extra_credentials_list', kwargs={'pk': jt.pk})
-    response = post(url, {
-        'associate': True,
-        'id': credential.id,
-    }, objs.superusers.admin)
-    assert response.status_code == 204
-
-    response = get(url, user=objs.superusers.admin)
-    assert response.data.get('count') == 1
-
-
-@pytest.mark.django_db
-def test_detach_extra_credential(get, post, organization_factory, job_template_factory, credential):
-    objs = organization_factory("org", superusers=['admin'])
-    jt = job_template_factory("jt", organization=objs.organization,
-                              inventory='test_inv', project='test_proj').job_template
-    jt.credentials.add(credential)
-    jt.save()
-
-    url = reverse('api:job_template_extra_credentials_list', kwargs={'pk': jt.pk})
-    response = post(url, {
-        'disassociate': True,
-        'id': credential.id,
-    }, objs.superusers.admin)
-    assert response.status_code == 204
-
-    response = get(url, user=objs.superusers.admin)
-    assert response.data.get('count') == 0
-
-
-@pytest.mark.django_db
-def test_attach_extra_credential_wrong_kind_xfail(get, post, organization_factory, job_template_factory, machine_credential):
-    """Extra credentials only allow net + cloud credentials"""
-    objs = organization_factory("org", superusers=['admin'])
-    jt = job_template_factory("jt", organization=objs.organization,
-                              inventory='test_inv', project='test_proj').job_template
-
-    url = reverse('api:job_template_extra_credentials_list', kwargs={'pk': jt.pk})
-    response = post(url, {
-        'associate': True,
-        'id': machine_credential.id,
-    }, objs.superusers.admin)
-    assert response.status_code == 400
-
-    response = get(url, user=objs.superusers.admin)
-    assert response.data.get('count') == 0
 
 
 @pytest.mark.django_db
@@ -360,57 +258,6 @@ def test_launch_with_pending_deletion_inventory_workflow(get, post, organization
 
 
 @pytest.mark.django_db
-def test_launch_with_extra_credentials(get, post, organization_factory,
-                                       job_template_factory, machine_credential,
-                                       credential, net_credential):
-    objs = organization_factory("org", superusers=['admin'])
-    jt = job_template_factory("jt", organization=objs.organization,
-                              inventory='test_inv', project='test_proj').job_template
-    jt.ask_credential_on_launch = True
-    jt.save()
-
-    resp = post(
-        reverse('api:job_template_launch', kwargs={'pk': jt.pk}),
-        dict(
-            credentials=[machine_credential.pk, credential.pk, net_credential.pk]
-        ),
-        objs.superusers.admin, expect=201
-    )
-    job_pk = resp.data.get('id')
-
-    resp = get(reverse('api:job_extra_credentials_list', kwargs={'pk': job_pk}), objs.superusers.admin)
-    assert resp.data.get('count') == 2
-
-    resp = get(reverse('api:job_template_extra_credentials_list', kwargs={'pk': jt.pk}), objs.superusers.admin)
-    assert resp.data.get('count') == 0
-
-
-@pytest.mark.django_db
-def test_launch_with_extra_credentials_not_allowed(get, post, organization_factory,
-                                                   job_template_factory, machine_credential,
-                                                   credential, net_credential):
-    objs = organization_factory("org", superusers=['admin'])
-    jt = job_template_factory("jt", organization=objs.organization,
-                              inventory='test_inv', project='test_proj').job_template
-    jt.credentials.add(machine_credential)
-    jt.ask_credential_on_launch = False
-    jt.save()
-
-    resp = post(
-        reverse('api:job_template_launch', kwargs={'pk': jt.pk}),
-        dict(
-            credentials=[machine_credential.pk, credential.pk, net_credential.pk]
-        ),
-        objs.superusers.admin
-    )
-    assert 'credentials' in resp.data['ignored_fields'].keys()
-    job_pk = resp.data.get('id')
-
-    resp = get(reverse('api:job_extra_credentials_list', kwargs={'pk': job_pk}), objs.superusers.admin)
-    assert resp.data.get('count') == 0
-
-
-@pytest.mark.django_db
 def test_jt_without_project(inventory):
     data = dict(name="Test", job_type="run",
                 inventory=inventory.pk, project=None)
@@ -508,6 +355,72 @@ def test_job_template_unset_custom_virtualenv(get, patch, organization_factory,
     url = reverse('api:job_template_detail', kwargs={'pk': jt.id})
     resp = patch(url, {'custom_virtualenv': value}, user=objs.superusers.admin, expect=200)
     assert resp.data['custom_virtualenv'] is None
+
+
+@pytest.mark.django_db
+def test_jt_organization_follows_project(post, patch, admin_user):
+    org1 = Organization.objects.create(name='foo1')
+    org2 = Organization.objects.create(name='foo2')
+    project_common = dict(scm_type='git', playbook_files=['helloworld.yml'])
+    project1 = Project.objects.create(name='proj1', organization=org1, **project_common)
+    project2 = Project.objects.create(name='proj2', organization=org2, **project_common)
+    r = post(
+        url=reverse('api:job_template_list'),
+        data={
+            "name": "fooo",
+            "ask_inventory_on_launch": True,
+            "project": project1.pk,
+            "playbook": "helloworld.yml"
+        },
+        user=admin_user,
+        expect=201
+    )
+    data = r.data
+    assert data['organization'] == project1.organization_id
+    data['project'] = project2.id
+    jt = JobTemplate.objects.get(pk=data['id'])
+    r = patch(
+        url=jt.get_absolute_url(),
+        data=data,
+        user=admin_user,
+        expect=200
+    )
+    assert r.data['organization'] == project2.organization_id
+
+
+@pytest.mark.django_db
+def test_jt_organization_field_is_read_only(patch, post, project, admin_user):
+    org = project.organization
+    jt = JobTemplate.objects.create(
+        name='foo_jt',
+        ask_inventory_on_launch=True,
+        project=project, playbook='helloworld.yml'
+    )
+    org2 = Organization.objects.create(name='foo2')
+    r = patch(
+        url=jt.get_absolute_url(),
+        data={'organization': org2.id},
+        user=admin_user,
+        expect=200
+    )
+    assert r.data['organization'] == org.id
+    assert JobTemplate.objects.get(pk=jt.pk).organization == org
+
+    # similar test, but on creation
+    r = post(
+        url=reverse('api:job_template_list'),
+        data={
+            'name': 'foobar',
+            'project': project.id,
+            'organization': org2.id,
+            'ask_inventory_on_launch': True,
+            'playbook': 'helloworld.yml'
+        },
+        user=admin_user,
+        expect=201
+    )
+    assert r.data['organization'] == org.id
+    assert JobTemplate.objects.get(pk=r.data['id']).organization == org
 
 
 @pytest.mark.django_db

@@ -2,8 +2,8 @@ import React, { Component } from 'react';
 import { Redirect, Link } from 'react-router-dom';
 import { PageSection, Card } from '@patternfly/react-core';
 import { withI18n } from '@lingui/react';
-import { UnifiedJobsAPI } from '@api';
-import ContentError from '@components/ContentError';
+import { UnifiedJobsAPI } from '../../api';
+import ContentError from '../../components/ContentError';
 import { JOB_TYPE_URL_SEGMENTS } from '../../constants';
 
 const NOT_FOUND = 'not found';
@@ -54,7 +54,7 @@ class JobTypeRedirect extends Component {
     if (error) {
       return (
         <PageSection>
-          <Card className="awx-c-card">
+          <Card>
             {error === NOT_FOUND ? (
               <ContentError isNotFound>
                 <Link to="/jobs">{i18n._(`View all Jobs`)}</Link>

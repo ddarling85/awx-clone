@@ -1,13 +1,17 @@
 import Base from '../Base';
 import NotificationsMixin from '../mixins/Notifications.mixin';
 import LaunchUpdateMixin from '../mixins/LaunchUpdate.mixin';
+import SchedulesMixin from '../mixins/Schedules.mixin';
 
-class Projects extends LaunchUpdateMixin(NotificationsMixin(Base)) {
+class Projects extends SchedulesMixin(
+  LaunchUpdateMixin(NotificationsMixin(Base))
+) {
   constructor(http) {
     super(http);
     this.baseUrl = '/api/v2/projects/';
 
     this.readAccessList = this.readAccessList.bind(this);
+    this.readInventories = this.readInventories.bind(this);
     this.readPlaybooks = this.readPlaybooks.bind(this);
     this.readSync = this.readSync.bind(this);
     this.sync = this.sync.bind(this);
@@ -15,6 +19,10 @@ class Projects extends LaunchUpdateMixin(NotificationsMixin(Base)) {
 
   readAccessList(id, params) {
     return this.http.get(`${this.baseUrl}${id}/access_list/`, { params });
+  }
+
+  readInventories(id) {
+    return this.http.get(`${this.baseUrl}${id}/inventories/`);
   }
 
   readPlaybooks(id) {

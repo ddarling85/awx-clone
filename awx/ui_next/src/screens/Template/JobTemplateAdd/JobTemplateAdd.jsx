@@ -1,33 +1,33 @@
 import React, { useState } from 'react';
-import { withRouter } from 'react-router-dom';
-import { withI18n } from '@lingui/react';
-import { t } from '@lingui/macro';
-import { Card, CardHeader, PageSection, Tooltip } from '@patternfly/react-core';
-import { CardBody } from '@components/Card';
-import CardCloseButton from '@components/CardCloseButton';
+import { useHistory } from 'react-router-dom';
+import { Card, PageSection } from '@patternfly/react-core';
+import { CardBody } from '../../../components/Card';
 import JobTemplateForm from '../shared/JobTemplateForm';
-import { JobTemplatesAPI } from '@api';
+import { JobTemplatesAPI, OrganizationsAPI } from '../../../api';
 
-function JobTemplateAdd({ history, i18n }) {
+function JobTemplateAdd() {
   const [formSubmitError, setFormSubmitError] = useState(null);
+  const history = useHistory();
 
   async function handleSubmit(values) {
     const {
       labels,
-      organizationId,
       instanceGroups,
       initialInstanceGroups,
       credentials,
+      webhook_credential,
       ...remainingValues
     } = values;
 
     setFormSubmitError(null);
+    remainingValues.project = remainingValues.project.id;
+    remainingValues.webhook_credential = webhook_credential?.id;
     try {
       const {
         data: { id, type },
       } = await JobTemplatesAPI.create(remainingValues);
       await Promise.all([
-        submitLabels(id, labels, organizationId),
+        submitLabels(id, labels, values.project.summary_fields.organization.id),
         submitInstanceGroups(id, instanceGroups),
         submitCredentials(id, credentials),
       ]);
@@ -37,17 +37,22 @@ function JobTemplateAdd({ history, i18n }) {
     }
   }
 
-  function submitLabels(templateId, labels = [], organizationId) {
-    const associationPromises = labels
-      .filter(label => !label.isNew)
-      .map(label => JobTemplatesAPI.associateLabel(templateId, label));
-    const creationPromises = labels
-      .filter(label => label.isNew)
-      .map(label =>
-        JobTemplatesAPI.generateLabel(templateId, label, organizationId)
-      );
+  async function submitLabels(templateId, labels = [], orgId) {
+    if (!orgId) {
+      try {
+        const {
+          data: { results },
+        } = await OrganizationsAPI.read();
+        orgId = results[0].id;
+      } catch (err) {
+        throw err;
+      }
+    }
+    const associationPromises = labels.map(label =>
+      JobTemplatesAPI.associateLabel(templateId, label, orgId)
+    );
 
-    return Promise.all([...associationPromises, ...creationPromises]);
+    return Promise.all([...associationPromises]);
   }
 
   function submitInstanceGroups(templateId, addedGroups = []) {
@@ -71,21 +76,16 @@ function JobTemplateAdd({ history, i18n }) {
   return (
     <PageSection>
       <Card>
-        <CardHeader className="at-u-textRight">
-          <Tooltip content={i18n._(t`Close`)} position="top">
-            <CardCloseButton onClick={handleCancel} />
-          </Tooltip>
-        </CardHeader>
         <CardBody>
           <JobTemplateForm
             handleCancel={handleCancel}
             handleSubmit={handleSubmit}
+            submitError={formSubmitError}
           />
         </CardBody>
-        {formSubmitError ? <div>formSubmitError</div> : ''}
       </Card>
     </PageSection>
   );
 }
 
-export default withI18n()(withRouter(JobTemplateAdd));
+export default JobTemplateAdd;

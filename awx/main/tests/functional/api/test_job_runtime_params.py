@@ -265,18 +265,6 @@ def test_job_launch_fails_without_credential_access(job_template_prompts, runtim
 
 
 @pytest.mark.django_db
-@pytest.mark.job_runtime_vars
-def test_job_block_scan_job_type_change(job_template_prompts, post, admin_user):
-    job_template = job_template_prompts(True)
-
-    # Assure that changing the type of a scan job blocks the launch
-    response = post(reverse('api:job_template_launch', kwargs={'pk':job_template.pk}),
-                    dict(job_type='scan'), admin_user, expect=400)
-
-    assert 'job_type' in response.data
-
-
-@pytest.mark.django_db
 def test_job_launch_JT_with_validation(machine_credential, credential, deploy_jobtemplate):
     deploy_jobtemplate.extra_vars = '{"job_template_var": 3}'
     deploy_jobtemplate.ask_credential_on_launch = True
@@ -316,7 +304,7 @@ def test_job_launch_with_default_creds(machine_credential, vault_credential, dep
 @pytest.mark.django_db
 def test_job_launch_JT_enforces_unique_credentials_kinds(machine_credential, credentialtype_aws, deploy_jobtemplate):
     """
-    JT launching should require that extra_credentials have distinct CredentialTypes
+    JT launching should require that credentials have distinct CredentialTypes
     """
     creds = []
     for i in range(2):

@@ -1,16 +1,31 @@
-import React from 'react';
-import { Link, useParams } from 'react-router-dom';
+import React, { useCallback } from 'react';
+import { Link, useHistory, useParams } from 'react-router-dom';
 import { withI18n } from '@lingui/react';
 import { t } from '@lingui/macro';
 import { Button } from '@patternfly/react-core';
 
-import { CardBody, CardActionsRow } from '@components/Card';
-import { DetailList, Detail } from '@components/DetailList';
-import { formatDateString } from '@util/dates';
+import AlertModal from '../../../components/AlertModal';
+import { CardBody, CardActionsRow } from '../../../components/Card';
+import DeleteButton from '../../../components/DeleteButton';
+import { DetailList, Detail } from '../../../components/DetailList';
+import ErrorDetail from '../../../components/ErrorDetail';
+import { formatDateString } from '../../../util/dates';
+import { TeamsAPI } from '../../../api';
+import useRequest, { useDismissableError } from '../../../util/useRequest';
 
 function TeamDetail({ team, i18n }) {
   const { name, description, created, modified, summary_fields } = team;
+  const history = useHistory();
   const { id } = useParams();
+
+  const { request: deleteTeam, isLoading, error: deleteError } = useRequest(
+    useCallback(async () => {
+      await TeamsAPI.destroy(id);
+      history.push(`/teams`);
+    }, [id, history])
+  );
+
+  const { error, dismissError } = useDismissableError(deleteError);
 
   return (
     <CardBody>
@@ -36,12 +51,39 @@ function TeamDetail({ team, i18n }) {
         />
       </DetailList>
       <CardActionsRow>
-        {summary_fields.user_capabilities.edit && (
-          <Button component={Link} to={`/teams/${id}/edit`}>
-            {i18n._(t`Edit`)}
-          </Button>
-        )}
+        {summary_fields.user_capabilities &&
+          summary_fields.user_capabilities.edit && (
+            <Button
+              aria-label={i18n._(t`Edit`)}
+              component={Link}
+              to={`/teams/${id}/edit`}
+            >
+              {i18n._(t`Edit`)}
+            </Button>
+          )}
+        {summary_fields.user_capabilities &&
+          summary_fields.user_capabilities.delete && (
+            <DeleteButton
+              name={name}
+              modalTitle={i18n._(t`Delete Team`)}
+              onConfirm={deleteTeam}
+              isDisabled={isLoading}
+            >
+              {i18n._(t`Delete`)}
+            </DeleteButton>
+          )}
       </CardActionsRow>
+      {error && (
+        <AlertModal
+          isOpen={error}
+          variant="error"
+          title={i18n._(t`Error!`)}
+          onClose={dismissError}
+        >
+          {i18n._(t`Failed to delete team.`)}
+          <ErrorDetail error={error} />
+        </AlertModal>
+      )}
     </CardBody>
   );
 }

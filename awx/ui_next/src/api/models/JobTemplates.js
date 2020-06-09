@@ -1,8 +1,11 @@
 import Base from '../Base';
 import NotificationsMixin from '../mixins/Notifications.mixin';
 import InstanceGroupsMixin from '../mixins/InstanceGroups.mixin';
+import SchedulesMixin from '../mixins/Schedules.mixin';
 
-class JobTemplates extends InstanceGroupsMixin(NotificationsMixin(Base)) {
+class JobTemplates extends SchedulesMixin(
+  InstanceGroupsMixin(NotificationsMixin(Base))
+) {
   constructor(http) {
     super(http);
     this.baseUrl = '/api/v2/job_templates/';
@@ -13,7 +16,7 @@ class JobTemplates extends InstanceGroupsMixin(NotificationsMixin(Base)) {
     this.disassociateLabel = this.disassociateLabel.bind(this);
     this.readCredentials = this.readCredentials.bind(this);
     this.readAccessList = this.readAccessList.bind(this);
-    this.generateLabel = this.generateLabel.bind(this);
+    this.readWebhookKey = this.readWebhookKey.bind(this);
   }
 
   launch(id, data) {
@@ -24,8 +27,11 @@ class JobTemplates extends InstanceGroupsMixin(NotificationsMixin(Base)) {
     return this.http.get(`${this.baseUrl}${id}/launch/`);
   }
 
-  associateLabel(id, label) {
-    return this.http.post(`${this.baseUrl}${id}/labels/`, label);
+  associateLabel(id, label, orgId) {
+    return this.http.post(`${this.baseUrl}${id}/labels/`, {
+      name: label.name,
+      organization: orgId,
+    });
   }
 
   disassociateLabel(id, label) {
@@ -35,15 +41,10 @@ class JobTemplates extends InstanceGroupsMixin(NotificationsMixin(Base)) {
     });
   }
 
-  generateLabel(id, label, orgId) {
-    return this.http.post(`${this.baseUrl}${id}/labels/`, {
-      name: label.name,
-      organization: orgId,
-    });
-  }
-
   readCredentials(id, params) {
-    return this.http.get(`${this.baseUrl}${id}/credentials/`, { params });
+    return this.http.get(`${this.baseUrl}${id}/credentials/`, {
+      params,
+    });
   }
 
   associateCredentials(id, credentialId) {
@@ -60,7 +61,35 @@ class JobTemplates extends InstanceGroupsMixin(NotificationsMixin(Base)) {
   }
 
   readAccessList(id, params) {
-    return this.http.get(`${this.baseUrl}${id}/access_list/`, { params });
+    return this.http.get(`${this.baseUrl}${id}/access_list/`, {
+      params,
+    });
+  }
+
+  readScheduleList(id, params) {
+    return this.http.get(`${this.baseUrl}${id}/schedules/`, {
+      params,
+    });
+  }
+
+  readSurvey(id) {
+    return this.http.get(`${this.baseUrl}${id}/survey_spec/`);
+  }
+
+  updateSurvey(id, survey) {
+    return this.http.post(`${this.baseUrl}${id}/survey_spec/`, survey);
+  }
+
+  destroySurvey(id) {
+    return this.http.delete(`${this.baseUrl}${id}/survey_spec/`);
+  }
+
+  readWebhookKey(id) {
+    return this.http.get(`${this.baseUrl}${id}/webhook_key/`);
+  }
+
+  updateWebhookKey(id) {
+    return this.http.post(`${this.baseUrl}${id}/webhook_key/`);
   }
 }
 

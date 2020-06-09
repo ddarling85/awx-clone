@@ -1,12 +1,15 @@
 import React from 'react';
 import { act } from 'react-dom/test-utils';
 
-import { OrganizationsAPI } from '@api';
-import { mountWithContexts, waitForElement } from '@testUtils/enzymeHelpers';
+import { OrganizationsAPI } from '../../../api';
+import {
+  mountWithContexts,
+  waitForElement,
+} from '../../../../testUtils/enzymeHelpers';
 
 import OrganizationDetail from './OrganizationDetail';
 
-jest.mock('@api');
+jest.mock('../../../api');
 
 describe('<OrganizationDetail />', () => {
   const mockOrganization = {
@@ -19,12 +22,16 @@ describe('<OrganizationDetail />', () => {
     summary_fields: {
       user_capabilities: {
         edit: true,
+        delete: true,
       },
     },
   };
   const mockInstanceGroups = {
     data: {
-      results: [{ name: 'One', id: 1 }, { name: 'Two', id: 2 }],
+      results: [
+        { name: 'One', id: 1 },
+        { name: 'Two', id: 2 },
+      ],
     },
   };
 
@@ -80,8 +87,8 @@ describe('<OrganizationDetail />', () => {
       { label: 'Last Modified', value: '8/11/2019, 7:47:37 PM' },
       { label: 'Max Hosts', value: '0' },
     ];
-    // eslint-disable-next-line no-restricted-syntax
-    for (const { label, value } of testParams) {
+    for (let i = 0; i < testParams.length; i++) {
+      const { label, value } = testParams[i];
       // eslint-disable-next-line no-await-in-loop
       const detail = await waitForElement(wrapper, `Detail[label="${label}"]`);
       expect(detail.find('dt').text()).toBe(label);
@@ -98,7 +105,7 @@ describe('<OrganizationDetail />', () => {
     });
     const editButton = await waitForElement(
       wrapper,
-      'OrganizationDetail Button'
+      'OrganizationDetail Button[aria-label="Edit"]'
     );
     expect(editButton.text()).toEqual('Edit');
     expect(editButton.prop('to')).toBe('/organizations/undefined/edit');
@@ -115,6 +122,74 @@ describe('<OrganizationDetail />', () => {
       );
     });
     await waitForElement(wrapper, 'OrganizationDetail');
-    expect(wrapper.find('OrganizationDetail Button').length).toBe(0);
+    expect(
+      wrapper.find('OrganizationDetail Button[aria-label="Edit"]').length
+    ).toBe(0);
+  });
+
+  test('expected api calls are made for delete', async () => {
+    OrganizationsAPI.readInstanceGroups.mockResolvedValue({ data: {} });
+
+    let wrapper;
+    await act(async () => {
+      wrapper = mountWithContexts(
+        <OrganizationDetail organization={mockOrganization} />
+      );
+    });
+    await waitForElement(
+      wrapper,
+      'OrganizationDetail Button[aria-label="Delete"]'
+    );
+    await act(async () => {
+      wrapper.find('DeleteButton').invoke('onConfirm')();
+    });
+    expect(OrganizationsAPI.destroy).toHaveBeenCalledTimes(1);
+  });
+
+  test('should show content error for failed instance group fetch', async () => {
+    OrganizationsAPI.readInstanceGroups.mockImplementationOnce(() =>
+      Promise.reject(new Error())
+    );
+
+    let wrapper;
+    await act(async () => {
+      wrapper = mountWithContexts(
+        <OrganizationDetail organization={mockOrganization} />
+      );
+    });
+    await waitForElement(wrapper, 'ContentError', el => el.length === 1);
+  });
+
+  test('Error dialog shown for failed deletion', async () => {
+    OrganizationsAPI.destroy.mockImplementationOnce(() =>
+      Promise.reject(new Error())
+    );
+
+    let wrapper;
+    await act(async () => {
+      wrapper = mountWithContexts(
+        <OrganizationDetail organization={mockOrganization} />
+      );
+    });
+    await waitForElement(
+      wrapper,
+      'OrganizationDetail Button[aria-label="Delete"]'
+    );
+    await act(async () => {
+      wrapper.find('DeleteButton').invoke('onConfirm')();
+    });
+    await waitForElement(
+      wrapper,
+      'Modal[title="Error!"]',
+      el => el.length === 1
+    );
+    await act(async () => {
+      wrapper.find('Modal[title="Error!"]').invoke('onClose')();
+    });
+    await waitForElement(
+      wrapper,
+      'Modal[title="Error!"]',
+      el => el.length === 0
+    );
   });
 });

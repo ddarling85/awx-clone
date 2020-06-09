@@ -1,11 +1,14 @@
 import React from 'react';
 import { act } from 'react-dom/test-utils';
 import { createMemoryHistory } from 'history';
-import { mountWithContexts, waitForElement } from '@testUtils/enzymeHelpers';
+import {
+  mountWithContexts,
+  waitForElement,
+} from '../../../../testUtils/enzymeHelpers';
 import UserAdd from './UserAdd';
-import { UsersAPI } from '@api';
+import { UsersAPI } from '../../../api';
 
-jest.mock('@api');
+jest.mock('../../../api');
 let wrapper;
 
 describe('<UserAdd />', () => {
@@ -13,6 +16,7 @@ describe('<UserAdd />', () => {
     await act(async () => {
       wrapper = mountWithContexts(<UserAdd />);
     });
+    UsersAPI.create.mockResolvedValueOnce({ data: {} });
     const updatedUserData = {
       username: 'sysadmin',
       email: 'sysadmin@ansible.com',
@@ -38,19 +42,6 @@ describe('<UserAdd />', () => {
     });
     await act(async () => {
       wrapper.find('button[aria-label="Cancel"]').prop('onClick')();
-    });
-    expect(history.location.pathname).toEqual('/users');
-  });
-
-  test('should navigate to users list when close (x) is clicked', async () => {
-    const history = createMemoryHistory({});
-    await act(async () => {
-      wrapper = mountWithContexts(<UserAdd />, {
-        context: { router: { history } },
-      });
-    });
-    await act(async () => {
-      wrapper.find('button[aria-label="Close"]').prop('onClick')();
     });
     expect(history.location.pathname).toEqual('/users');
   });

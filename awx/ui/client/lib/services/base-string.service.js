@@ -76,13 +76,32 @@ function BaseStringService (namespace) {
     this.YES = t.s('YES');
     this.CLOSE = t.s('CLOSE');
     this.TEST = t.s('TEST');
+    this.REMOVE = t.s('REMOVE');
     this.SUCCESSFUL_CREATION = resource => t.s('{{ resource }} successfully created', { resource: $filter('sanitize')(resource) });
+
+    this.logos = {
+        AWX_LOGO: t.s('Ansible AWX Logo'),
+        TOWER_LOGO: t.s('Ansible Tower Logo'),
+        CUSTOM_LOGO: t.s('Custom Logo')
+    };
 
     this.deleteResource = {
         HEADER: t.s('Delete'),
         USED_BY: resourceType => t.s('The {{ resourceType }} is currently being used by other resources.', { resourceType }),
         UNAVAILABLE: resourceType => t.s('Deleting this {{ resourceType }} will make the following resources unavailable.', { resourceType }),
         CONFIRM: resourceType => t.s('Are you sure you want to delete this {{ resourceType }}?', { resourceType })
+    };
+
+    this.removeTeamAccess = {
+        HEADER: t.s('Team access removal'),
+        ACTION_TEXT: t.s('REMOVE TEAM ACCESS'),
+        CONFIRM: (role, name) => t.s('Please confirm that you would like to remove {{ role }} access from the team {{ name }}. This will affect all members of the team. If you would like to only remove access for this particular user, please remove them from the team.', { role, name }),
+    };
+
+    this.removeUserAccess = {
+        HEADER: t.s('Role access removal'),
+        ACTION_TEXT: t.s('REMOVE ACCESS'),
+        CONFIRM: (role, name) => t.s('Please confirm that you would like to remove {{ role }} access from {{ name }}.', { role, name }),
     };
 
     this.cancelJob = {

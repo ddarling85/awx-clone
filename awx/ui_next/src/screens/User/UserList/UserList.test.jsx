@@ -1,10 +1,13 @@
 import React from 'react';
-import { UsersAPI } from '@api';
-import { mountWithContexts, waitForElement } from '@testUtils/enzymeHelpers';
+import { UsersAPI } from '../../../api';
+import {
+  mountWithContexts,
+  waitForElement,
+} from '../../../../testUtils/enzymeHelpers';
 
 import UsersList, { _UsersList } from './UserList';
 
-jest.mock('@api');
+jest.mock('../../../api');
 
 let wrapper;
 const loadUsers = jest.spyOn(_UsersList.prototype, 'loadUsers');
@@ -121,17 +124,8 @@ describe('UsersList with full permissions', () => {
   });
 
   test('Users are retrieved from the api and the components finishes loading', async () => {
-    await waitForElement(
-      wrapper,
-      'UsersList',
-      el => el.state('hasContentLoading') === true
-    );
+    await waitForElement(wrapper, 'ContentLoading', el => el.length === 0);
     expect(loadUsers).toHaveBeenCalled();
-    await waitForElement(
-      wrapper,
-      'UsersList',
-      el => el.state('hasContentLoading') === false
-    );
   });
 
   test('Selects one team when row is checked', async () => {
@@ -255,17 +249,7 @@ describe('UsersList with full permissions', () => {
   });
 
   test('Add button shown for users with ability to POST', async () => {
-    await waitForElement(
-      wrapper,
-      'UsersList',
-      el => el.state('hasContentLoading') === true
-    );
-    await waitForElement(
-      wrapper,
-      'UsersList',
-      el => el.state('hasContentLoading') === false
-    );
-    expect(wrapper.find('ToolbarAddButton').length).toBe(1);
+    await waitForElement(wrapper, 'ToolbarAddButton', el => el.length === 1);
   });
 });
 
@@ -280,16 +264,8 @@ describe('UsersList without full permissions', () => {
     });
 
     wrapper = mountWithContexts(<UsersList />);
-    await waitForElement(
-      wrapper,
-      'UsersList',
-      el => el.state('hasContentLoading') === true
-    );
-    await waitForElement(
-      wrapper,
-      'UsersList',
-      el => el.state('hasContentLoading') === false
-    );
+    await waitForElement(wrapper, 'ContentLoading', el => el.length === 1);
+    await waitForElement(wrapper, 'ContentLoading', el => el.length === 0);
     expect(wrapper.find('ToolbarAddButton').length).toBe(0);
   });
 });

@@ -4,13 +4,17 @@ import { t } from '@lingui/macro';
 import { Button } from '@patternfly/react-core';
 import { withI18n } from '@lingui/react';
 import { useHistory, useParams } from 'react-router-dom';
-import { VariablesDetail } from '@components/CodeMirrorInput';
-import { CardBody, CardActionsRow } from '@components/Card';
-import ErrorDetail from '@components/ErrorDetail';
-import AlertModal from '@components/AlertModal';
-import { DetailList, Detail, UserDateDetail } from '@components/DetailList';
+import { VariablesDetail } from '../../../components/CodeMirrorInput';
+import { CardBody, CardActionsRow } from '../../../components/Card';
+import ErrorDetail from '../../../components/ErrorDetail';
+import AlertModal from '../../../components/AlertModal';
+import {
+  DetailList,
+  Detail,
+  UserDateDetail,
+} from '../../../components/DetailList';
 import InventoryGroupsDeleteModal from '../shared/InventoryGroupsDeleteModal';
-import { GroupsAPI, InventoriesAPI } from '@api';
+import { GroupsAPI, InventoriesAPI } from '../../../api';
 
 function InventoryGroupDetail({ i18n, inventoryGroup }) {
   const {
@@ -46,7 +50,11 @@ function InventoryGroupDetail({ i18n, inventoryGroup }) {
   return (
     <CardBody>
       <DetailList gutter="sm">
-        <Detail label={i18n._(t`Name`)} value={name} />
+        <Detail
+          label={i18n._(t`Name`)}
+          value={name}
+          dataCy="inventory-group-detail-name"
+        />
         <Detail label={i18n._(t`Description`)} value={description} />
         <VariablesDetail
           label={i18n._(t`Variables`)}
@@ -94,7 +102,7 @@ function InventoryGroupDetail({ i18n, inventoryGroup }) {
       )}
       {error && (
         <AlertModal
-          variant="danger"
+          variant="error"
           title={i18n._(t`Error!`)}
           isOpen={error}
           onClose={() => setError(false)}

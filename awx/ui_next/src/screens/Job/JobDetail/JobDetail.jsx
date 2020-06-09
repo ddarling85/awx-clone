@@ -1,22 +1,24 @@
+import 'styled-components/macro';
 import React, { useState } from 'react';
 import { Link, useHistory } from 'react-router-dom';
 import { withI18n } from '@lingui/react';
 import { t } from '@lingui/macro';
-import { Button } from '@patternfly/react-core';
+import { Button, Chip } from '@patternfly/react-core';
 import styled from 'styled-components';
 
-import AlertModal from '@components/AlertModal';
-import { DetailList, Detail } from '@components/DetailList';
-import { CardBody, CardActionsRow } from '@components/Card';
-import { ChipGroup, Chip, CredentialChip } from '@components/Chip';
-import { VariablesInput as _VariablesInput } from '@components/CodeMirrorInput';
-import DeleteButton from '@components/DeleteButton';
-import ErrorDetail from '@components/ErrorDetail';
-import LaunchButton from '@components/LaunchButton';
-import { StatusIcon } from '@components/Sparkline';
-import { toTitleCase } from '@util/strings';
-import { formatDateString } from '@util/dates';
-import { Job } from '@types';
+import AlertModal from '../../../components/AlertModal';
+import { DetailList, Detail } from '../../../components/DetailList';
+import { CardBody, CardActionsRow } from '../../../components/Card';
+import ChipGroup from '../../../components/ChipGroup';
+import CredentialChip from '../../../components/CredentialChip';
+import { VariablesInput as _VariablesInput } from '../../../components/CodeMirrorInput';
+import DeleteButton from '../../../components/DeleteButton';
+import ErrorDetail from '../../../components/ErrorDetail';
+import LaunchButton from '../../../components/LaunchButton';
+import StatusIcon from '../../../components/StatusIcon';
+import { toTitleCase } from '../../../util/strings';
+import { formatDateString } from '../../../util/dates';
+import { Job } from '../../../types';
 import {
   JobsAPI,
   ProjectUpdatesAPI,
@@ -24,7 +26,7 @@ import {
   WorkflowJobsAPI,
   InventoriesAPI,
   AdHocCommandsAPI,
-} from '@api';
+} from '../../../api';
 
 const VariablesInput = styled(_VariablesInput)`
   .pf-c-form__label {
@@ -34,10 +36,9 @@ const VariablesInput = styled(_VariablesInput)`
 
 const StatusDetailValue = styled.div`
   align-items: center;
-  display: inline-flex;
-  .at-c-statusIcon {
-    margin-right: 10px;
-  }
+  display: inline-grid;
+  grid-gap: 10px;
+  grid-template-columns: auto auto;
 `;
 
 const VERBOSITY = {
@@ -165,7 +166,15 @@ function JobDetail({ job, i18n }) {
           <Detail
             label={i18n._(t`Inventory`)}
             value={
-              <Link to={`/inventory/${inventory.id}`}>{inventory.name}</Link>
+              <Link
+                to={
+                  inventory.kind === 'smart'
+                    ? `/inventories/smart_inventory/${inventory.id}`
+                    : `/inventories/inventory/${inventory.id}`
+                }
+              >
+                {inventory.name}
+              </Link>
             }
           />
         )}
@@ -208,7 +217,7 @@ function JobDetail({ job, i18n }) {
             fullWidth
             label={i18n._(t`Credentials`)}
             value={
-              <ChipGroup numChips={5}>
+              <ChipGroup numChips={5} totalChips={credentials.length}>
                 {credentials.map(c => (
                   <CredentialChip key={c.id} credential={c} isReadOnly />
                 ))}
@@ -221,7 +230,7 @@ function JobDetail({ job, i18n }) {
             fullWidth
             label={i18n._(t`Labels`)}
             value={
-              <ChipGroup numChips={5}>
+              <ChipGroup numChips={5} totalChips={labels.results.length}>
                 {labels.results.map(l => (
                   <Chip key={l.id} isReadOnly>
                     {l.name}
@@ -276,7 +285,7 @@ function JobDetail({ job, i18n }) {
       {errorMsg && (
         <AlertModal
           isOpen={errorMsg}
-          variant="danger"
+          variant="error"
           onClose={() => setErrorMsg()}
           title={i18n._(t`Job Delete Error`)}
         >

@@ -1,15 +1,14 @@
-import React, { useState, useEffect } from 'react';
-import { string, func, bool } from 'prop-types';
+import React, { useCallback, useEffect } from 'react';
+import { func, bool } from 'prop-types';
 import { withRouter } from 'react-router-dom';
 import { withI18n } from '@lingui/react';
 import { t } from '@lingui/macro';
-import { FormGroup } from '@patternfly/react-core';
-import { InventoriesAPI } from '@api';
-import { Inventory } from '@types';
-import Lookup from '@components/Lookup';
-import { FieldTooltip } from '@components/FormField';
-import { getQSConfig, parseQueryString } from '@util/qs';
-import OptionsList from './shared/OptionsList';
+import { InventoriesAPI } from '../../api';
+import { Inventory } from '../../types';
+import Lookup from './Lookup';
+import OptionsList from '../OptionsList';
+import useRequest from '../../util/useRequest';
+import { getQSConfig, parseQueryString } from '../../util/qs';
 import LookupErrorMessage from './shared/LookupErrorMessage';
 
 const QS_CONFIG = getQSConfig('inventory', {
@@ -18,43 +17,30 @@ const QS_CONFIG = getQSConfig('inventory', {
   order_by: 'name',
 });
 
-function InventoryLookup({
-  value,
-  tooltip,
-  onChange,
-  onBlur,
-  required,
-  isValid,
-  helperTextInvalid,
-  i18n,
-  history,
-}) {
-  const [inventories, setInventories] = useState([]);
-  const [count, setCount] = useState(0);
-  const [error, setError] = useState(null);
+function InventoryLookup({ value, onChange, onBlur, required, i18n, history }) {
+  const {
+    result: { inventories, count },
+    request: fetchInventories,
+    error,
+    isLoading,
+  } = useRequest(
+    useCallback(async () => {
+      const params = parseQueryString(QS_CONFIG, history.location.search);
+      const { data } = await InventoriesAPI.read(params);
+      return {
+        inventories: data.results,
+        count: data.count,
+      };
+    }, [history.location]),
+    { inventories: [], count: 0 }
+  );
 
   useEffect(() => {
-    (async () => {
-      const params = parseQueryString(QS_CONFIG, history.location.search);
-      try {
-        const { data } = await InventoriesAPI.read(params);
-        setInventories(data.results);
-        setCount(data.count);
-      } catch (err) {
-        setError(err);
-      }
-    })();
-  }, [history.location]);
+    fetchInventories();
+  }, [fetchInventories]);
 
   return (
-    <FormGroup
-      label={i18n._(t`Inventory`)}
-      isRequired={required}
-      fieldId="inventory-lookup"
-      isValid={isValid}
-      helperTextInvalid={helperTextInvalid}
-    >
-      {tooltip && <FieldTooltip content={tooltip} />}
+    <>
       <Lookup
         id="inventory-lookup"
         header={i18n._(t`Inventory`)}
@@ -62,6 +48,7 @@ function InventoryLookup({
         onChange={onChange}
         onBlur={onBlur}
         required={required}
+        isLoading={isLoading}
         qsConfig={QS_CONFIG}
         renderOptionsList={({ state, dispatch, canDelete }) => (
           <OptionsList
@@ -100,20 +87,18 @@ function InventoryLookup({
         )}
       />
       <LookupErrorMessage error={error} />
-    </FormGroup>
+    </>
   );
 }
 
 InventoryLookup.propTypes = {
   value: Inventory,
-  tooltip: string,
   onChange: func.isRequired,
   required: bool,
 };
 
 InventoryLookup.defaultProps = {
   value: null,
-  tooltip: '',
   required: false,
 };
 

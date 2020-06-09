@@ -93,7 +93,7 @@
  * | sourceModel | Used in conjunction with sourceField when the data for the field is part of the summary_fields object returned by the API. Set to the name of the summary_fields object that contains the field. For example, the job_templates object returned by the API contains summary_fields.inventory. |
  * | sourceField | String containing the summary_field.object.field name from the API summary_field object. For example, if a fields should be associated to the summary_fields.inventory.name, set the sourceModel to 'inventory' and the sourceField to 'name'. |
  * | spinner | true or false. If true, adds aw-spinner directive. Optionally add min and max attributes to control the range of allowed values. |
- * | type | String containing one of the following types defined in buildField: alertblock, hidden, text, password, email, textarea, select, number, checkbox, checkbox_group, radio, radio_group, lookup, custom. |
+ * | type | String containing one of the following types defined in buildField: alertblock, hidden, text, password, email, textarea, select, number, checkbox, checkbox_group, radio, lookup, custom. |
  * | trueValue | For radio buttons and checkboxes. Value to set the model to when the checkbox or radio button is selected. |
  * | hasShowInputButton (sensitive type only) | This creates a button next to the input that toggles the input as text and password types. |
  * The form object contains a buttons object for defining any buttons to be included in the generated HTML. Generally all forms will have a Reset and a Submit button. If no buttons should be generated define buttons as an empty object, or set the showButtons option to false.
@@ -684,7 +684,7 @@ angular.module('FormGenerator', [GeneratorHelpers.name, 'Utilities', listGenerat
                     html += (field.ngShow) ? this.attr(field, 'ngShow') : "";
                     html += ">\n";
                     html += (field.closeable === undefined || field.closeable === true) ?
-                        "<button type=\"button\" class=\"close\" data-dismiss=\"alert\" aria-hidden=\"true\">&times;</button>\n" : "";
+                        "<button aria-label=\"{{'Close'|translate}}\" type=\"button\" class=\"close\" data-dismiss=\"alert\" aria-hidden=\"true\">&times;</button>\n" : "";
                     html += field.alertTxt;
                     html += "</div>\n";
                     html += "</div>\n";
@@ -728,6 +728,7 @@ angular.module('FormGenerator', [GeneratorHelpers.name, 'Utilities', listGenerat
                         html += `
                             <div>
                                 <at-switch on-toggle="toggleForm('${field.toggleSource}')" switch-on="${field.toggleSource}" switch-disabled="${"ngDisabled" in field} ? ${field.ngDisabled} : false" hide="!(${"ngShow" in field ? field.ngShow : true})"></at-switch>
+                                <div class="error api-error" id="${this.form.name}-${fld}-api-error" ng-bind="${fld}_api_error"></div>
                             </div>
                         `;
                     }
@@ -784,7 +785,7 @@ angular.module('FormGenerator', [GeneratorHelpers.name, 'Utilities', listGenerat
                         }
 
                         if (field.clear) {
-                            html += "<span class=\"input-group-btn\"><button type=\"button\" ";
+                            html += "<span class=\"input-group-btn\"><button aria-label=\"{{'Clear field'|translate}}\" type=\"button\" ";
                             html += "id=\"" + this.form.name + "_" + fld + "_clear_btn\" ";
                             html += "class=\"btn btn-default\" ng-click=\"clear('" + fld + "','" + field.associated + "')\" " +
                                 "aw-tool-tip=\"Clear " + field.label + "\" id=\"" + fld + "-clear-btn\" ";
@@ -797,6 +798,7 @@ angular.module('FormGenerator', [GeneratorHelpers.name, 'Utilities', listGenerat
                             const defaultGenHashButtonTemplate = `
                                 <span class="input-group-btn input-group-prepend">
                                     <button
+                                        aria-label="{{'Generate field'|translate}}"
                                         type="button"
                                         class="btn Form-lookupButton"
                                         ng-click="genHash('${fld}')"
@@ -1196,51 +1198,6 @@ angular.module('FormGenerator', [GeneratorHelpers.name, 'Utilities', listGenerat
                         }
                     }
 
-                    //radio group
-                    if (field.type === 'radio_group') {
-
-                        html += label();
-
-                        html += "<div ";
-                        html += (field.ngShow) ? "ng-show=\"" + field.ngShow + "\" " : "";
-                        html += (horizontal) ? "class=\"radio-group " + getFieldWidth() + "\"" : "class=\"radio-group\"";
-                        html += ">\n";
-
-                        for (i = 0; i < field.options.length; i++) {
-                            html += "<label class=\"";
-                            html += (field.options[i].labelClass) ? ` ${field.options[i].labelClass} "` : "\"";
-                            html += (field.options[i].ngShow) ? this.attr(field.options[i], 'ngShow') : "";
-                            html += ">";
-                            html += "<input type=\"radio\" ";
-                            html += "name=\"" + fld + "\" ";
-                            html += "value=\"" + field.options[i].value + "\" ";
-                            html += "ng-model=\"" + fld + "\" ";
-                            html += (field.ngChange) ? this.attr(field, 'ngChange') : "";
-                            html += (field.ngClick) ? this.attr(field, 'ngClick') : "";
-                            html += (field.ngDisabled) ? `ng-disabled="${field.ngDisabled}"` : "";
-                            html += (field.readonly) ? "disabled " : "";
-                            html += (field.required) ? "required " : "";
-                            html += (field.ngshow) ? "ng-show=\"" + field.ngShow + "\" " : "";
-                            if(field.awRequiredWhen) {
-                                html += field.awRequiredWhen.init ? "data-awrequired-init=\"" + field.awRequiredWhen.init + "\" " : "";
-                                html += field.awRequiredWhen.reqExpression ? "aw-required-when=\"" + field.awRequiredWhen.reqExpression + "\" " : "";
-                                html += field.awRequiredWhen.alwaysShowAsterisk ? "data-awrequired-always-show-asterisk=true " : "";
-                            }
-                            html += (field.ngDisabled) ? this.attr(field, 'ngDisabled') : "";
-                            html += " > " + field.options[i].label + "\n";
-                            html += "</label>\n";
-                        }
-                        if (field.required || field.awRequiredWhen) {
-                            html += "<div class=\"error\" id=\"" + this.form.name + "-" + fld + "-required-error\" ng-show=\"" +
-                                this.form.name + '_form.' + fld + ".$dirty && " +
-                                this.form.name + '_form.' + fld + ".$error.required\">" + i18n._("Please select a value.") + "</div>\n";
-                        }
-                        html += "<div class=\"error api-error\" id=\"" + this.form.name + "-" + fld + "-api-error\" ng-bind=\"" +
-                            fld + "_api_error\"></div>\n";
-
-                        html += "</div>\n";
-                    }
-
                     // radio button
                     if (field.type === 'radio') {
 
@@ -1298,7 +1255,7 @@ angular.module('FormGenerator', [GeneratorHelpers.name, 'Utilities', listGenerat
 
                         html += `<div class="input-group Form-mixedInputGroup">`;
                         html += "<span class=\"input-group-btn input-group-prepend\">\n";
-                        html += `<button type="button" class="Form-lookupButton btn" ng-click="${field.ngClick || defaultLookupNgClick}"
+                        html += `<button aria-label="{{'Lookup field'|translate}}" type="button" class="Form-lookupButton btn" ng-click="${field.ngClick || defaultLookupNgClick}"
                         ${field.readonly || field.showonly}
                         ${this.attr(field, "ngDisabled")}
                         id="${fld}-lookup-btn"><i class="fa fa-search"></i></button>`;
@@ -1463,7 +1420,7 @@ angular.module('FormGenerator', [GeneratorHelpers.name, 'Utilities', listGenerat
                         html += "</div></div>";
                     } else {
                         html += "<div class=\"Form-exitHolder\">";
-                        html += "<button class=\"Form-exit\" ng-click=\"formCancel()\">";
+                        html += "<button aria-label=\"{{'Close'|translate}}\" class=\"Form-exit\" ng-click=\"formCancel()\">";
                         html += "<i class=\"fa fa-times-circle\"></i>";
                         html += "</button></div>\n";
                     }
@@ -1733,6 +1690,9 @@ angular.module('FormGenerator', [GeneratorHelpers.name, 'Utilities', listGenerat
                                     if (button.ngClick) {
                                         html += this.attr(button, 'ngClick');
                                     }
+                                    if (button.ngClass) {
+                                        html += this.attr(button, 'ngClass');
+                                    }
                                     if (button.ngDisabled) {
                                         ngDisabled = (button.ngDisabled===true) ? `${this.form.name}_form.$invalid ||  ${this.form.name}_form.$pending`: button.ngDisabled;
                                         if (btn !== 'reset') {
@@ -1817,7 +1777,7 @@ angular.module('FormGenerator', [GeneratorHelpers.name, 'Utilities', listGenerat
 
                 if (collection.instructions) {
                     html += "<div class=\"alert alert-info alert-block\">\n";
-                    html += "<button type=\"button\" class=\"close\" data-dismiss=\"alert\">&times;</button>\n";
+                    html += "<button aria-label=\"{{'Close'|translate}}\" type=\"button\" class=\"close\" data-dismiss=\"alert\">&times;</button>\n";
                     html += "<strong>Hint: </strong>" + collection.instructions + "\n";
                     html += "</div>\n";
                 }
@@ -1942,7 +1902,7 @@ angular.module('FormGenerator', [GeneratorHelpers.name, 'Utilities', listGenerat
                     for (act in collection.fieldActions) {
                         if (act !== 'columnClass') {
                             fAction = collection.fieldActions[act];
-                            html += "<button id=\"" + ((fAction.id) ? fAction.id : act + "-action") + "\" ";
+                            html += "<button aria-label=\"{{act}}\" id=\"" + ((fAction.id) ? fAction.id : collection.iterator + "-" + `{{${collection.iterator}.id}}` + "-" + act + "-action") + "\" ";
                             html += (fAction.awToolTip) ? 'aw-tool-tip="' + fAction.awToolTip + '"' : '';
                             html += (fAction.dataPlacement) ? 'data-placement="' + fAction.dataPlacement + '"' : '';
                             html += (fAction.href) ? "href=\"" + fAction.href + "\" " : "";

@@ -1,12 +1,12 @@
 /* eslint react/no-unused-state: 0 */
 import React, { Component } from 'react';
 import { withRouter, Redirect } from 'react-router-dom';
-import { CardBody } from '@components/Card';
-import ContentError from '@components/ContentError';
-import ContentLoading from '@components/ContentLoading';
-import { JobTemplatesAPI, ProjectsAPI } from '@api';
-import { JobTemplate } from '@types';
-import { getAddedAndRemoved } from '@util/lists';
+import { CardBody } from '../../../components/Card';
+import ContentError from '../../../components/ContentError';
+import ContentLoading from '../../../components/ContentLoading';
+import { JobTemplatesAPI, ProjectsAPI } from '../../../api';
+import { JobTemplate } from '../../../types';
+import { getAddedAndRemoved } from '../../../util/lists';
 import JobTemplateForm from '../shared/JobTemplateForm';
 
 const loadRelatedProjectPlaybooks = async project =>
@@ -97,49 +97,47 @@ class JobTemplateEdit extends Component {
     const { template, history } = this.props;
     const {
       labels,
-      organizationId,
       instanceGroups,
       initialInstanceGroups,
       credentials,
+      webhook_credential,
       ...remainingValues
     } = values;
 
     this.setState({ formSubmitError: null });
+    remainingValues.project = values.project.id;
+    remainingValues.webhook_credential = webhook_credential?.id || null;
     try {
       await JobTemplatesAPI.update(template.id, remainingValues);
       await Promise.all([
-        this.submitLabels(labels, organizationId),
+        this.submitLabels(labels, template?.organization),
         this.submitInstanceGroups(instanceGroups, initialInstanceGroups),
         this.submitCredentials(credentials),
       ]);
       history.push(this.detailsUrl);
-    } catch (formSubmitError) {
-      this.setState({ formSubmitError });
+    } catch (error) {
+      this.setState({ formSubmitError: error });
     }
   }
 
-  async submitLabels(labels = [], organizationId) {
+  async submitLabels(labels = [], orgId) {
     const { template } = this.props;
+
     const { added, removed } = getAddedAndRemoved(
       template.summary_fields.labels.results,
       labels
     );
+
     const disassociationPromises = removed.map(label =>
       JobTemplatesAPI.disassociateLabel(template.id, label)
     );
-    const associationPromises = added
-      .filter(label => !label.isNew)
-      .map(label => JobTemplatesAPI.associateLabel(template.id, label));
-    const creationPromises = added
-      .filter(label => label.isNew)
-      .map(label =>
-        JobTemplatesAPI.generateLabel(template.id, label, organizationId)
-      );
+    const associationPromises = added.map(label => {
+      return JobTemplatesAPI.associateLabel(template.id, label, orgId);
+    });
 
     const results = await Promise.all([
       ...disassociationPromises,
       ...associationPromises,
-      ...creationPromises,
     ]);
     return results;
   }
@@ -215,8 +213,8 @@ class JobTemplateEdit extends Component {
           handleCancel={this.handleCancel}
           handleSubmit={this.handleSubmit}
           relatedProjectPlaybooks={relatedProjectPlaybooks}
+          submitError={formSubmitError}
         />
-        {formSubmitError ? <div> error </div> : null}
       </CardBody>
     );
   }

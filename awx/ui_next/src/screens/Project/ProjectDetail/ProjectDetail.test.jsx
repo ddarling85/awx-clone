@@ -1,7 +1,14 @@
 import React from 'react';
+import { act } from 'react-dom/test-utils';
 import { createMemoryHistory } from 'history';
-import { mountWithContexts, waitForElement } from '@testUtils/enzymeHelpers';
+import {
+  mountWithContexts,
+  waitForElement,
+} from '../../../../testUtils/enzymeHelpers';
+import { ProjectsAPI } from '../../../api';
 import ProjectDetail from './ProjectDetail';
+
+jest.mock('../../../api');
 
 describe('<ProjectDetail />', () => {
   const mockProject = {
@@ -62,22 +69,7 @@ describe('<ProjectDetail />', () => {
   });
 
   test('should render Details', () => {
-    const wrapper = mountWithContexts(<ProjectDetail project={mockProject} />, {
-      context: {
-        linguiPublisher: {
-          i18n: {
-            _: key => {
-              if (key.values) {
-                Object.entries(key.values).forEach(([k, v]) => {
-                  key.id = key.id.replace(new RegExp(`\\{${k}\\}`), v);
-                });
-              }
-              return key.id;
-            },
-          },
-        },
-      },
-    });
+    const wrapper = mountWithContexts(<ProjectDetail project={mockProject} />);
     function assertDetail(label, value) {
       expect(wrapper.find(`Detail[label="${label}"] dt`).text()).toBe(label);
       expect(wrapper.find(`Detail[label="${label}"] dd`).text()).toBe(value);
@@ -85,12 +77,12 @@ describe('<ProjectDetail />', () => {
     assertDetail('Name', mockProject.name);
     assertDetail('Description', mockProject.description);
     assertDetail('Organization', mockProject.summary_fields.organization.name);
-    assertDetail('SCM Type', 'Git');
-    assertDetail('SCM URL', mockProject.scm_url);
-    assertDetail('SCM Branch', mockProject.scm_branch);
-    assertDetail('SCM Refspec', mockProject.scm_refspec);
+    assertDetail('Source Control Type', 'Git');
+    assertDetail('Source Control URL', mockProject.scm_url);
+    assertDetail('Source Control Branch', mockProject.scm_branch);
+    assertDetail('Source Control Refspec', mockProject.scm_refspec);
     assertDetail(
-      'SCM Credential',
+      'Source Control Credential',
       `Scm: ${mockProject.summary_fields.credential.name}`
     );
     assertDetail(
@@ -122,6 +114,7 @@ describe('<ProjectDetail />', () => {
 
   test('should hide options label when all project options return false', () => {
     const mockOptions = {
+      scm_type: '',
       scm_clean: false,
       scm_delete_on_update: false,
       scm_update_on_launch: false,
@@ -135,7 +128,7 @@ describe('<ProjectDetail />', () => {
     expect(wrapper.find('Detail[label="Options"]').length).toBe(0);
   });
 
-  test('should render with missing summary fields', async done => {
+  test('should render with missing summary fields', async () => {
     const wrapper = mountWithContexts(
       <ProjectDetail project={{ ...mockProject, summary_fields: {} }} />
     );
@@ -144,10 +137,9 @@ describe('<ProjectDetail />', () => {
       'Detail[label="Name"]',
       el => el.length === 1
     );
-    done();
   });
 
-  test('should show edit button for users with edit permission', async done => {
+  test('should show edit button for users with edit permission', async () => {
     const wrapper = mountWithContexts(<ProjectDetail project={mockProject} />);
     const editButton = await waitForElement(
       wrapper,
@@ -155,10 +147,9 @@ describe('<ProjectDetail />', () => {
     );
     expect(editButton.text()).toEqual('Edit');
     expect(editButton.prop('to')).toBe(`/projects/${mockProject.id}/edit`);
-    done();
   });
 
-  test('should hide edit button for users without edit permission', async done => {
+  test('should hide edit button for users without edit permission', async () => {
     const wrapper = mountWithContexts(
       <ProjectDetail
         project={{
@@ -175,7 +166,6 @@ describe('<ProjectDetail />', () => {
     expect(wrapper.find('ProjectDetail Button[aria-label="edit"]').length).toBe(
       0
     );
-    done();
   });
 
   test('edit button should navigate to project edit', () => {
@@ -188,5 +178,38 @@ describe('<ProjectDetail />', () => {
       .find('Button[aria-label="edit"] Link')
       .simulate('click', { button: 0 });
     expect(history.location.pathname).toEqual('/projects/1/edit');
+  });
+
+  test('expected api calls are made for delete', async () => {
+    const wrapper = mountWithContexts(<ProjectDetail project={mockProject} />);
+    await waitForElement(wrapper, 'ProjectDetail Button[aria-label="Delete"]');
+    await act(async () => {
+      wrapper.find('DeleteButton').invoke('onConfirm')();
+    });
+    expect(ProjectsAPI.destroy).toHaveBeenCalledTimes(1);
+  });
+
+  test('Error dialog shown for failed deletion', async () => {
+    ProjectsAPI.destroy.mockImplementationOnce(() =>
+      Promise.reject(new Error())
+    );
+    const wrapper = mountWithContexts(<ProjectDetail project={mockProject} />);
+    await waitForElement(wrapper, 'ProjectDetail Button[aria-label="Delete"]');
+    await act(async () => {
+      wrapper.find('DeleteButton').invoke('onConfirm')();
+    });
+    await waitForElement(
+      wrapper,
+      'Modal[title="Error!"]',
+      el => el.length === 1
+    );
+    await act(async () => {
+      wrapper.find('Modal[title="Error!"]').invoke('onClose')();
+    });
+    await waitForElement(
+      wrapper,
+      'Modal[title="Error!"]',
+      el => el.length === 0
+    );
   });
 });

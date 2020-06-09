@@ -16,7 +16,6 @@ ANSIBLE_METADATA = {'metadata_version': '1.1',
 DOCUMENTATION = '''
 ---
 module: tower_host
-version_added: "2.3"
 author: "Wayne Witzel III (@wwitzel3)"
 short_description: create, update, or destroy Ansible Tower host.
 description:
@@ -27,6 +26,10 @@ options:
       description:
         - The name to use for the host.
       required: True
+      type: str
+    new_name:
+      description:
+        - To use when changing a hosts's name.
       type: str
     description:
       description:
@@ -44,8 +47,8 @@ options:
       default: 'yes'
     variables:
       description:
-        - Variables to use for the host. Use C(@) for a file.
-      type: str
+        - Variables to use for the host.
+      type: dict
     state:
       description:
         - Desired state of the resource.
@@ -69,67 +72,62 @@ EXAMPLES = '''
 '''
 
 
-import os
-
-from ..module_utils.ansible_tower import TowerModule, tower_auth_config, tower_check_mode
-
-try:
-    import tower_cli
-    import tower_cli.exceptions as exc
-
-    from tower_cli.conf import settings
-except ImportError:
-    pass
+from ..module_utils.tower_api import TowerModule
+import json
 
 
 def main():
+    # Any additional arguments that are not fields of the item can be added here
     argument_spec = dict(
         name=dict(required=True),
+        new_name=dict(),
         description=dict(),
         inventory=dict(required=True),
         enabled=dict(type='bool', default=True),
-        variables=dict(),
+        variables=dict(type='dict'),
         state=dict(choices=['present', 'absent'], default='present'),
     )
-    module = TowerModule(argument_spec=argument_spec, supports_check_mode=True)
 
+    # Create a module for ourselves
+    module = TowerModule(argument_spec=argument_spec)
+
+    # Extract our parameters
     name = module.params.get('name')
+    new_name = module.params.get('new_name')
     description = module.params.get('description')
     inventory = module.params.get('inventory')
     enabled = module.params.get('enabled')
     state = module.params.get('state')
-
     variables = module.params.get('variables')
-    if variables:
-        if variables.startswith('@'):
-            filename = os.path.expanduser(variables[1:])
-            with open(filename, 'r') as f:
-                variables = f.read()
 
-    json_output = {'host': name, 'state': state}
+    # Attempt to look up the related items the user specified (these will fail the module if not found)
+    inventory_id = module.resolve_name_to_id('inventories', inventory)
 
-    tower_auth = tower_auth_config(module)
-    with settings.runtime_values(**tower_auth):
-        tower_check_mode(module)
-        host = tower_cli.get_resource('host')
+    # Attempt to look up host based on the provided name and inventory ID
+    host = module.get_one('hosts', **{
+        'data': {
+            'name': name,
+            'inventory': inventory_id
+        }
+    })
 
-        try:
-            inv_res = tower_cli.get_resource('inventory')
-            inv = inv_res.get(name=inventory)
+    if state == 'absent':
+        # If the state was absent we can let the module delete it if needed, the module will handle exiting from this
+        module.delete_if_needed(host)
 
-            if state == 'present':
-                result = host.modify(name=name, inventory=inv['id'], enabled=enabled,
-                                     variables=variables, description=description, create_on_missing=True)
-                json_output['id'] = result['id']
-            elif state == 'absent':
-                result = host.delete(name=name, inventory=inv['id'])
-        except (exc.NotFound) as excinfo:
-            module.fail_json(msg='Failed to update host, inventory not found: {0}'.format(excinfo), changed=False)
-        except (exc.ConnectionError, exc.BadRequest, exc.AuthError) as excinfo:
-            module.fail_json(msg='Failed to update host: {0}'.format(excinfo), changed=False)
+    # Create the data that gets sent for create and update
+    host_fields = {
+        'name': new_name if new_name else name,
+        'inventory': inventory_id,
+        'enabled': enabled,
+    }
+    if description is not None:
+        host_fields['description'] = description
+    if variables is not None:
+        host_fields['variables'] = json.dumps(variables)
 
-    json_output['changed'] = result['changed']
-    module.exit_json(**json_output)
+    # If the state was present and we can let the module build or update the existing host, this will return on its own
+    module.create_or_update_if_needed(host, host_fields, endpoint='hosts', item_type='host')
 
 
 if __name__ == '__main__':

@@ -1,18 +1,16 @@
 import React, { useState, useEffect } from 'react';
-import { TrashAltIcon } from '@patternfly/react-icons';
-import { withRouter } from 'react-router-dom';
+import { useParams, useLocation } from 'react-router-dom';
 import { withI18n } from '@lingui/react';
 import { t } from '@lingui/macro';
-import { getQSConfig, parseQueryString } from '@util/qs';
-import { InventoriesAPI, GroupsAPI } from '@api';
 import { Button, Tooltip } from '@patternfly/react-core';
-import AlertModal from '@components/AlertModal';
-import ErrorDetail from '@components/ErrorDetail';
-import DataListToolbar from '@components/DataListToolbar';
+import { getQSConfig, parseQueryString } from '../../../util/qs';
+import { InventoriesAPI, GroupsAPI } from '../../../api';
+import AlertModal from '../../../components/AlertModal';
+import ErrorDetail from '../../../components/ErrorDetail';
+import DataListToolbar from '../../../components/DataListToolbar';
 import PaginatedDataList, {
   ToolbarAddButton,
-} from '@components/PaginatedDataList';
-import styled from 'styled-components';
+} from '../../../components/PaginatedDataList';
 import InventoryGroupItem from './InventoryGroupItem';
 import InventoryGroupsDeleteModal from '../shared/InventoryGroupsDeleteModal';
 
@@ -21,21 +19,6 @@ const QS_CONFIG = getQSConfig('group', {
   page_size: 20,
   order_by: 'name',
 });
-
-const DeleteButton = styled(Button)`
-  padding: 5px 8px;
-
-  &:hover {
-    background-color: #d9534f;
-    color: white;
-  }
-
-  &[disabled] {
-    color: var(--pf-c-button--m-plain--Color);
-    pointer-events: initial;
-    cursor: not-allowed;
-  }
-`;
 
 function cannotDelete(item) {
   return !item.summary_fields.user_capabilities.delete;
@@ -54,7 +37,7 @@ const useModal = () => {
   };
 };
 
-function InventoryGroupsList({ i18n, location, match }) {
+function InventoryGroupsList({ i18n }) {
   const [actions, setActions] = useState(null);
   const [contentError, setContentError] = useState(null);
   const [deletionError, setDeletionError] = useState(null);
@@ -64,7 +47,8 @@ function InventoryGroupsList({ i18n, location, match }) {
   const [selected, setSelected] = useState([]);
   const { isModalOpen, toggleModal } = useModal();
 
-  const inventoryId = match.params.id;
+  const { id: inventoryId } = useParams();
+  const { search } = useLocation();
   const fetchGroups = (id, queryString) => {
     const params = parseQueryString(QS_CONFIG, queryString);
     return InventoriesAPI.readGroups(id, params);
@@ -81,7 +65,7 @@ function InventoryGroupsList({ i18n, location, match }) {
             data: { actions: optionActions },
           },
         ] = await Promise.all([
-          fetchGroups(inventoryId, location.search),
+          fetchGroups(inventoryId, search),
           InventoriesAPI.readGroupsOptions(inventoryId),
         ]);
 
@@ -95,7 +79,7 @@ function InventoryGroupsList({ i18n, location, match }) {
       }
     }
     fetchData();
-  }, [inventoryId, location]);
+  }, [inventoryId, search]);
 
   const handleSelectAll = isSelected => {
     setSelected(isSelected ? [...groups] : []);
@@ -134,16 +118,18 @@ function InventoryGroupsList({ i18n, location, match }) {
     setIsLoading(true);
 
     try {
-      /* eslint-disable no-await-in-loop, no-restricted-syntax */
+      /* eslint-disable no-await-in-loop */
       /* Delete groups sequentially to avoid api integrity errors */
-      for (const group of selected) {
+      /* https://eslint.org/docs/rules/no-await-in-loop#when-not-to-use-it */
+      for (let i = 0; i < selected.length; i++) {
+        const group = selected[i];
         if (option === 'delete') {
           await GroupsAPI.destroy(+group.id);
         } else if (option === 'promote') {
           await InventoriesAPI.promoteGroup(inventoryId, +group.id);
         }
       }
-      /* eslint-enable no-await-in-loop, no-restricted-syntax */
+      /* eslint-enable no-await-in-loop */
     } catch (error) {
       setDeletionError(error);
     }
@@ -153,7 +139,7 @@ function InventoryGroupsList({ i18n, location, match }) {
     try {
       const {
         data: { count, results },
-      } = await fetchGroups(inventoryId, location.search);
+      } = await fetchGroups(inventoryId, search);
       setGroups(results);
       setGroupCount(count);
     } catch (error) {
@@ -224,26 +210,28 @@ function InventoryGroupsList({ i18n, location, match }) {
             onSelectAll={handleSelectAll}
             qsConfig={QS_CONFIG}
             additionalControls={[
+              ...(canAdd
+                ? [
+                    <ToolbarAddButton
+                      key="add"
+                      linkTo={`/inventories/inventory/${inventoryId}/groups/add`}
+                    />,
+                  ]
+                : []),
               <Tooltip content={renderTooltip()} position="top" key="delete">
                 <div>
-                  <DeleteButton
-                    variant="plain"
+                  <Button
+                    variant="danger"
                     aria-label={i18n._(t`Delete`)}
                     onClick={toggleModal}
                     isDisabled={
                       selected.length === 0 || selected.some(cannotDelete)
                     }
                   >
-                    <TrashAltIcon />
-                  </DeleteButton>
+                    {i18n._(t`Delete`)}
+                  </Button>
                 </div>
               </Tooltip>,
-              canAdd && (
-                <ToolbarAddButton
-                  key="add"
-                  linkTo={`/inventories/inventory/${inventoryId}/groups/add`}
-                />
-              ),
             ]}
           />
         )}
@@ -259,7 +247,7 @@ function InventoryGroupsList({ i18n, location, match }) {
       {deletionError && (
         <AlertModal
           isOpen={deletionError}
-          variant="danger"
+          variant="error"
           title={i18n._(t`Error!`)}
           onClose={() => setDeletionError(null)}
         >
@@ -276,4 +264,4 @@ function InventoryGroupsList({ i18n, location, match }) {
     </>
   );
 }
-export default withI18n()(withRouter(InventoryGroupsList));
+export default withI18n()(InventoryGroupsList);

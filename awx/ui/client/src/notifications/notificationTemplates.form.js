@@ -168,22 +168,6 @@ export default ['i18n', function(i18n) {
                 subForm: 'typeSubForm',
                 ngDisabled: '!(notification_template.summary_fields.user_capabilities.edit || canAdd)'
             },
-            rooms: {
-                label: i18n._('Destination Channels'),
-                type: 'textarea',
-                rows: 3,
-                awPopOver: i18n._('Enter one HipChat channel per line. The pound symbol (#) is not required.'),
-                dataTitle: i18n._('Destination Channels'),
-                dataPlacement: 'right',
-                dataContainer: "body",
-                awRequiredWhen: {
-                    reqExpression: "room_required",
-                    init: "false"
-                },
-                ngShow: "notification_type.value == 'hipchat'",
-                subForm: 'typeSubForm',
-                ngDisabled: '!(notification_template.summary_fields.user_capabilities.edit || canAdd)'
-            },
             token: {
                 labelBind: 'tokenLabel',
                 type: 'sensitive',
@@ -341,18 +325,6 @@ export default ['i18n', function(i18n) {
                 label: i18n._('Disable SSL Verification'),
                 type: 'checkbox',
                 ngShow: "notification_type.value == 'grafana' ",
-                subForm: 'typeSubForm',
-                ngDisabled: '!(notification_template.summary_fields.user_capabilities.edit || canAdd)'
-            },
-            api_url: {
-                label: i18n._('API URL'),
-                type: 'text',
-                placeholder: 'https://mycompany.hipchat.com',
-                awRequiredWhen: {
-                    reqExpression: "hipchat_required",
-                    init: "false"
-                },
-                ngShow: "notification_type.value == 'hipchat' ",
                 subForm: 'typeSubForm',
                 ngDisabled: '!(notification_template.summary_fields.user_capabilities.edit || canAdd)'
             },
@@ -555,23 +527,14 @@ export default ['i18n', function(i18n) {
                 ngDisabled: '!(notification_template.summary_fields.user_capabilities.edit || canAdd)'
             },
             email_options: {
-                label: i18n._('Options'),
-                type: 'radio_group',
-                subForm: 'typeSubForm',
+                label: i18n._('Email Options'),
+                dataTitle: i18n._('Email Options'),
+                defaultText: i18n._('Choose an email option'),
+                type: 'select',
+                ngOptions: 'type.id as type.name for type in emailOptions',
                 ngShow: "notification_type.value == 'email'",
-                ngClick: "emailOptionsChange()",
-                ngDisabled: '!(notification_template.summary_fields.user_capabilities.edit || canAdd)',
-                options: [{
-                    value: 'use_tls',
-                    label: i18n._('Use TLS'),
-                    ngShow: "notification_type.value == 'email' ",
-                    labelClass: 'Form-inputLabel'
-                }, {
-                    value: 'use_ssl',
-                    label: i18n._('Use SSL'),
-                    ngShow: "notification_type.value == 'email'",
-                    labelClass: 'Form-inputLabel'
-                }]
+                subForm: 'typeSubForm',
+                ngDisabled: '!(notification_template.summary_fields.user_capabilities.edit || canAdd)'
             },
             hex_color: {
                 label: i18n._('Notification Color'),
@@ -718,7 +681,7 @@ export default ['i18n', function(i18n) {
                 ngDisabled: '!(notification_template.summary_fields.user_capabilities.edit || canAdd)',
             },
             running_message: {
-                label: i18n._('Workflow Running Message'),
+                label: i18n._('Workflow Pending Approval Message'),
                 class: 'Form-formGroup--fullWidth',
                 type: 'syntax_highlight',
                 mode: 'jinja2',
@@ -729,7 +692,7 @@ export default ['i18n', function(i18n) {
                 ngDisabled: '!(notification_template.summary_fields.user_capabilities.edit || canAdd)',
             },
             running_body: {
-                label: i18n._('Workflow Running Message Body'),
+                label: i18n._('Workflow Pending Approval Message Body'),
                 class: 'Form-formGroup--fullWidth',
                 type: 'syntax_highlight',
                 mode: 'jinja2',

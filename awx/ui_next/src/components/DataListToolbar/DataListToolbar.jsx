@@ -7,38 +7,23 @@ import styled from 'styled-components';
 import { SearchIcon } from '@patternfly/react-icons';
 import {
   DataToolbar,
-  DataToolbarContent,
-  DataToolbarGroup,
-  DataToolbarToggleGroup,
+  DataToolbarContent as _DataToolbarContent,
+  DataToolbarGroup as _DataToolbarGroup,
   DataToolbarItem,
+  DataToolbarToggleGroup,
 } from '@patternfly/react-core/dist/umd/experimental';
 import ExpandCollapse from '../ExpandCollapse';
 import Search from '../Search';
 import Sort from '../Sort';
 
-import { SearchColumns, SortColumns, QSConfig } from '@types';
+import { SearchColumns, SortColumns, QSConfig } from '../../types';
 
-const AdditionalControlsWrapper = styled.div`
-  display: flex;
-  flex-grow: 1;
-  justify-content: flex-end;
-  align-items: center;
-
-  & > :not(:first-child) {
-    margin-left: 20px;
-  }
+const DataToolbarContent = styled(_DataToolbarContent)`
+  --pf-c-data-toolbar__content--PaddingLeft: 24px;
+  --pf-c-data-toolbar__content--PaddingRight: 8px;
 `;
-
-const AdditionalControlsDataToolbarGroup = styled(DataToolbarGroup)`
-  margin-left: auto;
-  margin-right: 0 !important;
-`;
-
-const DataToolbarSeparator = styled(DataToolbarItem)`
-  width: 1px !important;
-  height: 30px !important;
-  margin-left: 3px !important;
-  margin-right: 10px !important;
+const DataToolbarGroup = styled(_DataToolbarGroup)`
+  --pf-c-data-toolbar__group--spacer: 24px;
 `;
 
 class DataListToolbar extends React.Component {
@@ -80,7 +65,6 @@ class DataListToolbar extends React.Component {
                   id="select-all"
                 />
               </DataToolbarItem>
-              <DataToolbarSeparator variant="separator" />
             </DataToolbarGroup>
           )}
           <DataToolbarToggleGroup toggleIcon={<SearchIcon />} breakpoint="lg">
@@ -97,8 +81,8 @@ class DataListToolbar extends React.Component {
               <Sort qsConfig={qsConfig} columns={sortColumns} onSort={onSort} />
             </DataToolbarItem>
           </DataToolbarToggleGroup>
-          <DataToolbarGroup>
-            {showExpandCollapse && (
+          {showExpandCollapse && (
+            <DataToolbarGroup>
               <Fragment>
                 <DataToolbarItem>
                   <ExpandCollapse
@@ -108,15 +92,13 @@ class DataListToolbar extends React.Component {
                   />
                 </DataToolbarItem>
               </Fragment>
-            )}
+            </DataToolbarGroup>
+          )}
+          <DataToolbarGroup>
+            {additionalControls.map(control => (
+              <DataToolbarItem key={control.key}>{control}</DataToolbarItem>
+            ))}
           </DataToolbarGroup>
-          <AdditionalControlsDataToolbarGroup>
-            <DataToolbarItem>
-              <AdditionalControlsWrapper>
-                {additionalControls}
-              </AdditionalControlsWrapper>
-            </DataToolbarItem>
-          </AdditionalControlsDataToolbarGroup>
         </DataToolbarContent>
       </DataToolbar>
     );

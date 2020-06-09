@@ -1,4 +1,10 @@
 ---
+- name: Generate broadcast websocket secret
+  set_fact:
+    broadcast_websocket_secret: "{{ lookup('password', '/dev/null', length=128) }}"
+  run_once: true
+  no_log: true
+
 - fail:
     msg: "Only set one of kubernetes_context or openshift_host"
   when: openshift_host is defined and kubernetes_context is defined
@@ -24,7 +30,7 @@
     kubectl_or_oc: "{{ openshift_oc_bin if openshift_oc_bin is defined else 'kubectl' }}"
 
 - set_fact:
-    deployment_object: "sts"
+    deployment_object: "deployment"
 
 - name: Record deployment size
   shell: |
@@ -39,11 +45,12 @@
     kubernetes_deployment_replica_size: "{{ deployment_details.stdout | int }}"
   when: deployment_details.rc == 0
 
-- name: Delete existing Deployment
+- name: Delete existing Deployment (or StatefulSet)
   shell: |
+    {{ kubectl_or_oc }} delete sts \
+      {{ kubernetes_deployment_name }} -n {{ kubernetes_namespace }} --ignore-not-found
     {{ kubectl_or_oc }} delete {{ deployment_object }} \
-      {{ kubernetes_deployment_name }} -n {{ kubernetes_namespace }}
-  when: deployment_details.rc == 0
+      {{ kubernetes_deployment_name }} -n {{ kubernetes_namespace }} --ignore-not-found
 
 - name: Get Postgres Service Detail
   shell: "{{ kubectl_or_oc }} describe svc {{ postgresql_service_name }} -n {{ kubernetes_namespace }}"
@@ -79,22 +86,35 @@
 
 - name: Deploy PostgreSQL (Kubernetes)
   block:
-    - name: Template PostgreSQL Deployment (Kubernetes)
-      set_fact:
-        pg_values: "{{ lookup('template', 'postgresql-values.yml.j2') }}"
+    - name: Create Temporary Values File (Kubernetes)
+      tempfile:
+        state: file
+        suffix: .yml
+      register: values_file
+
+    - name: Populate Temporary Values File (Kubernetes)
+      template:
+        src: postgresql-values.yml.j2
+        dest: "{{ values_file.path }}"
       no_log: true
 
     - name: Deploy and Activate Postgres (Kubernetes)
       shell: |
-        helm repo update --tiller-namespace={{ tiller_namespace | default('kube-system') }}
-        echo {{ pg_values | quote }} | helm upgrade {{ postgresql_service_name }} --install \
+        helm repo add stable https://kubernetes-charts.storage.googleapis.com
+        helm repo update
+        helm upgrade {{ postgresql_service_name }} \
+          --install \
           --namespace {{ kubernetes_namespace }} \
-          --version="6.2.1" \
-          --tiller-namespace={{ tiller_namespace | default('kube-system') }} \
-          --values - \
+          --version="8.3.0" \
+          --values {{ values_file.path }} \
           stable/postgresql
       register: kubernetes_pg_activate
       no_log: true
+
+    - name: Remove tempfile
+      file:
+        path: "{{ values_file.path }}"
+        state: absent
   when:
     - pg_hostname is not defined or pg_hostname == ''
     - postgres_svc_details is defined and postgres_svc_details.rc != 0
@@ -118,7 +138,7 @@
       shell: |
         POD=$({{ kubectl_or_oc }} -n {{ kubernetes_namespace }} \
           get pods -l=name=postgresql --field-selector status.phase=Running -o jsonpath="{.items[0].metadata.name}")
-        oc exec $POD -n {{ kubernetes_namespace }} -- bash -c "psql -tAc 'select version()'"
+        {{ kubectl_or_oc }} exec $POD -n {{ kubernetes_namespace }} -- bash -c "psql -tAc 'select version()'"
       register: pg_version
     - name: Upgrade postgres if necessary
       block:
@@ -170,71 +190,25 @@
 
 - name: Set image names if using custom registry
   block:
-    - name: Set task image name
+    - name: Set awx image name
       set_fact:
-        kubernetes_task_image: "{{ docker_registry }}/{{ docker_registry_repository }}/{{ task_image }}"
-      when: kubernetes_task_image is not defined
-
-    - name: Set web image name
-      set_fact:
-        kubernetes_web_image: "{{ docker_registry }}/{{ docker_registry_repository }}/{{ web_image }}"
-      when: kubernetes_web_image is not defined
+        kubernetes_awx_image: "{{ docker_registry }}/{{ docker_registry_repository }}/{{ awx_image }}"
+      when: kubernetes_awx_image is not defined
   when: docker_registry is defined
 
-- name: Generate SSL certificates for RabbitMQ, if needed
-  include_tasks: ssl_cert_gen.yml
-  when: "rabbitmq_use_ssl|default(False)|bool"
-
-- name: Get Kubernetes Config
-  command: |
-    {{ kubectl_or_oc }} config view -o json
-  register: kube_config_cmd
-  no_log: true
-
-- name: Convert kube config to dictionary
+- name: Determine Deployment api version
   set_fact:
-    kube_config: "{{ kube_config_cmd.stdout | from_json }}"
-  no_log: true
-
-- name: Extract current context from kube config
-  set_fact:
-    current_kube_context: "{{ kube_config['current-context'] }}"
-
-- name: Find cluster for current context
-  set_fact:
-    kube_cluster: |
-      {{ (kube_config.contexts |
-          selectattr("name", "equalto", current_kube_context) |
-          list)[0].context.cluster }}
-
-- name: Find server for current context
-  set_fact:
-    kube_server: |
-      {{ (kube_config.clusters |
-          selectattr("name", "equalto", kube_cluster|trim) |
-          list)[0].cluster.server }}
-
-- name: Get kube version from api server
-  uri:
-    url: "{{ kube_server | trim }}/version"
-    validate_certs: false
-  register: kube_version
-
-- name: Extract server version from command output
-  set_fact:
-    kube_api_version: "{{ kube_version.json.gitVersion[1:] }}"
-
-- name: Determine StatefulSet api version
-  set_fact:
-    kubernetes_statefulset_api_version: "{{ 'apps/v1' if kube_api_version is version('1.9', '>=') else 'apps/v1beta1' }}"
+    kubernetes_deployment_api_version: "{{ 'apps/v1' if kube_api_version is version('1.9', '>=') else 'apps/v1beta1' }}"
 
 - name: Render deployment templates
   set_fact:
     "{{ item }}": "{{ lookup('template', item + '.yml.j2') }}"
   with_items:
     - 'configmap'
-    - 'deployment'
     - 'secret'
+    - 'deployment'
+    - 'supervisor'
+    - 'launch_awx'
   no_log: true
 
 - name: Apply Deployment
@@ -242,8 +216,10 @@
     echo {{ item | quote }} | {{ kubectl_or_oc }} apply -f -
   with_items:
     - "{{ configmap }}"
-    - "{{ deployment }}"
     - "{{ secret }}"
+    - "{{ deployment }}"
+    - "{{ supervisor }}"
+    - "{{ launch_awx }}"
   no_log: true
 
 - name: Delete any existing management pod
@@ -311,7 +287,5 @@
 
 - name: Scale up deployment
   shell: |
-    {{ kubectl_or_oc }} -n {{ kubernetes_namespace }} \
-      scale {{ deployment_object }} {{ kubernetes_deployment_name }} --replicas=0
     {{ kubectl_or_oc }} -n {{ kubernetes_namespace }} \
       scale {{ deployment_object }} {{ kubernetes_deployment_name }} --replicas={{ replicas | default(kubernetes_deployment_replica_size) }}

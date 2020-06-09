@@ -4,7 +4,7 @@ The `requirements.txt` and `requirements_ansible.txt` files are generated from `
 
 ## How To Use
 
-Commands should from inside `./requirements` directory of the awx repository.
+Commands should be run from inside the `./requirements` directory of the awx repository.
 
 Make sure you have `patch, awk, python3, python2, python3-venv, python2-virtualenv, pip2, pip3` installed. The development container image should have all these.
 
@@ -38,8 +38,6 @@ This script will:
   - Update `requirements.txt` based on `requirements.in`
   - Update/generate `requirements_ansible.txt` based on `requirements_ansible.in`
     - including an automated patch that adds `python_version < "3"` for Python 2 backward compatibility
-  - Removes the `docutils` dependency line from `requirements.txt` and `requirements_ansible.txt`
-
 
 ## Licenses and Source Files
 
@@ -129,6 +127,11 @@ This breaks a very large amount of AWX code that assumes these fields
 are returned as dicts. Upgrading this library will require a refactor
 to accomidate this change.
 
+### wheel
+
+azure-cli-core requires a version of wheel that is incompatible with
+certain packages building with later versions of pip, so we override it.
+
 ### pip and setuptools
 
 The offline installer needs to have functionality confirmed before upgrading these.
@@ -137,17 +140,8 @@ in the top-level Makefile.
 
 ## Library Notes
 
-### celery
+### pexpect
 
-This is only used for the beat feature (running periodic tasks).
-This could be replaced, see: https://github.com/ansible/awx/pull/2530
+Version 4.8 makes us a little bit nervous with changes to `searchwindowsize` https://github.com/pexpect/pexpect/pull/579/files
+Pin to `pexpect==4.7.x` until we have more time to move to `4.8` and test.
 
-### requests-futures
-
-This can be removed when a solution for the external log queuing is ready.
-https://github.com/ansible/awx/pull/5092
-
-### asgi-amqp
-
-This library is not compatible with channels 2 and is not expected
-to become so. This drives other pins in the requirements file.

@@ -1,6 +1,8 @@
+import datetime
 import pytest
 
 from django.utils.encoding import smart_str
+from django.utils.timezone import now
 
 from awx.api.versioning import reverse
 from awx.main.models import JobTemplate, Schedule
@@ -140,7 +142,6 @@ def test_encrypted_survey_answer(post, patch, admin_user, project, inventory, su
     ("DTSTART:20030925T104941Z RRULE:FREQ=DAILY;INTERVAL=10;COUNT=500;UNTIL=20040925T104941Z", "RRULE may not contain both COUNT and UNTIL"),  # noqa
     ("DTSTART;TZID=America/New_York:20300308T050000Z RRULE:FREQ=DAILY;INTERVAL=1", "rrule parsing failed validation"),
     ("DTSTART:20300308T050000 RRULE:FREQ=DAILY;INTERVAL=1", "DTSTART cannot be a naive datetime"),
-    ("DTSTART:19700101T000000Z RRULE:FREQ=MINUTELY;INTERVAL=1", "more than 1000 events are not allowed"),  # noqa
 ])
 def test_invalid_rrules(post, admin_user, project, inventory, rrule, error):
     job_template = JobTemplate.objects.create(
@@ -342,6 +343,40 @@ def test_months_with_31_days(post, admin_user):
     ]
 
 
+@pytest.mark.django_db
+@pytest.mark.timeout(3)
+@pytest.mark.parametrize('freq, delta, total_seconds', (
+    ('MINUTELY', 1, 60),
+    ('MINUTELY', 15, 15 * 60),
+    ('HOURLY', 1, 3600),
+    ('HOURLY', 4, 3600 * 4),
+))
+def test_really_old_dtstart(post, admin_user, freq, delta, total_seconds):
+    url = reverse('api:schedule_rrule')
+    # every <interval>, at the :30 second mark
+    rrule = f'DTSTART;TZID=America/New_York:20051231T000030 RRULE:FREQ={freq};INTERVAL={delta}'
+    start = now()
+    next_ten = post(url, {'rrule': rrule}, admin_user, expect=200).data['utc']
+
+    assert len(next_ten) == 10
+
+    # the first date is *in the future*
+    assert next_ten[0] >= start
+
+    # ...but *no more than* <interval> into the future
+    assert now() + datetime.timedelta(**{
+        'minutes' if freq == 'MINUTELY' else 'hours': delta
+    })
+
+    # every date in the list is <interval> greater than the last
+    for i, x in enumerate(next_ten):
+        if i == 0:
+            continue
+        assert x.second == 30
+        delta = (x - next_ten[i - 1])
+        assert delta.total_seconds() == total_seconds
+
+
 def test_dst_rollback_duplicates(post, admin_user):
     # From Nov 2 -> Nov 3, 2030, daylight savings ends and we "roll back" an hour.
     # Make sure we don't "double count" duplicate times in the "rolled back"
@@ -365,3 +400,77 @@ def test_zoneinfo(get, admin_user):
     url = reverse('api:schedule_zoneinfo')
     r = get(url, admin_user, expect=200)
     assert {'name': 'America/New_York'} in r.data
+
+
+@pytest.mark.django_db
+def test_normal_user_can_create_jt_schedule(options, post, project, inventory, alice):
+    jt = JobTemplate.objects.create(
+        name='test-jt',
+        project=project,
+        playbook='helloworld.yml',
+        inventory=inventory
+    )
+    jt.save()
+    url = reverse('api:schedule_list')
+
+    # can't create a schedule on the JT because we don't have execute rights
+    params = {
+        'name': 'My Example Schedule',
+        'rrule': RRULE_EXAMPLE,
+        'unified_job_template': jt.id,
+    }
+    assert 'POST' not in options(url, user=alice).data['actions'].keys()
+    post(url, params, alice, expect=403)
+
+    # now we can, because we're allowed to execute the JT
+    jt.execute_role.members.add(alice)
+    assert 'POST' in options(url, user=alice).data['actions'].keys()
+    post(url, params, alice, expect=201)
+
+
+@pytest.mark.django_db
+def test_normal_user_can_create_project_schedule(options, post, project, alice):
+    url = reverse('api:schedule_list')
+
+    # can't create a schedule on the project because we don't have update rights
+    params = {
+        'name': 'My Example Schedule',
+        'rrule': RRULE_EXAMPLE,
+        'unified_job_template': project.id,
+    }
+    assert 'POST' not in options(url, user=alice).data['actions'].keys()
+    post(url, params, alice, expect=403)
+
+    # use role does *not* grant the ability to schedule
+    project.use_role.members.add(alice)
+    assert 'POST' not in options(url, user=alice).data['actions'].keys()
+    post(url, params, alice, expect=403)
+
+    # now we can, because we're allowed to update project
+    project.update_role.members.add(alice)
+    assert 'POST' in options(url, user=alice).data['actions'].keys()
+    post(url, params, alice, expect=201)
+
+
+@pytest.mark.django_db
+def test_normal_user_can_create_inventory_update_schedule(options, post, inventory_source, alice):
+    url = reverse('api:schedule_list')
+
+    # can't create a schedule on the project because we don't have update rights
+    params = {
+        'name': 'My Example Schedule',
+        'rrule': RRULE_EXAMPLE,
+        'unified_job_template': inventory_source.id,
+    }
+    assert 'POST' not in options(url, user=alice).data['actions'].keys()
+    post(url, params, alice, expect=403)
+
+    # use role does *not* grant the ability to schedule
+    inventory_source.inventory.use_role.members.add(alice)
+    assert 'POST' not in options(url, user=alice).data['actions'].keys()
+    post(url, params, alice, expect=403)
+
+    # now we can, because we're allowed to update project
+    inventory_source.inventory.update_role.members.add(alice)
+    assert 'POST' in options(url, user=alice).data['actions'].keys()
+    post(url, params, alice, expect=201)

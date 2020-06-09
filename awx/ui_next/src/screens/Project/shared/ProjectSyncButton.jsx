@@ -3,9 +3,9 @@ import { number } from 'prop-types';
 import { withI18n } from '@lingui/react';
 import { t } from '@lingui/macro';
 
-import AlertModal from '@components/AlertModal';
-import ErrorDetail from '@components/ErrorDetail';
-import { ProjectsAPI } from '@api';
+import AlertModal from '../../../components/AlertModal';
+import ErrorDetail from '../../../components/ErrorDetail';
+import { ProjectsAPI } from '../../../api';
 
 class ProjectSyncButton extends React.Component {
   static propTypes = {
@@ -54,7 +54,7 @@ class ProjectSyncButton extends React.Component {
         {syncError && (
           <AlertModal
             isOpen={syncError}
-            variant="danger"
+            variant="error"
             title={i18n._(t`Error!`)}
             onClose={this.handleSyncErrorClose}
           >

@@ -1,15 +1,16 @@
-import React, { useState, useEffect } from 'react';
-import { string, func, bool } from 'prop-types';
+import React, { useCallback, useEffect } from 'react';
+import { node, string, func, bool } from 'prop-types';
 import { withRouter } from 'react-router-dom';
 import { withI18n } from '@lingui/react';
 import { t } from '@lingui/macro';
 import { FormGroup } from '@patternfly/react-core';
-import { ProjectsAPI } from '@api';
-import { Project } from '@types';
-import { FieldTooltip } from '@components/FormField';
-import { getQSConfig, parseQueryString } from '@util/qs';
+import { ProjectsAPI } from '../../api';
+import { Project } from '../../types';
+import { FieldTooltip } from '../FormField';
+import OptionsList from '../OptionsList';
+import useRequest from '../../util/useRequest';
+import { getQSConfig, parseQueryString } from '../../util/qs';
 import Lookup from './Lookup';
-import OptionsList from './shared/OptionsList';
 import LookupErrorMessage from './shared/LookupErrorMessage';
 
 const QS_CONFIG = getQSConfig('project', {
@@ -20,6 +21,7 @@ const QS_CONFIG = getQSConfig('project', {
 
 function ProjectLookup({
   helperTextInvalid,
+  autocomplete,
   i18n,
   isValid,
   onChange,
@@ -29,25 +31,32 @@ function ProjectLookup({
   onBlur,
   history,
 }) {
-  const [projects, setProjects] = useState([]);
-  const [count, setCount] = useState(0);
-  const [error, setError] = useState(null);
+  const {
+    result: { projects, count },
+    request: fetchProjects,
+    error,
+    isLoading,
+  } = useRequest(
+    useCallback(async () => {
+      const params = parseQueryString(QS_CONFIG, history.location.search);
+      const { data } = await ProjectsAPI.read(params);
+      if (data.count === 1 && autocomplete) {
+        autocomplete(data.results[0]);
+      }
+      return {
+        count: data.count,
+        projects: data.results,
+      };
+    }, [history.location.search, autocomplete]),
+    {
+      count: 0,
+      projects: [],
+    }
+  );
 
   useEffect(() => {
-    (async () => {
-      const params = parseQueryString(QS_CONFIG, history.location.search);
-      try {
-        const { data } = await ProjectsAPI.read(params);
-        setProjects(data.results);
-        setCount(data.count);
-        if (data.count === 1) {
-          onChange(data.results[0]);
-        }
-      } catch (err) {
-        setError(err);
-      }
-    })();
-  }, [onChange, history.location]);
+    fetchProjects();
+  }, [fetchProjects]);
 
   return (
     <FormGroup
@@ -66,6 +75,7 @@ function ProjectLookup({
         onBlur={onBlur}
         onChange={onChange}
         required={required}
+        isLoading={isLoading}
         qsConfig={QS_CONFIG}
         renderOptionsList={({ state, dispatch, canDelete }) => (
           <OptionsList
@@ -78,7 +88,7 @@ function ProjectLookup({
               },
               {
                 name: i18n._(t`Type`),
-                key: 'type',
+                key: 'scm_type',
                 options: [
                   [``, i18n._(t`Manual`)],
                   [`git`, i18n._(t`Git`)],
@@ -88,7 +98,7 @@ function ProjectLookup({
                 ],
               },
               {
-                name: i18n._(t`SCM URL`),
+                name: i18n._(t`Source Control URL`),
                 key: 'scm_url',
               },
               {
@@ -124,22 +134,24 @@ function ProjectLookup({
 }
 
 ProjectLookup.propTypes = {
-  value: Project,
-  helperTextInvalid: string,
+  autocomplete: func,
+  helperTextInvalid: node,
   isValid: bool,
   onBlur: func,
   onChange: func.isRequired,
   required: bool,
   tooltip: string,
+  value: Project,
 };
 
 ProjectLookup.defaultProps = {
+  autocomplete: () => {},
   helperTextInvalid: '',
   isValid: true,
+  onBlur: () => {},
   required: false,
   tooltip: '',
   value: null,
-  onBlur: () => {},
 };
 
 export { ProjectLookup as _ProjectLookup };

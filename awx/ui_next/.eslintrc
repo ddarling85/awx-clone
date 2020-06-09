@@ -8,16 +8,9 @@
       "modules": true
     }
   },
-  "plugins": [
-    "react-hooks"
-  ],
+  "plugins": ["react-hooks"],
   "extends": ["airbnb", "prettier", "prettier/react"],
   "settings": {
-    "import/resolver": {
-      "webpack": {
-        "config": "webpack.config.js"
-      }
-    },
     "react": {
       "version": "16.5.2"
     }
@@ -34,7 +27,7 @@
     "camelcase": "off",
     "arrow-parens": "off",
     "comma-dangle": "off",
-    "//": "https://github.com/benmosher/eslint-plugin-import/issues/479#issuecomment-252500896",
+    // https://github.com/benmosher/eslint-plugin-import/issues/479#issuecomment-252500896
     "import/no-extraneous-dependencies": "off",
     "max-len": [
       "error",

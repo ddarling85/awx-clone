@@ -1,18 +1,19 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useLocation } from 'react-router-dom';
 import { withI18n } from '@lingui/react';
 import { t } from '@lingui/macro';
-import { CredentialsAPI } from '@api';
 import { Card, PageSection } from '@patternfly/react-core';
-import AlertModal from '@components/AlertModal';
-import ErrorDetail from '@components/ErrorDetail';
-import DataListToolbar from '@components/DataListToolbar';
+import { CredentialsAPI } from '../../../api';
+import AlertModal from '../../../components/AlertModal';
+import ErrorDetail from '../../../components/ErrorDetail';
+import DataListToolbar from '../../../components/DataListToolbar';
 import PaginatedDataList, {
   ToolbarAddButton,
   ToolbarDeleteButton,
-} from '@components/PaginatedDataList';
-import { getQSConfig, parseQueryString } from '@util/qs';
-import { CredentialListItem } from '.';
+} from '../../../components/PaginatedDataList';
+import useRequest, { useDeleteItems } from '../../../util/useRequest';
+import { getQSConfig, parseQueryString } from '../../../util/qs';
+import CredentialListItem from './CredentialListItem';
 
 const QS_CONFIG = getQSConfig('credential', {
   page: 1,
@@ -21,52 +22,59 @@ const QS_CONFIG = getQSConfig('credential', {
 });
 
 function CredentialList({ i18n }) {
-  const [actions, setActions] = useState(null);
-  const [contentError, setContentError] = useState(null);
-  const [credentialCount, setCredentialCount] = useState(0);
-  const [credentials, setCredentials] = useState([]);
-  const [deletionError, setDeletionError] = useState(null);
-  const [hasContentLoading, setHasContentLoading] = useState(true);
   const [selected, setSelected] = useState([]);
-
   const location = useLocation();
 
-  const loadCredentials = async ({ search }) => {
-    const params = parseQueryString(QS_CONFIG, search);
-    setContentError(null);
-    setHasContentLoading(true);
-    try {
-      const [
-        {
-          data: { count, results },
-        },
-        {
-          data: { actions: optionActions },
-        },
-      ] = await Promise.all([
+  const {
+    result: { credentials, credentialCount, actions },
+    error: contentError,
+    isLoading,
+    request: fetchCredentials,
+  } = useRequest(
+    useCallback(async () => {
+      const params = parseQueryString(QS_CONFIG, location.search);
+      const [creds, credActions] = await Promise.all([
         CredentialsAPI.read(params),
-        loadCredentialActions(),
+        CredentialsAPI.readOptions(),
       ]);
-
-      setCredentials(results);
-      setCredentialCount(count);
-      setActions(optionActions);
-    } catch (error) {
-      setContentError(error);
-    } finally {
-      setHasContentLoading(false);
+      return {
+        credentials: creds.data.results,
+        credentialCount: creds.data.count,
+        actions: credActions.data.actions,
+      };
+    }, [location]),
+    {
+      credentials: [],
+      credentialCount: 0,
+      actions: {},
     }
-  };
+  );
 
   useEffect(() => {
-    loadCredentials(location);
-  }, [location]); // eslint-disable-line react-hooks/exhaustive-deps
+    fetchCredentials();
+  }, [fetchCredentials]);
 
-  const loadCredentialActions = () => {
-    if (actions) {
-      return Promise.resolve({ data: { actions } });
+  const isAllSelected =
+    selected.length > 0 && selected.length === credentials.length;
+  const {
+    isLoading: isDeleteLoading,
+    deleteItems: deleteCredentials,
+    deletionError,
+    clearDeletionError,
+  } = useDeleteItems(
+    useCallback(async () => {
+      return Promise.all(selected.map(({ id }) => CredentialsAPI.destroy(id)));
+    }, [selected]),
+    {
+      qsConfig: QS_CONFIG,
+      allItemsSelected: isAllSelected,
+      fetchItems: fetchCredentials,
     }
-    return CredentialsAPI.readOptions();
+  );
+
+  const handleDelete = async () => {
+    await deleteCredentials();
+    setSelected([]);
   };
 
   const handleSelectAll = isSelected => {
@@ -81,44 +89,15 @@ function CredentialList({ i18n }) {
     }
   };
 
-  const handleDelete = async () => {
-    setHasContentLoading(true);
-
-    try {
-      await Promise.all(
-        selected.map(credential => CredentialsAPI.destroy(credential.id))
-      );
-    } catch (error) {
-      setDeletionError(error);
-    }
-
-    const params = parseQueryString(QS_CONFIG, location.search);
-    try {
-      const {
-        data: { count, results },
-      } = await CredentialsAPI.read(params);
-
-      setCredentials(results);
-      setCredentialCount(count);
-      setSelected([]);
-    } catch (error) {
-      setContentError(error);
-    }
-
-    setHasContentLoading(false);
-  };
-
   const canAdd =
     actions && Object.prototype.hasOwnProperty.call(actions, 'POST');
-  const isAllSelected =
-    selected.length > 0 && selected.length === credentials.length;
 
   return (
     <PageSection>
       <Card>
         <PaginatedDataList
           contentError={contentError}
-          hasContentLoading={hasContentLoading}
+          hasContentLoading={isLoading || isDeleteLoading}
           items={credentials}
           itemCount={credentialCount}
           qsConfig={QS_CONFIG}
@@ -127,6 +106,7 @@ function CredentialList({ i18n }) {
             <CredentialListItem
               key={item.id}
               credential={item}
+              fetchCredentials={fetchCredentials}
               detailUrl={`/credentials/${item.id}/details`}
               isSelected={selected.some(row => row.id === item.id)}
               onSelect={() => handleSelect(item)}
@@ -140,25 +120,26 @@ function CredentialList({ i18n }) {
               onSelectAll={handleSelectAll}
               qsConfig={QS_CONFIG}
               additionalControls={[
+                ...(canAdd
+                  ? [<ToolbarAddButton key="add" linkTo="/credentials/add" />]
+                  : []),
                 <ToolbarDeleteButton
                   key="delete"
                   onDelete={handleDelete}
                   itemsToDelete={selected}
                   pluralizedItemName={i18n._(t`Credentials`)}
                 />,
-                canAdd && (
-                  <ToolbarAddButton key="add" linkTo="/credentials/add" />
-                ),
               ]}
             />
           )}
         />
       </Card>
       <AlertModal
+        aria-label={i18n._(t`Deletion Error`)}
         isOpen={deletionError}
-        variant="danger"
+        variant="error"
         title={i18n._(t`Error!`)}
-        onClose={() => setDeletionError(null)}
+        onClose={clearDeletionError}
       >
         {i18n._(t`Failed to delete one or more credentials.`)}
         <ErrorDetail error={deletionError} />

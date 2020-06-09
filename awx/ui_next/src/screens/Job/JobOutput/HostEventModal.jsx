@@ -1,16 +1,16 @@
 import React, { useEffect, useState } from 'react';
 import { Modal as PFModal, Tab, Tabs as PFTabs } from '@patternfly/react-core';
-import CodeMirrorInput from '@components/CodeMirrorInput';
-import ContentEmpty from '@components/ContentEmpty';
 import PropTypes from 'prop-types';
-import { DetailList, Detail } from '@components/DetailList';
-import { StatusIcon } from '@components/Sparkline';
 import { withI18n } from '@lingui/react';
 import { t } from '@lingui/macro';
 import styled from 'styled-components';
-import Entities from 'html-entities';
+import { AllHtmlEntities } from 'html-entities';
+import StatusIcon from '../../../components/StatusIcon';
+import { DetailList, Detail } from '../../../components/DetailList';
+import ContentEmpty from '../../../components/ContentEmpty';
+import CodeMirrorInput from '../../../components/CodeMirrorInput';
 
-const entities = new Entities.AllHtmlEntities();
+const entities = new AllHtmlEntities();
 
 const Modal = styled(PFModal)`
   --pf-c-modal-box__footer--MarginTop: 0;
@@ -26,10 +26,9 @@ const Modal = styled(PFModal)`
 
 const HostNameDetailValue = styled.div`
   align-items: center;
-  display: inline-flex;
-  .at-c-statusIcon {
-    margin-right: 10px;
-  }
+  display: inline-grid;
+  grid-gap: 10px;
+  grid-template-columns: auto auto;
 `;
 
 const Tabs = styled(PFTabs)`
@@ -98,7 +97,9 @@ const processCodeMirrorValue = value => {
 };
 
 const processStdOutValue = hostEvent => {
-  const { taskAction, res } = hostEvent.event_data;
+  const taskAction = hostEvent?.event_data?.taskAction;
+  const res = hostEvent?.event_data?.res;
+
   let stdOut;
   if (taskAction === 'debug' && res.result && res.result.stdout) {
     stdOut = res.result.stdout;
@@ -108,7 +109,7 @@ const processStdOutValue = hostEvent => {
     Array.isArray(res.results)
   ) {
     [stdOut] = res.results;
-  } else {
+  } else if (res) {
     stdOut = res.stdout;
   }
   return stdOut;
@@ -126,12 +127,13 @@ function HostEventModal({ onClose, hostEvent = {}, isOpen = false, i18n }) {
     setActiveTabKey(tabIndex);
   };
 
-  const jsonObj = processCodeMirrorValue(hostEvent.event_data.res);
-  const stdErr = processCodeMirrorValue(hostEvent.event_data.res.stderr);
+  const jsonObj = processCodeMirrorValue(hostEvent?.event_data?.res);
+  const stdErr = processCodeMirrorValue(hostEvent?.event_data?.res?.stderr);
   const stdOut = processCodeMirrorValue(processStdOutValue(hostEvent));
 
   return (
     <Modal
+      isFooterLeftAligned
       isLarge
       isOpen={isOpen}
       onClose={onClose}
@@ -167,7 +169,7 @@ function HostEventModal({ onClose, hostEvent = {}, isOpen = false, i18n }) {
             />
             <Detail
               label={i18n._(t`Command`)}
-              value={hostEvent.event_data.res.cmd}
+              value={hostEvent?.event_data?.res?.cmd}
             />
           </DetailList>
         </Tab>
