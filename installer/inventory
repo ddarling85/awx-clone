@@ -1,4 +1,4 @@
-localhost ansible_connection=local ansible_python_interpreter="/usr/bin/env python"
+localhost ansible_connection=local ansible_python_interpreter="/usr/bin/env python3"
 
 [all:vars]
 
@@ -7,6 +7,7 @@ localhost ansible_connection=local ansible_python_interpreter="/usr/bin/env pyth
 # be selected based on: latest, 1, 1.0, 1.0.0, 1.0.0.123
 # by default the base will be used to search for ansible/awx_web and ansible/awx_task
 dockerhub_base=ansible
+dockerhub_version=9.1.1
 
 # Openshift Install
 # Will need to set -e openshift_password=developer -e docker_registry_password=$(oc whoami -t)
@@ -62,13 +63,13 @@ dockerhub_base=ansible
 
 # Common Docker parameters
 use_docker_compose=True
-awx_task_hostname=awx
-awx_web_hostname=awxweb
-postgres_data_dir="~/.awx/pgdocker"
-host_port=80
-host_port_ssl=443
+awx_task_hostname=hv-centos2
+awx_web_hostname=hv-centos2
+postgres_data_dir="/srv/awx/pgdocker"
+host_port=8080
+#host_port_ssl=443
 #ssl_certificate=
-docker_compose_dir="~/.awx/awxcompose"
+docker_compose_dir="/srv/awx/awxcompose"
 
 # Required for Openshift when building the image on your own
 # Optional for Openshift if using Dockerhub or another prebuilt registry
