@@ -2,14 +2,14 @@
 # All Rights Reserved.
 import os
 import logging
+import django
 from awx import __version__ as tower_version
-
 # Prepare the AWX environment.
 from awx import prepare_env, MODE
+from channels.routing import get_default_application  # noqa
 prepare_env() # NOQA
 
-from django.core.wsgi import get_wsgi_application  # NOQA
-from channels.asgi import get_channel_layer
+
 
 """
 ASGI config for AWX project.
@@ -32,6 +32,5 @@ if MODE == 'production':
 
 
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "awx.settings")
-
-
-channel_layer = get_channel_layer()
+django.setup()
+channel_layer = get_default_application()

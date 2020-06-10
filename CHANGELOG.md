@@ -2,6 +2,130 @@
 
 This is a list of high-level changes for each release of AWX. A full list of commits can be found at `https://github.com/ansible/awx/releases/tag/<version>`.
 
+## 12.0.0 (Jun 9, 2020)
+- Removed memcached as a dependency of AWX (https://github.com/ansible/awx/pull/7240) 
+- Moved to a single container image build instead of separate awx_web and awx_task images. The container image is just `awx` (https://github.com/ansible/awx/pull/7228)
+- Official AWX container image builds now use a two-stage container build process that notably reduces the size of our published images (https://github.com/ansible/awx/pull/7017)
+- Removed support for HipChat notifications ([EoL announcement](https://www.atlassian.com/partnerships/slack/faq#faq-98b17ca3-247f-423b-9a78-70a91681eff0)); all previously-created HipChat notification templates will be deleted due to this removal.
+- Fixed a bug which broke AWX installations with oc version 4.3 (https://github.com/ansible/awx/pull/6948/files)
+- Fixed a performance issue that caused notable delay of stdout processing for playbooks run against large numbers of hosts (https://github.com/ansible/awx/issues/6991)
+- Fixed a bug that caused CyberArk AIM credential plugin looks to hang forever in some environments (https://github.com/ansible/awx/issues/6986)
+- Fixed a bug that caused ANY/ALL converage settings not to properly save when editing approval nodes in the UI (https://github.com/ansible/awx/issues/6998)
+- Fixed a bug that broke support for the satellite6_group_prefix source variable (https://github.com/ansible/awx/issues/7031)
+- Fixed a bug that prevented changes to workflow node convergence settings when approval nodes were in use (https://github.com/ansible/awx/issues/7063)
+- Fixed a bug that caused notifications to fail on newer version of Mattermost (https://github.com/ansible/awx/issues/7264)
+- Fixed a bug (by upgrading to 0.8.1 of the foreman collection) that prevented host_filters from working properly with Foreman-based inventory (https://github.com/ansible/awx/issues/7225)
+- Fixed a bug that prevented the usage of the Conjur credential plugin with secrets that contain spaces (https://github.com/ansible/awx/issues/7191)
+- Fixed a bug in awx-manage run_wsbroadcast --status in kubernetes (https://github.com/ansible/awx/pull/7009)
+- Fixed a bug that broke notification toggles for system jobs in the UI (https://github.com/ansible/awx/pull/7042)
+- Fixed a bug that broke local pip installs of awxkit (https://github.com/ansible/awx/issues/7107)
+- Fixed a bug that prevented PagerDuty notifications from sending for workflow job template approvals (https://github.com/ansible/awx/issues/7094)
+- Fixed a bug that broke external log aggregation support for URL paths that include the = character (such as the tokens for SumoLogic) (https://github.com/ansible/awx/issues/7139)
+- Fixed a bug that prevented organization admins from removing labels from workflow job templates (https://github.com/ansible/awx/pull/7143)
+
+## 11.2.0 (Apr 29, 2020)
+
+- Inventory updates now use collection-based plugins by default (in Ansible 2.9+):
+    - amazon.aws.aws_ec2
+    - community.vmware.vmware_vm_inventory
+    - azure.azcollection.azure_rm
+    - google.cloud.gcp_compute
+    - theforeman.foreman.foreman
+    - openstack.cloud.openstack
+    - ovirt.ovirt_collection.ovirt
+    - awx.awx.tower
+- Added support for Approle and LDAP/AD mechanisms to the Hashicorp Vault credential plugin (https://github.com/ansible/awx/issues/5076)
+- Added Project (Domain Name) support for the OpenStack Keystone v3 API (https://github.com/ansible/awx/issues/6831)
+- Added a new setting for raising log verbosity for rsyslogd (https://github.com/ansible/awx/pull/6818)
+- Added the ability to monitor stdout in the CLI for running jobs and workflow jobs (https://github.com/ansible/awx/issues/6165)
+- Fixed a bug which prevented the AWX CLI from properly installing with newer versions of pip (https://github.com/ansible/awx/issues/6870)
+- Fixed a bug which broke AWX's external logging support when configured with HTTPS endpoints that utilize self-signed certificates (https://github.com/ansible/awx/issues/6851)
+- Fixed a local docker installer bug that mistakenly attempted to upgrade PostgreSQL when an external pg_hostname is specified (https://github.com/ansible/awx/pull/5398)
+- Fixed a race condition that caused task container crashes when pods are quickly brought down and back up (https://github.com/ansible/awx/issues/6750)
+- Fixed a bug that caused 404 errors when attempting to view the second page of the workflow approvals view (https://github.com/ansible/awx/issues/6803)
+- Fixed a bug that prevented the use of ANSIBLE_SSH_ARGS for ad-hoc-commands (https://github.com/ansible/awx/pull/6811)
+- Fixed a bug that broke AWX installs/upgrades on Red Hat OpenShift (https://github.com/ansible/awx/issues/6791)
+
+
+## 11.1.0 (Apr 22, 2020)
+- Changed rsyslogd to persist queued events to disk (to prevent a risk of out-of-memory errors) (https://github.com/ansible/awx/issues/6746)
+- Added the ability to configure the destination and maximum disk size of rsyslogd spool (in the event of a log aggregator outage) (https://github.com/ansible/awx/pull/6763)
+- Added the ability to discover playbooks in project clones from symlinked directories (https://github.com/ansible/awx/pull/6773)
+- Fixed a bug that caused certain log aggregator settings to break logging integration (https://github.com/ansible/awx/issues/6760)
+- Fixed a bug that caused playbook execution in container groups to sometimes unexpectedly deadlock (https://github.com/ansible/awx/issues/6692)
+- Improved stability of the new redis clustering implementation (https://github.com/ansible/awx/pull/6739 https://github.com/ansible/awx/pull/6720)
+- Improved stability of the new rsyslogd-based logging implementation (https://github.com/ansible/awx/pull/6796)
+
+## 11.0.0 (Apr 16, 2020)
+- As of AWX 11.0.0, Kubernetes-based deployments use a Deployment rather than a StatefulSet.
+- Reimplemented external logging support using rsyslogd to improve reliability and address a number of issues (https://github.com/ansible/awx/issues/5155)
+- Changed activity stream logs to include summary fields for related objects (https://github.com/ansible/awx/issues/1761)
+- Added code to more gracefully attempt to reconnect to redis if it restarts/becomes unavailable (https://github.com/ansible/awx/pull/6670)
+- Fixed a bug that caused REFRESH_TOKEN_EXPIRE_SECONDS to not properly be respected for OAuth2.0 refresh tokens generated by AWX (https://github.com/ansible/awx/issues/6630)
+- Fixed a bug that broke schedules containing RRULES with very old DTSTART dates (https://github.com/ansible/awx/pull/6550)
+- Fixed a bug that broke installs on older versions of Ansible packaged with certain Linux distributions (https://github.com/ansible/awx/issues/5501)
+- Fixed a bug that caused the activity stream to sometimes report the incorrect actor when associating user membership on SAML login (https://github.com/ansible/awx/pull/6525)
+- Fixed a bug in AWX's Grafana notification support when annotation tags are omitted (https://github.com/ansible/awx/issues/6580)
+- Fixed a bug that prevented some users from searching for Source Control credentials in the AWX user interface (https://github.com/ansible/awx/issues/6600)
+- Fixed a bug that prevented disassociating orphaned users from credentials (https://github.com/ansible/awx/pull/6554)
+- Updated Twisted to address CVE-2020-10108 and CVE-2020-10109.
+
+## 10.0.0 (Mar 30, 2020)
+- As of AWX 10.0.0, the official AWX CLI no longer supports Python 2 (it requires at least Python 3.6) (https://github.com/ansible/awx/pull/6327)
+- AWX no longer relies on RabbitMQ; Redis is added as a new dependency (https://github.com/ansible/awx/issues/5443)
+- Altered AWX's event tables to allow more than ~2 billion total events (https://github.com/ansible/awx/issues/6010)
+- Improved the performance (time to execute, and memory consumption) of the periodic job cleanup system job (https://github.com/ansible/awx/pull/6166)
+- Updated Job Templates so they now have an explicit Organization field (it is no longer inferred from the associated Project) (https://github.com/ansible/awx/issues/3903)
+- Updated social-auth-core to address an upcoming GitHub API deprecation (https://github.com/ansible/awx/issues/5970)
+- Updated to ansible-runner 1.4.6 to address various bugs.
+- Updated Django to address CVE-2020-9402
+- Updated pyyaml version to address CVE-2017-18342
+- Fixed a bug which prevented the new `scm_branch` field from being used in custom notification templates (https://github.com/ansible/awx/issues/6258)
+- Fixed a race condition that sometimes causes success/failure notifications to include an incomplete list of hosts (https://github.com/ansible/awx/pull/6290)
+- Fixed a bug that can cause certain setting pages to lose unsaved form edits when a playbook is launched (https://github.com/ansible/awx/issues/5265)
+- Fixed a bug that can prevent the "Use TLS/SSL" field from properly saving when editing email notification templates (https://github.com/ansible/awx/issues/6383)
+- Fixed a race condition that sometimes broke event/stdout processing for jobs launched in container groups (https://github.com/ansible/awx/issues/6280)
+
+## 9.3.0 (Mar 12, 2020)
+- Added the ability to specify an OAuth2 token description in the AWX CLI (https://github.com/ansible/awx/issues/6122)
+- Added support for K8S service account annotations to the installer (https://github.com/ansible/awx/pull/6007)
+- Added support for K8S imagePullSecrets to the installer (https://github.com/ansible/awx/pull/5989)
+- Launching jobs (and workflows) using the --monitor flag in the AWX CLI now returns a non-zero exit code on job failure (https://github.com/ansible/awx/issues/5920)
+- Improved UI performance for various job views when many simultaneous users are logged into AWX (https://github.com/ansible/awx/issues/5883)
+- Updated to the latest version of Django to address a few open CVEs (https://github.com/ansible/awx/pull/6080)
+- Fixed a critical bug which can cause AWX to hang and stop launching playbooks after a periodic of time (https://github.com/ansible/awx/issues/5617)
+- Fixed a bug which caused delays in project update stdout for certain large SCM clones (as of Ansible 2.9+) (https://github.com/ansible/awx/pull/6254)
+- Fixed a bug which caused certain smart inventory filters to mistakenly return duplicate hosts (https://github.com/ansible/awx/pull/5972)
+- Fixed an unclear server error when creating smart inventories with the AWX collection (https://github.com/ansible/awx/issues/6250)
+- Fixed a bug that broke Grafana notification support (https://github.com/ansible/awx/issues/6137)
+- Fixed a UI bug which prevent users with read access to an organization from editing credentials for that organization (https://github.com/ansible/awx/pull/6241)
+- Fixed a bug which prevent workflow approval records from recording a `started` and `elapsed` date (https://github.com/ansible/awx/issues/6202)
+- Fixed a bug which caused workflow nodes to have a confusing option for `verbosity` (https://github.com/ansible/awx/issues/6196)
+- Fixed an RBAC bug which prevented projects and inventory schedules from being created by certain users in certain contexts (https://github.com/ansible/awx/issues/5717)
+- Fixed a bug that caused `role_path` in a project's config to not be respected due to an error processing `/etc/ansible/ansible.cfg` (https://github.com/ansible/awx/pull/6038)
+- Fixed a bug that broke inventory updates for installs with custom home directories for the awx user (https://github.com/ansible/awx/pull/6152)
+- Fixed a bug that broke fact data collection when AWX encounters invalid/unexpected fact data (https://github.com/ansible/awx/issues/5935)
+
+
+## 9.2.0 (Feb 12, 2020)
+- Added the ability to configure the convergence behavior of workflow nodes https://github.com/ansible/awx/issues/3054
+- AWX now allows for a configurable global limit for fork count (per-job run).  The default maximum is 200. https://github.com/ansible/awx/pull/5604
+- Added the ability to specify AZURE_PUBLIC_CLOUD (for e.g., Azure Government KeyVault support) for the Azure credential plugin https://github.com/ansible/awx/issues/5138
+- Added support for several additional parameters for Satellite dynamic inventory https://github.com/ansible/awx/pull/5598
+- Added a new field to jobs for tracking the date/time a job is cancelled https://github.com/ansible/awx/pull/5610
+- Made a series of additional optimizations to the callback receiver to further improve stdout write speed for running playbooks https://github.com/ansible/awx/pull/5677 https://github.com/ansible/awx/pull/5739
+- Updated AWX to be compatible with Helm 3.x (https://github.com/ansible/awx/pull/5776)
+- Optimized AWX's job dependency/scheduling code to drastically improve processing time in scenarios where there are many pending jobs scheduled simultaneously https://github.com/ansible/awx/issues/5154
+- Fixed a bug which could cause SCM authentication details (basic auth passwords) to be reported to external loggers in certain failure scenarios (e.g., when a git clone fails and ansible itself prints an error message to stdout) https://github.com/ansible/awx/pull/5812
+- Fixed a k8s installer bug that caused installs to fail in certain situations https://github.com/ansible/awx/issues/5574
+- Fixed a number of issues that caused analytics gathering and reporting to run more often than necessary https://github.com/ansible/awx/pull/5721
+- Fixed a bug in the AWX CLI that prevented JSON-type settings from saving properly https://github.com/ansible/awx/issues/5528
+- Improved support for fetching custom virtualenv dependencies when AWX is installed behind a proxy https://github.com/ansible/awx/pull/5805
+- Updated the bundled version of openstacksdk to address a known issue https://github.com/ansible/awx/issues/5821
+- Updated the bundled vmware_inventory plugin to the latest version to address a bug https://github.com/ansible/awx/pull/5668
+- Fixed a bug that can cause inventory updates to fail to properly save their output when run within a workflow https://github.com/ansible/awx/pull/5666
+- Removed a number of pre-computed fields from the Host and Group models to improve AWX performance.  As part of this change, inventory group UIs throughout the interface no longer display status icons https://github.com/ansible/awx/pull/5448
+
 ## 9.1.1 (Jan 14, 2020)
 
 - Fixed a bug that caused database migrations on Kubernetes installs to hang https://github.com/ansible/awx/pull/5579
@@ -39,7 +163,7 @@ This is a list of high-level changes for each release of AWX. A full list of com
 - Fixed a bug in the CLI which incorrectly parsed launch time arguments for `awx job_templates launch` and `awx workflow_job_templates launch` (https://github.com/ansible/awx/issues/5093).
 - Fixed a bug that caused inventory updates using "sourced from a project" to stop working (https://github.com/ansible/awx/issues/4750).
 - Fixed a bug that caused Slack notifications to sometimes show the wrong bot avatar (https://github.com/ansible/awx/pull/5125).
-- Fixed a bug that prevented the use of digits in Tower's URL settings (https://github.com/ansible/awx/issues/5081).
+- Fixed a bug that prevented the use of digits in AWX's URL settings (https://github.com/ansible/awx/issues/5081).
 
 ## 8.0.0 (Oct 21, 2019)
 

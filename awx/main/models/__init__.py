@@ -3,6 +3,7 @@
 
 # Django
 from django.conf import settings # noqa
+from django.db import connection
 from django.db.models.signals import pre_delete  # noqa
 
 # AWX
@@ -58,7 +59,6 @@ from awx.main.models.workflow import (  # noqa
     WorkflowJob, WorkflowJobNode, WorkflowJobOptions, WorkflowJobTemplate,
     WorkflowJobTemplateNode, WorkflowApproval, WorkflowApprovalTemplate,
 )
-from awx.main.models.channels import ChannelGroup # noqa
 from awx.api.versioning import reverse
 from awx.main.models.oauth import ( # noqa
     OAuth2AccessToken, OAuth2Application
@@ -78,6 +78,26 @@ User.add_to_class('get_queryset', get_user_queryset)
 User.add_to_class('can_access', check_user_access)
 User.add_to_class('can_access_with_errors', check_user_access_with_errors)
 User.add_to_class('accessible_objects', user_accessible_objects)
+
+
+def enforce_bigint_pk_migration():
+    # see: https://github.com/ansible/awx/issues/6010
+    # look at all the event tables and verify that they have been fully migrated
+    # from the *old* int primary key table to the replacement bigint table
+    # if not, attempt to migrate them in the background
+    for tblname in (
+        'main_jobevent', 'main_inventoryupdateevent',
+        'main_projectupdateevent', 'main_adhoccommandevent',
+        'main_systemjobevent'
+    ):
+        with connection.cursor() as cursor:
+            cursor.execute(
+                'SELECT 1 FROM information_schema.tables WHERE table_name=%s',
+                (f'_old_{tblname}',)
+            )
+            if bool(cursor.rowcount):
+                from awx.main.tasks import migrate_legacy_event_data
+                migrate_legacy_event_data.apply_async([tblname])
 
 
 def cleanup_created_modified_by(sender, **kwargs):

@@ -1,7 +1,5 @@
 import os
 
-from six import PY3, with_metaclass
-
 from awxkit import api, config
 from awxkit.utils import to_str
 from awxkit.api.pages import Page
@@ -45,7 +43,7 @@ DEPRECATED_RESOURCES_REVERSE = dict(
 )
 
 
-class CustomCommand(with_metaclass(CustomRegistryMeta)):
+class CustomCommand(metaclass=CustomRegistryMeta):
     """Base class for implementing custom commands.
 
     Custom commands represent static code which should run - they are
@@ -76,6 +74,7 @@ class Login(CustomCommand):
 
     def handle(self, client, parser):
         auth = parser.add_argument_group('OAuth2.0 Options')
+        auth.add_argument('--description', help='description of the generated OAuth2.0 token', metavar='TEXT')
         auth.add_argument('--conf.client_id', metavar='TEXT')
         auth.add_argument('--conf.client_secret', metavar='TEXT')
         auth.add_argument(
@@ -90,6 +89,8 @@ class Login(CustomCommand):
             'client_secret': getattr(parsed, 'conf.client_secret', None),
             'scope': getattr(parsed, 'conf.scope', None),
         }
+        if getattr(parsed, 'description', None):
+            kwargs['description'] = parsed.description
         try:
             token = api.Api().get_oauth2_token(**kwargs)
         except Exception as e:
@@ -101,7 +102,7 @@ class Login(CustomCommand):
         else:
             fmt = client.get_config('format')
             if fmt == 'human':
-                print('export TOWER_TOKEN={}'.format(token))
+                print('export TOWER_OAUTH_TOKEN={}'.format(token))
             else:
                 print(to_str(FORMATTERS[fmt]({'token': token}, '.')).strip())
 
@@ -150,18 +151,7 @@ def parse_resource(client, skip_deprecated=False):
                 k, help='', **kwargs
             )
 
-    try:
-        resource = client.parser.parse_known_args()[0].resource
-    except SystemExit:
-        if PY3:
-            raise
-        else:
-            # Unfortunately, argparse behavior between py2 and py3
-            # changed in a notable way when required subparsers
-            # have invalid (or missing) arguments specified
-            # see: https://github.com/python/cpython/commit/f97c59aaba2d93e48cbc6d25f7ff9f9c87f8d0b2
-            # In py2, this raises a SystemExit; which we want to _ignore_
-            resource = None
+    resource = client.parser.parse_known_args()[0].resource
     if resource in DEPRECATED_RESOURCES.values():
         client.argv[
             client.argv.index(resource)
@@ -186,8 +176,12 @@ def parse_resource(client, skip_deprecated=False):
                     ]
                 }
                 _filter = 'key, value'
+            try:
+                connection = client.root.connection
+            except AttributeError:
+                connection = None
             formatted = format_response(
-                Page.from_json(response),
+                Page.from_json(response, connection=connection),
                 fmt=client.get_config('format'),
                 filter=_filter
             )

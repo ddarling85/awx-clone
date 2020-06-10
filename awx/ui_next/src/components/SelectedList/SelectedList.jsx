@@ -1,20 +1,18 @@
 import React, { Component } from 'react';
 import PropTypes from 'prop-types';
-import { Split as PFSplit, SplitItem } from '@patternfly/react-core';
+import { Chip, Split as PFSplit, SplitItem } from '@patternfly/react-core';
+
 import styled from 'styled-components';
-import { ChipGroup, Chip } from '../Chip';
-import VerticalSeparator from '../VerticalSeparator';
+import ChipGroup from '../ChipGroup';
 
 const Split = styled(PFSplit)`
-  padding-top: 15px;
-  padding-bottom: 5px;
-  border-bottom: #ebebeb var(--pf-global--BorderWidth--sm) solid;
+  margin: 20px 0px;
   align-items: baseline;
 `;
 
 const SplitLabelItem = styled(SplitItem)`
-  font-size: 14px;
   font-weight: bold;
+  margin-right: 32px;
   word-break: initial;
 `;
 
@@ -40,9 +38,8 @@ class SelectedList extends Component {
     return (
       <Split>
         <SplitLabelItem>{label}</SplitLabelItem>
-        <VerticalSeparator />
         <SplitItem>
-          <ChipGroup numChips={5}>
+          <ChipGroup numChips={5} totalChips={selected.length}>
             {selected.map(item =>
               renderChip({
                 item,

@@ -1,80 +1,61 @@
-import React, { Component, Fragment } from 'react';
-import { Route, withRouter, Switch } from 'react-router-dom';
+import React, { useState, useCallback } from 'react';
+import { Route, Switch } from 'react-router-dom';
 import { withI18n } from '@lingui/react';
 import { t } from '@lingui/macro';
 
-import { Config } from '@contexts/Config';
-import Breadcrumbs from '@components/Breadcrumbs/Breadcrumbs';
+import { Config } from '../../contexts/Config';
+import Breadcrumbs from '../../components/Breadcrumbs/Breadcrumbs';
 
 import HostList from './HostList';
 import HostAdd from './HostAdd';
 import Host from './Host';
 
-class Hosts extends Component {
-  constructor(props) {
-    super(props);
+function Hosts({ i18n }) {
+  const [breadcrumbConfig, setBreadcrumbConfig] = useState({
+    '/hosts': i18n._(t`Hosts`),
+    '/hosts/add': i18n._(t`Create New Host`),
+  });
 
-    const { i18n } = props;
-
-    this.state = {
-      breadcrumbConfig: {
+  const buildBreadcrumbConfig = useCallback(
+    host => {
+      if (!host) {
+        return;
+      }
+      setBreadcrumbConfig({
         '/hosts': i18n._(t`Hosts`),
         '/hosts/add': i18n._(t`Create New Host`),
-      },
-    };
-  }
+        [`/hosts/${host.id}`]: `${host.name}`,
+        [`/hosts/${host.id}/edit`]: i18n._(t`Edit Details`),
+        [`/hosts/${host.id}/details`]: i18n._(t`Details`),
+        [`/hosts/${host.id}/facts`]: i18n._(t`Facts`),
+        [`/hosts/${host.id}/groups`]: i18n._(t`Groups`),
+        [`/hosts/${host.id}/completed_jobs`]: i18n._(t`Completed Jobs`),
+      });
+    },
+    [i18n]
+  );
 
-  setBreadcrumbConfig = host => {
-    const { i18n } = this.props;
-
-    if (!host) {
-      return;
-    }
-
-    const breadcrumbConfig = {
-      '/hosts': i18n._(t`Hosts`),
-      '/hosts/add': i18n._(t`Create New Host`),
-      [`/hosts/${host.id}`]: `${host.name}`,
-      [`/hosts/${host.id}/edit`]: i18n._(t`Edit Details`),
-      [`/hosts/${host.id}/details`]: i18n._(t`Details`),
-      [`/hosts/${host.id}/facts`]: i18n._(t`Facts`),
-      [`/hosts/${host.id}/groups`]: i18n._(t`Groups`),
-      [`/hosts/${host.id}/completed_jobs`]: i18n._(t`Completed Jobs`),
-    };
-
-    this.setState({ breadcrumbConfig });
-  };
-
-  render() {
-    const { match, history, location } = this.props;
-    const { breadcrumbConfig } = this.state;
-
-    return (
-      <Fragment>
-        <Breadcrumbs breadcrumbConfig={breadcrumbConfig} />
-        <Switch>
-          <Route path={`${match.path}/add`} render={() => <HostAdd />} />
-          <Route
-            path={`${match.path}/:id`}
-            render={() => (
-              <Config>
-                {({ me }) => (
-                  <Host
-                    history={history}
-                    location={location}
-                    setBreadcrumb={this.setBreadcrumbConfig}
-                    me={me || {}}
-                  />
-                )}
-              </Config>
+  return (
+    <>
+      <Breadcrumbs breadcrumbConfig={breadcrumbConfig} />
+      <Switch>
+        <Route path="/hosts/add">
+          <HostAdd />
+        </Route>
+        <Route path="/hosts/:id">
+          <Config>
+            {({ me }) => (
+              <Host setBreadcrumb={buildBreadcrumbConfig} me={me || {}} />
             )}
-          />
-          <Route path={`${match.path}`} render={() => <HostList />} />
-        </Switch>
-      </Fragment>
-    );
-  }
+          </Config>
+        </Route>
+        <Route path="/hosts">
+          <HostList />
+        </Route>
+      </Switch>
+    </>
+  );
 }
 
 export { Hosts as _Hosts };
-export default withI18n()(withRouter(Hosts));
+export default withI18n()(Hosts);

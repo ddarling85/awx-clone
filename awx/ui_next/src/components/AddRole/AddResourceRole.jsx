@@ -2,10 +2,10 @@ import React, { Fragment } from 'react';
 import PropTypes from 'prop-types';
 import { withI18n } from '@lingui/react';
 import { t } from '@lingui/macro';
-import { Wizard } from '@patternfly/react-core';
+import SelectableCard from '../SelectableCard';
+import Wizard from '../Wizard';
 import SelectResourceStep from './SelectResourceStep';
 import SelectRoleStep from './SelectRoleStep';
-import SelectableCard from './SelectableCard';
 import { TeamsAPI, UsersAPI } from '../../api';
 
 const readUsers = async queryParams =>
@@ -142,6 +142,17 @@ class AddResourceRole extends React.Component {
     } = this.state;
     const { onClose, roles, i18n } = this.props;
 
+    // Object roles can be user only, so we remove them when
+    // showing role choices for team access
+    const selectableRoles = { ...roles };
+    if (selectedResource === 'teams') {
+      Object.keys(roles).forEach(key => {
+        if (selectableRoles[key].user_only) {
+          delete selectableRoles[key];
+        }
+      });
+    }
+
     const userSearchColumns = [
       {
         name: i18n._(t`Username`),
@@ -247,7 +258,7 @@ class AddResourceRole extends React.Component {
                 sortColumns={userSortColumns}
                 displayKey="username"
                 onRowClick={this.handleResourceCheckboxClick}
-                onSearch={readUsers}
+                fetchItems={readUsers}
                 selectedLabel={i18n._(t`Selected`)}
                 selectedResourceRows={selectedResourceRows}
                 sortedColumnKey="username"
@@ -258,7 +269,7 @@ class AddResourceRole extends React.Component {
                 searchColumns={teamSearchColumns}
                 sortColumns={teamSortColumns}
                 onRowClick={this.handleResourceCheckboxClick}
-                onSearch={readTeams}
+                fetchItems={readTeams}
                 selectedLabel={i18n._(t`Selected`)}
                 selectedResourceRows={selectedResourceRows}
               />
@@ -274,7 +285,7 @@ class AddResourceRole extends React.Component {
         component: (
           <SelectRoleStep
             onRolesClick={this.handleRoleCheckboxClick}
-            roles={roles}
+            roles={selectableRoles}
             selectedListKey={selectedResource === 'users' ? 'username' : 'name'}
             selectedListLabel={i18n._(t`Selected`)}
             selectedResourceRows={selectedResourceRows}
@@ -301,6 +312,8 @@ class AddResourceRole extends React.Component {
         steps={steps}
         title={wizardTitle}
         nextButtonText={currentStep.nextButtonText || undefined}
+        backButtonText={i18n._(t`Back`)}
+        cancelButtonText={i18n._(t`Cancel`)}
       />
     );
   }

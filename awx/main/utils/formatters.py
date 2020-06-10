@@ -3,13 +3,13 @@
 
 from copy import copy
 import json
-import time
 import logging
 import traceback
 import socket
 from datetime import datetime
 
-
+from dateutil.tz import tzutc
+from django.core.serializers.json import DjangoJSONEncoder
 from django.conf import settings
 
 
@@ -92,20 +92,26 @@ class LogstashFormatterBase(logging.Formatter):
         }
 
     @classmethod
-    def format_timestamp(cls, time):
-        tstamp = datetime.utcfromtimestamp(time)
-        return tstamp.strftime("%Y-%m-%dT%H:%M:%S") + ".%03d" % (tstamp.microsecond / 1000) + "Z"
-
-    @classmethod
     def format_exception(cls, exc_info):
         return ''.join(traceback.format_exception(*exc_info)) if exc_info else ''
 
     @classmethod
     def serialize(cls, message):
-        return bytes(json.dumps(message), 'utf-8')
+        return json.dumps(message, cls=DjangoJSONEncoder) + '\n'
 
 
 class LogstashFormatter(LogstashFormatterBase):
+
+    def __init__(self, *args, **kwargs):
+        self.cluster_host_id = settings.CLUSTER_HOST_ID
+        self.tower_uuid = None
+        uuid = (
+            getattr(settings, 'LOG_AGGREGATOR_TOWER_UUID', None) or
+            getattr(settings, 'INSTALL_UUID', None)
+        )
+        if uuid:
+            self.tower_uuid = uuid
+        super(LogstashFormatter, self).__init__(*args, **kwargs)
 
     def reformat_data_for_log(self, raw_data, kind=None):
         '''
@@ -121,45 +127,14 @@ class LogstashFormatter(LogstashFormatterBase):
                 pass  # best effort here, if it's not valid JSON, then meh
             return raw_data
         elif kind == 'system_tracking':
-            data = copy(raw_data['ansible_facts'])
+            data = copy(raw_data.get('ansible_facts', {}))
         else:
             data = copy(raw_data)
         if isinstance(data, str):
             data = json.loads(data)
         data_for_log = {}
 
-        def index_by_name(alist):
-            """Takes a list of dictionaries with `name` as a key in each dict
-            and returns a dictionary indexed by those names"""
-            adict = {}
-            for item in alist:
-                subdict = copy(item)
-                if 'name' in subdict:
-                    name = subdict.get('name', None)
-                elif 'path' in subdict:
-                    name = subdict.get('path', None)
-                if name:
-                    # Logstash v2 can not accept '.' in a name
-                    name = name.replace('.', '_')
-                    adict[name] = subdict
-            return adict
-
-        def convert_to_type(t, val):
-            if t is float:
-                val = val[:-1] if val.endswith('s') else val
-                try:
-                    return float(val)
-                except ValueError:
-                    return val
-            elif t is int:
-                try:
-                    return int(val)
-                except ValueError:
-                    return val
-            elif t is str:
-                return val
-
-        if kind == 'job_events':
+        if kind == 'job_events' and raw_data.get('python_objects', {}).get('job_event'):
             job_event = raw_data['python_objects']['job_event']
             for field_object in job_event._meta.fields:
 
@@ -177,9 +152,6 @@ class LogstashFormatter(LogstashFormatterBase):
 
                 try:
                     data_for_log[key] = getattr(job_event, fd)
-                    if fd in ['created', 'modified'] and data_for_log[key] is not None:
-                        time_float = time.mktime(data_for_log[key].timetuple())
-                        data_for_log[key] = self.format_timestamp(time_float)
                 except Exception as e:
                     data_for_log[key] = 'Exception `{}` producing field'.format(e)
 
@@ -193,11 +165,26 @@ class LogstashFormatter(LogstashFormatterBase):
                 data['ansible_python'].pop('version_info', None)
 
             data_for_log['ansible_facts'] = data
-            data_for_log['ansible_facts_modified'] = raw_data['ansible_facts_modified']
-            data_for_log['inventory_id'] = raw_data['inventory_id']
-            data_for_log['host_name'] = raw_data['host_name']
-            data_for_log['job_id'] = raw_data['job_id']
+            data_for_log['ansible_facts_modified'] = raw_data.get('ansible_facts_modified')
+            data_for_log['inventory_id'] = raw_data.get('inventory_id')
+            data_for_log['host_name'] = raw_data.get('host_name')
+            data_for_log['job_id'] = raw_data.get('job_id')
         elif kind == 'performance':
+            def convert_to_type(t, val):
+                if t is float:
+                    val = val[:-1] if val.endswith('s') else val
+                    try:
+                        return float(val)
+                    except ValueError:
+                        return val
+                elif t is int:
+                    try:
+                        return int(val)
+                    except ValueError:
+                        return val
+                elif t is str:
+                    return val
+
             request = raw_data['python_objects']['request']
             response = raw_data['python_objects']['response']
 
@@ -231,28 +218,17 @@ class LogstashFormatter(LogstashFormatterBase):
             log_kind = record.name[len('awx.analytics.'):]
             fields = self.reformat_data_for_log(fields, kind=log_kind)
         # General AWX metadata
-        for log_name, setting_name in [
-                ('type', 'LOG_AGGREGATOR_TYPE'),
-                ('cluster_host_id', 'CLUSTER_HOST_ID'),
-                ('tower_uuid', 'LOG_AGGREGATOR_TOWER_UUID')]:
-            if hasattr(settings, setting_name):
-                fields[log_name] = getattr(settings, setting_name, None)
-            elif log_name == 'type':
-                fields[log_name] = 'other'
-
-        uuid = (
-            getattr(settings, 'LOG_AGGREGATOR_TOWER_UUID', None) or
-            getattr(settings, 'INSTALL_UUID', None)
-        )
-        if uuid:
-            fields['tower_uuid'] = uuid
+        fields['cluster_host_id'] = self.cluster_host_id
+        fields['tower_uuid'] = self.tower_uuid
         return fields
 
     def format(self, record):
+        stamp = datetime.utcfromtimestamp(record.created)
+        stamp = stamp.replace(tzinfo=tzutc())
         message = {
             # Field not included, but exist in related logs
             # 'path': record.pathname
-            '@timestamp': self.format_timestamp(record.created),
+            '@timestamp': stamp,
             'message': record.getMessage(),
             'host': self.host,
 
@@ -268,4 +244,7 @@ class LogstashFormatter(LogstashFormatterBase):
         if record.exc_info:
             message.update(self.get_debug_fields(record))
 
+        if settings.LOG_AGGREGATOR_TYPE == 'splunk':
+            # splunk messages must have a top level "event" key
+            message = {'event': message}
         return self.serialize(message)

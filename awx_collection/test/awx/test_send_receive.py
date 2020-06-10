@@ -15,8 +15,9 @@ from awx.main.models import (
 )
 
 
+# warns based on password_management param, but not security issue
 @pytest.mark.django_db
-def test_receive_send_jt(run_module, admin_user, mocker):
+def test_receive_send_jt(run_module, admin_user, mocker, silence_deprecation):
     org = Organization.objects.create(name='SRtest')
     proj = Project.objects.create(
         name='SRtest',

@@ -10,7 +10,6 @@ This document provides a guide for installing AWX.
     + [AWX branding](#awx-branding)
     + [Prerequisites](#prerequisites)
     + [System Requirements](#system-requirements)
-    + [AWX Tunables](#awx-tunables)
     + [Choose a deployment platform](#choose-a-deployment-platform)
     + [Official vs Building Images](#official-vs-building-images)
   * [Upgrading from previous versions](#upgrading-from-previous-versions)
@@ -41,13 +40,25 @@ This document provides a guide for installing AWX.
     + [Run the installer](#run-the-installer-2)
     + [Post-install](#post-install-2)
     + [Accessing AWX](#accessing-awx-2)
+- [Installing the AWX CLI](#installing-the-awx-cli)
+  * [Building the CLI Documentation](#building-the-cli-documentation)
 
     
 ## Getting started
 
 ### Clone the repo
 
-If you have not already done so, you will need to clone, or create a local copy, of the [AWX repo](https://github.com/ansible/awx). For more on how to clone the repo, view [git clone help](https://git-scm.com/docs/git-clone).
+If you have not already done so, you will need to clone, or create a local copy, of the [AWX repo](https://github.com/ansible/awx). We generally recommend that you view the releases page:
+
+https://github.com/ansible/awx/releases
+
+...and clone the latest stable release, e.g.,
+
+`git clone -b x.y.z https://github.com/ansible/awx.git`
+
+Please note that deploying from `HEAD` (or the latest commit) is **not** stable, and that if you want to do this, you should proceed at your own risk (also, see the section #official-vs-building-images for building your own image).
+
+For more on how to clone the repo, view [git clone help](https://git-scm.com/docs/git-clone).
 
 Once you have a local copy, run commands within the root of the project tree.
 
@@ -69,8 +80,11 @@ Before you can run a deployment, you'll need the following installed in your loc
     + We use this module instead of `docker-py` because it is what the `docker-compose` Python module requires.
 - [GNU Make](https://www.gnu.org/software/make/)
 - [Git](https://git-scm.com/) Requires Version 1.8.4+
+- Python 3.6+
 - [Node 10.x LTS version](https://nodejs.org/en/download/)
+    + This is only required if you're [building your own container images](#official-vs-building-images) with `use_container_for_build=false`
 - [NPM 6.x LTS](https://docs.npmjs.com/)
+    + This is only required if you're [building your own container images](#official-vs-building-images) with `use_container_for_build=false`
 
 ### System Requirements
 
@@ -80,11 +94,7 @@ The system that runs the AWX service will need to satisfy the following requirem
 - At least 2 cpu cores
 - At least 20GB of space
 - Running Docker, Openshift, or Kubernetes
-- If you choose to use an external PostgreSQL database, please note that the minimum version is 9.6+.
-
-### AWX Tunables
-
-**TODO** add tunable bits
+- If you choose to use an external PostgreSQL database, please note that the minimum version is 10+.
 
 ### Choose a deployment platform
 
@@ -99,7 +109,7 @@ In the sections below, you'll find deployment details and instructions for each 
 
 ### Official vs Building Images
 
-When installing AWX you have the option of building your own images or using the images provided on DockerHub (see [awx_web](https://hub.docker.com/r/ansible/awx_web/) and [awx_task](https://hub.docker.com/r/ansible/awx_task/))
+When installing AWX you have the option of building your own image or using the image provided on DockerHub (see [awx](https://hub.docker.com/r/ansible/awx/))
 
 This is controlled by the following variables in the `inventory` file
 
@@ -112,11 +122,15 @@ If these variables are present then all deployments will use these hosted images
 
 *dockerhub_base*
 
-> The base location on DockerHub where the images are hosted (by default this pulls container images named `ansible/awx_web:tag` and `ansible/awx_task:tag`)
+> The base location on DockerHub where the images are hosted (by default this pulls a container image named `ansible/awx:tag`)
 
 *dockerhub_version*
 
 > Multiple versions are provided. `latest` always pulls the most recent. You may also select version numbers at different granularities: 1, 1.0, 1.0.1, 1.0.0.123
+
+*use_container_for_build*
+
+> Use a local distribution build container image for building the AWX package. This is helpful if you don't want to bother installing the build-time dependencies as it is taken care of already.
 
 
 ## Upgrading from previous versions
@@ -128,7 +142,6 @@ For convenience, you can create a file called `vars.yml`:
 ```
 admin_password: 'adminpass'
 pg_password: 'pgpass'
-rabbitmq_password: 'rabbitpass'
 secret_key: 'mysupersecret'
 ```
 
@@ -142,7 +155,7 @@ $ ansible-playbook -i inventory install.yml -e @vars.yml
 
 ### Prerequisites
 
-To complete a deployment to OpenShift, you will obviously need access to an OpenShift cluster. For demo and testing purposes, you can use [Minishift](https://github.com/minishift/minishift) to create a single node cluster running inside a virtual machine.
+To complete a deployment to OpenShift, you will need access to an OpenShift cluster. For demo and testing purposes, you can use [Minishift](https://github.com/minishift/minishift) to create a single node cluster running inside a virtual machine.
 
 When using OpenShift for deploying AWX make sure you have correct privileges to add the security context 'privileged', otherwise the installation will fail. The privileged context is needed because of the use of [the bubblewrap tool](https://github.com/containers/bubblewrap) to add an additional layer of security when using containers.
 
@@ -468,15 +481,15 @@ Before starting the install process, review the [inventory](./installer/inventor
 
 *host_port*
 
-> Provide a port number that can be mapped from the Docker daemon host to the web server running inside the AWX container. Defaults to *80*.
+> Provide a port number that can be mapped from the Docker daemon host to the web server running inside the AWX container. If undefined no port will be exposed. Defaults to *80*.
 
 *host_port_ssl*
 
-> Provide a port number that can be mapped from the Docker daemon host to the web server running inside the AWX container for SSL support. Defaults to *443*, only works if you also set `ssl_certificate` (see below).
+> Provide a port number that can be mapped from the Docker daemon host to the web server running inside the AWX container for SSL support. If undefined no port will be exposed. Defaults to *443*, only works if you also set `ssl_certificate` (see below).
 
 *ssl_certificate*
 
-> Optionally, provide the path to a file that contains a certificate and its private key.
+> Optionally, provide the path to a file that contains a certificate and its private key. This needs to be a .pem-file
 
 *docker_compose_dir*
 
@@ -505,10 +518,6 @@ If you wish to tag and push built images to a Docker registry, set the following
 *docker_registry_username*
 
 > Username of the user that will push images to the registry. Defaults to *developer*.
-
-*docker_remove_local_images*
-
-> Due to the way that the docker_image module behaves, images will not be pushed to a remote repository if they are present locally.  Set this to delete local versions of the images that will be pushed to the remote.  This will fail if containers are currently running from those images.
 
 **Note**
 
@@ -559,16 +568,7 @@ $ ansible-playbook -i inventory -e docker_registry_password=password install.yml
 
 ### Post-install
 
-After the playbook run completes, Docker will report up to 5 running containers. If you chose to use an existing PostgresSQL database, then it will report 4. You can view the running containers using the `docker ps` command, as follows:
-
-```bash
-CONTAINER ID        IMAGE               COMMAND                  CREATED             STATUS              PORTS                                NAMES
-e240ed8209cd        awx_task:1.0.0.8    "/tini -- /bin/sh ..."   2 minutes ago       Up About a minute   8052/tcp                             awx_task
-1cfd02601690        awx_web:1.0.0.8     "/tini -- /bin/sh ..."   2 minutes ago       Up About a minute   0.0.0.0:443->8052/tcp                 awx_web
-55a552142bcd        memcached:alpine    "docker-entrypoint..."   2 minutes ago       Up 2 minutes        11211/tcp                            memcached
-84011c072aad        rabbitmq:3          "docker-entrypoint..."   2 minutes ago       Up 2 minutes        4369/tcp, 5671-5672/tcp, 25672/tcp   rabbitmq
-97e196120ab3        postgres:9.6        "docker-entrypoint..."   2 minutes ago       Up 2 minutes        5432/tcp                             postgres
-```
+After the playbook run completes, Docker starts a series of containers that provide the services that make up AWX.  You can view the running containers using the `docker ps` command.
 
 If you're deploying using Docker Compose, container names will be prefixed by the name of the folder where the docker-compose.yml file is created (by default, `awx`).
 
@@ -634,3 +634,34 @@ Added instance awx to tower
 The AWX web server is accessible on the deployment host, using the *host_port* value set in the *inventory* file. The default URL is [http://localhost](http://localhost).
 
 You will prompted with a login dialog. The default administrator username is `admin`, and the password is `password`.
+
+
+# Installing the AWX CLI
+
+`awx` is the official command-line client for AWX.  It:
+
+* Uses naming and structure consistent with the AWX HTTP API
+* Provides consistent output formats with optional machine-parsable formats
+* To the extent possible, auto-detects API versions, available endpoints, and
+  feature support across multiple versions of AWX.
+
+Potential uses include:
+
+* Configuring and launching jobs/playbooks
+* Checking on the status and output of job runs
+* Managing objects like organizations, users, teams, etc...
+
+The preferred way to install the AWX CLI is through pip directly from GitHub:
+
+    pip install "https://github.com/ansible/awx/archive/$VERSION.tar.gz#egg=awxkit&subdirectory=awxkit"
+    awx --help
+
+...where ``$VERSION`` is the version of AWX you're running.  To see a list of all available releases, visit: https://github.com/ansible/awx/releases
+
+## Building the CLI Documentation
+
+To build the docs, spin up a real AWX server, `pip install sphinx sphinxcontrib-autoprogram`, and run:
+
+    ~ TOWER_HOST=https://awx.example.org TOWER_USERNAME=example TOWER_PASSWORD=secret make clean html
+    ~ cd build/html/ && python -m http.server
+    Serving HTTP on 0.0.0.0 port 8000 (http://0.0.0.0:8000/) ..

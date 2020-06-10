@@ -4,13 +4,13 @@ import { withRouter } from 'react-router-dom';
 import { withI18n } from '@lingui/react';
 import { t } from '@lingui/macro';
 
-import AlertModal from '@components/AlertModal';
-import ErrorDetail from '@components/ErrorDetail';
-import NotificationListItem from '@components/NotificationList/NotificationListItem';
-import PaginatedDataList from '@components/PaginatedDataList';
-import { getQSConfig, parseQueryString } from '@util/qs';
+import AlertModal from '../AlertModal';
+import ErrorDetail from '../ErrorDetail';
+import NotificationListItem from './NotificationListItem';
+import PaginatedDataList from '../PaginatedDataList';
+import { getQSConfig, parseQueryString } from '../../util/qs';
 
-import { NotificationTemplatesAPI } from '@api';
+import { NotificationTemplatesAPI } from '../../api';
 
 const QS_CONFIG = getQSConfig('notification', {
   page: 1,
@@ -25,7 +25,7 @@ class NotificationList extends Component {
       contentError: null,
       hasContentLoading: true,
       toggleError: false,
-      toggleLoading: false,
+      loadingToggleIds: [],
       itemCount: 0,
       notifications: [],
       startedTemplateIds: [],
@@ -147,7 +147,9 @@ class NotificationList extends Component {
       });
     }
 
-    this.setState({ toggleLoading: true });
+    this.setState(({ loadingToggleIds }) => ({
+      loadingToggleIds: loadingToggleIds.concat([notificationId]),
+    }));
     try {
       if (isCurrentlyOn) {
         await apiModel.disassociateNotificationTemplate(
@@ -164,9 +166,13 @@ class NotificationList extends Component {
       }
       this.setState(stateUpdateFunction);
     } catch (err) {
-      this.setState({ toggleError: true });
+      this.setState({ toggleError: err });
     } finally {
-      this.setState({ toggleLoading: false });
+      this.setState(({ loadingToggleIds }) => ({
+        loadingToggleIds: loadingToggleIds.filter(
+          item => item !== notificationId
+        ),
+      }));
     }
   }
 
@@ -180,7 +186,7 @@ class NotificationList extends Component {
       contentError,
       hasContentLoading,
       toggleError,
-      toggleLoading,
+      loadingToggleIds,
       itemCount,
       notifications,
       startedTemplateIds,
@@ -240,7 +246,10 @@ class NotificationList extends Component {
               key={notification.id}
               notification={notification}
               detailUrl={`/notifications/${notification.id}`}
-              canToggleNotifications={canToggleNotifications && !toggleLoading}
+              canToggleNotifications={
+                canToggleNotifications &&
+                !loadingToggleIds.includes(notification.id)
+              }
               toggleNotification={this.handleNotificationToggle}
               errorTurnedOn={errorTemplateIds.includes(notification.id)}
               startedTurnedOn={startedTemplateIds.includes(notification.id)}
@@ -250,9 +259,9 @@ class NotificationList extends Component {
           )}
         />
         <AlertModal
-          variant="danger"
+          variant="error"
           title={i18n._(t`Error!`)}
-          isOpen={toggleError && !toggleLoading}
+          isOpen={toggleError && loadingToggleIds.length === 0}
           onClose={this.handleNotificationErrorClose}
         >
           {i18n._(t`Failed to toggle notification.`)}

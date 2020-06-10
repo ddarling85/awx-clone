@@ -144,7 +144,7 @@ data:
 
     #Autoprovisioning should replace this
     CLUSTER_HOST_ID = socket.gethostname()
-    SYSTEM_UUID = '00000000-0000-0000-0000-000000000000'
+    SYSTEM_UUID = os.environ.get('MY_POD_UID', '00000000-0000-0000-0000-000000000000')
 
     SESSION_COOKIE_SECURE = False
     CSRF_COOKIE_SECURE = False
@@ -153,10 +153,10 @@ data:
 
     STATIC_ROOT = '/var/lib/awx/public/static'
     PROJECTS_ROOT = '/var/lib/awx/projects'
+    AWX_ANSIBLE_COLLECTIONS_PATHS = '/var/lib/awx/vendor/awx_ansible_collections'
     JOBOUTPUT_ROOT = '/var/lib/awx/job_status'
     SECRET_KEY = open('/etc/tower/SECRET_KEY', 'rb').read().strip()
     ALLOWED_HOSTS = ['*']
-    INTERNAL_API_URL = 'http://127.0.0.1:8052'
     SERVER_EMAIL = 'root@localhost'
     DEFAULT_FROM_EMAIL = 'webmaster@localhost'
     EMAIL_SUBJECT_PREFIX = '[AWX] '
@@ -174,11 +174,11 @@ data:
 
     LOGGING['loggers']['django.request']['handlers'] = ['console']
     LOGGING['loggers']['rest_framework.request']['handlers'] = ['console']
-    LOGGING['loggers']['awx']['handlers'] = ['console']
+    LOGGING['loggers']['awx']['handlers'] = ['console', 'external_logger']
     LOGGING['loggers']['awx.main.commands.run_callback_receiver']['handlers'] = ['console']
     LOGGING['loggers']['awx.main.commands.inventory_import']['handlers'] = ['console']
-    LOGGING['loggers']['awx.main.tasks']['handlers'] = ['console']
-    LOGGING['loggers']['awx.main.scheduler']['handlers'] = ['console']
+    LOGGING['loggers']['awx.main.tasks']['handlers'] = ['console', 'external_logger']
+    LOGGING['loggers']['awx.main.scheduler']['handlers'] = ['console', 'external_logger']
     LOGGING['loggers']['django_auth_ldap']['handlers'] = ['console']
     LOGGING['loggers']['social']['handlers'] = ['console']
     LOGGING['loggers']['system_tracking_migrations']['handlers'] = ['console']
@@ -192,16 +192,16 @@ data:
     LOGGING['handlers']['system_tracking_migrations'] = {'class': 'logging.NullHandler'}
     LOGGING['handlers']['management_playbooks'] = {'class': 'logging.NullHandler'}
 
-    CACHES = {
-        'default': {
-            'BACKEND': 'django.core.cache.backends.memcached.MemcachedCache',
-            'LOCATION': '{}:{}'.format("localhost", "11211")
-        },
-        'ephemeral': {
-            'BACKEND': 'django.core.cache.backends.locmem.LocMemCache',
-        },
-    }
-
     USE_X_FORWARDED_PORT = True
 
     AWX_CONTAINER_GROUP_DEFAULT_IMAGE = "{{ container_groups_image }}"
+    REDHAT_CANDLEPIN_HOST = "{{ candlepin_host  | default(omit) }}"
+    REDHAT_CANDLEPIN_VERIFY = "{{ candlepin_verify | default(omit) }}"
+    BROADCAST_WEBSOCKET_PORT = 8052
+    BROADCAST_WEBSOCKET_PROTOCOL = 'http'
+
+  {{ kubernetes_deployment_name }}_redis_conf: |
+    unixsocket /var/run/redis/redis.sock
+    unixsocketperm 777
+    port 0
+    bind 127.0.0.1

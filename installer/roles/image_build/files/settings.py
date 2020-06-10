@@ -14,13 +14,13 @@ STATIC_ROOT = '/var/lib/awx/public/static'
 
 PROJECTS_ROOT = '/var/lib/awx/projects'
 
+AWX_ANSIBLE_COLLECTIONS_PATHS = '/var/lib/awx/vendor/awx_ansible_collections'
+
 JOBOUTPUT_ROOT = '/var/lib/awx/job_status'
 
 SECRET_KEY = get_secret()
 
 ALLOWED_HOSTS = ['*']
-
-INTERNAL_API_URL = 'http://awxweb:8052'
 
 # Container environments don't like chroots
 AWX_PROOT_ENABLED = False
@@ -85,17 +85,5 @@ DATABASES = {
 if os.getenv("DATABASE_SSLMODE", False):
     DATABASES['default']['OPTIONS'] = {'sslmode': os.getenv("DATABASE_SSLMODE")}
 
-BROKER_URL = 'amqp://{}:{}@{}:{}/{}'.format(
-    os.getenv("RABBITMQ_USER", None),
-    os.getenv("RABBITMQ_PASSWORD", None),
-    os.getenv("RABBITMQ_HOST", None),
-    os.getenv("RABBITMQ_PORT", "5672"),
-    os.getenv("RABBITMQ_VHOST", "tower"))
-
-CHANNEL_LAYERS = {
-    'default': {'BACKEND': 'asgi_amqp.AMQPChannelLayer',
-                'ROUTING': 'awx.main.routing.channel_routing',
-                'CONFIG': {'url': BROKER_URL}}
-}
-
+USE_X_FORWARDED_HOST = True
 USE_X_FORWARDED_PORT = True

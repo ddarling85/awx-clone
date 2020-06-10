@@ -3,8 +3,8 @@ import { Route, withRouter, Switch } from 'react-router-dom';
 import { withI18n } from '@lingui/react';
 import { t } from '@lingui/macro';
 
-import { Config } from '@contexts/Config';
-import Breadcrumbs from '@components/Breadcrumbs/Breadcrumbs';
+import { Config } from '../../contexts/Config';
+import Breadcrumbs from '../../components/Breadcrumbs/Breadcrumbs';
 
 import ProjectsList from './ProjectList/ProjectList';
 import ProjectAdd from './ProjectAdd/ProjectAdd';
@@ -24,12 +24,14 @@ class Projects extends Component {
     };
   }
 
-  setBreadcrumbConfig = project => {
+  setBreadcrumbConfig = (project, nested) => {
     const { i18n } = this.props;
 
     if (!project) {
       return;
     }
+
+    const projectSchedulesPath = `/projects/${project.id}/schedules`;
 
     const breadcrumbConfig = {
       '/projects': i18n._(t`Projects`),
@@ -40,7 +42,14 @@ class Projects extends Component {
       [`/projects/${project.id}/access`]: i18n._(t`Access`),
       [`/projects/${project.id}/notifications`]: i18n._(t`Notifications`),
       [`/projects/${project.id}/job_templates`]: i18n._(t`Job Templates`),
-      [`/projects/${project.id}/schedules`]: i18n._(t`Schedules`),
+
+      [`${projectSchedulesPath}`]: i18n._(t`Schedules`),
+      [`${projectSchedulesPath}/add`]: i18n._(t`Create New Schedule`),
+      [`${projectSchedulesPath}/${nested?.id}`]: `${nested?.name}`,
+      [`${projectSchedulesPath}/${nested?.id}/details`]: i18n._(
+        t`Schedule Details`
+      ),
+      [`${projectSchedulesPath}/${nested?.id}/edit`]: i18n._(t`Edit Details`),
     };
 
     this.setState({ breadcrumbConfig });
@@ -54,23 +63,24 @@ class Projects extends Component {
       <Fragment>
         <Breadcrumbs breadcrumbConfig={breadcrumbConfig} />
         <Switch>
-          <Route path={`${match.path}/add`} render={() => <ProjectAdd />} />
-          <Route
-            path={`${match.path}/:id`}
-            render={() => (
-              <Config>
-                {({ me }) => (
-                  <Project
-                    history={history}
-                    location={location}
-                    setBreadcrumb={this.setBreadcrumbConfig}
-                    me={me || {}}
-                  />
-                )}
-              </Config>
-            )}
-          />
-          <Route path={`${match.path}`} render={() => <ProjectsList />} />
+          <Route path={`${match.path}/add`}>
+            <ProjectAdd />
+          </Route>
+          <Route path={`${match.path}/:id`}>
+            <Config>
+              {({ me }) => (
+                <Project
+                  history={history}
+                  location={location}
+                  setBreadcrumb={this.setBreadcrumbConfig}
+                  me={me || {}}
+                />
+              )}
+            </Config>
+          </Route>
+          <Route path={`${match.path}`}>
+            <ProjectsList />
+          </Route>
         </Switch>
       </Fragment>
     );

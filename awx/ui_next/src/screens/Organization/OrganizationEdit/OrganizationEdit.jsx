@@ -1,9 +1,9 @@
 import React, { useState } from 'react';
 import PropTypes from 'prop-types';
 import { useHistory } from 'react-router-dom';
-import { CardBody } from '@components/Card';
-import { OrganizationsAPI } from '@api';
-import { Config } from '@contexts/Config';
+import { CardBody } from '../../../components/Card';
+import { OrganizationsAPI } from '../../../api';
+import { Config } from '../../../contexts/Config';
 
 import OrganizationForm from '../shared/OrganizationForm';
 
@@ -48,10 +48,10 @@ function OrganizationEdit({ organization }) {
             onSubmit={handleSubmit}
             onCancel={handleCancel}
             me={me || {}}
+            submitError={formError}
           />
         )}
       </Config>
-      {formError ? <div>error</div> : null}
     </CardBody>
   );
 }

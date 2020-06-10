@@ -8,6 +8,7 @@ SOSREPORT_TOWER_COMMANDS = [
     "awx-manage list_instances", # tower cluster configuration
     "awx-manage run_dispatcher --status", # tower dispatch worker status
     "awx-manage check_license --data", # tower license status
+    "awx-manage run_wsbroadcast --status", # tower broadcast websocket status
     "supervisorctl status",   # tower process status
     "/var/lib/awx/venv/awx/bin/pip freeze",        # pip package list
     "/var/lib/awx/venv/awx/bin/pip freeze -l",     # pip package list without globally-installed packages
@@ -27,6 +28,10 @@ SOSREPORT_TOWER_DIRS = [
     "/var/log/tower",
     "/var/log/nginx",
     "/var/log/supervisor",
+    "/var/log/redis",
+    "/etc/opt/rh/rh-redis5/redis.conf",
+    "/etc/redis.conf",
+    "/var/opt/rh/rh-redis5/log/redis/redis.log",
     "/var/log/dist-upgrade",
     "/var/log/installer",
     "/var/log/unattended-upgrades",

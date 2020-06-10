@@ -17,7 +17,6 @@ DOCUMENTATION = '''
 ---
 module: tower_settings
 author: "Nikhil Jain (@jainnikhil30)"
-version_added: "2.7"
 short_description: Modify Ansible Tower settings.
 description:
     - Modify Ansible Tower settings. See
@@ -26,17 +25,21 @@ options:
     name:
       description:
         - Name of setting to modify
-      required: True
       type: str
     value:
       description:
         - Value to be modified for given setting.
-      required: True
+        - If given a non-string type, will make best effort to cast it to type API expects.
+        - For better control over types, use the C(settings) param instead.
       type: str
+    settings:
+      description:
+        - A data structure to be sent into the settings endpoint
+      type: dict
+requirements:
+  - pyyaml
 extends_documentation_fragment: awx.awx.auth
 '''
-
-RETURN = ''' # '''
 
 EXAMPLES = '''
 - name: Set the value of AWX_PROOT_BASE_PATH
@@ -56,50 +59,117 @@ EXAMPLES = '''
     name: "AUTH_LDAP_BIND_PASSWORD"
     value: "Password"
   no_log: true
+
+- name: Set all the LDAP Auth Bind Params
+  tower_settings:
+    settings:
+      AUTH_LDAP_BIND_PASSWORD: "password"
+      AUTH_LDAP_USER_ATTR_MAP:
+        email: "mail"
+        first_name: "givenName"
+        last_name: "surname"
 '''
 
-from ..module_utils.ansible_tower import TowerModule, tower_auth_config, tower_check_mode
+from ..module_utils.tower_api import TowerModule
 
 try:
-    import tower_cli
-    import tower_cli.exceptions as exc
-
-    from tower_cli.conf import settings
+    import yaml
+    HAS_YAML = True
 except ImportError:
-    pass
+    HAS_YAML = False
+
+
+def coerce_type(module, value):
+    # If our value is already None we can just return directly
+    if value is None:
+        return value
+
+    yaml_ish = bool((
+        value.startswith('{') and value.endswith('}')
+    ) or (
+        value.startswith('[') and value.endswith(']'))
+    )
+    if yaml_ish:
+        if not HAS_YAML:
+            module.fail_json(msg="yaml is not installed, try 'pip install pyyaml'")
+        return yaml.safe_load(value)
+    elif value.lower in ('true', 'false', 't', 'f'):
+        return {'t': True, 'f': False}[value[0].lower()]
+    try:
+        return int(value)
+    except ValueError:
+        pass
+    return value
 
 
 def main():
+    # Any additional arguments that are not fields of the item can be added here
     argument_spec = dict(
-        name=dict(required=True),
-        value=dict(required=True),
+        name=dict(),
+        value=dict(),
+        settings=dict(type='dict'),
     )
 
+    # Create a module for ourselves
     module = TowerModule(
         argument_spec=argument_spec,
-        supports_check_mode=False
+        required_one_of=[['name', 'settings']],
+        mutually_exclusive=[['name', 'settings']],
+        required_if=[['name', 'present', ['value']]]
     )
 
-    json_output = {}
-
+    # Extract our parameters
     name = module.params.get('name')
     value = module.params.get('value')
+    new_settings = module.params.get('settings')
 
-    tower_auth = tower_auth_config(module)
-    with settings.runtime_values(**tower_auth):
-        tower_check_mode(module)
-        try:
-            setting = tower_cli.get_resource('setting')
-            result = setting.modify(setting=name, value=value)
+    # If we were given a name/value pair we will just make settings out of that and proceed normally
+    if new_settings is None:
+        new_value = coerce_type(module, value)
 
-            json_output['id'] = result['id']
-            json_output['value'] = result['value']
+        new_settings = {name: new_value}
 
-        except (exc.ConnectionError, exc.BadRequest, exc.AuthError) as excinfo:
-            module.fail_json(msg='Failed to modify the setting: {0}'.format(excinfo), changed=False)
+    # Load the existing settings
+    existing_settings = module.get_endpoint('settings/all')['json']
 
-    json_output['changed'] = result['changed']
-    module.exit_json(**json_output)
+    # Begin a json response
+    json_response = {'changed': False, 'old_values': {}}
+
+    # Check any of the settings to see if anything needs to be updated
+    needs_update = False
+    for a_setting in new_settings:
+        if a_setting not in existing_settings or existing_settings[a_setting] != new_settings[a_setting]:
+            # At least one thing is different so we need to patch
+            needs_update = True
+            json_response['old_values'][a_setting] = existing_settings[a_setting]
+
+    # If nothing needs an update we can simply exit with the response (as not changed)
+    if not needs_update:
+        module.exit_json(**json_response)
+
+    # Make the call to update the settings
+    response = module.patch_endpoint('settings/all', **{'data': new_settings})
+
+    if response['status_code'] == 200:
+        # Set the changed response to True
+        json_response['changed'] = True
+
+        # To deal with the old style values we need to return 'value' in the response
+        new_values = {}
+        for a_setting in new_settings:
+            new_values[a_setting] = response['json'][a_setting]
+
+        # If we were using a name we will just add a value of a string, otherwise we will return an array in values
+        if name is not None:
+            json_response['value'] = new_values[name]
+        else:
+            json_response['values'] = new_values
+
+        module.exit_json(**json_response)
+    elif 'json' in response and '__all__' in response['json']:
+        module.fail_json(msg=response['json']['__all__'])
+    else:
+        module.fail_json(**{'msg': "Unable to update settings, see response", 'response': response})
 
 
 if __name__ == '__main__':

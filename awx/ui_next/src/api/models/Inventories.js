@@ -8,6 +8,7 @@ class Inventories extends InstanceGroupsMixin(Base) {
 
     this.readAccessList = this.readAccessList.bind(this);
     this.readHosts = this.readHosts.bind(this);
+    this.readHostDetail = this.readHostDetail.bind(this);
     this.readGroups = this.readGroups.bind(this);
     this.readGroupsOptions = this.readGroupsOptions.bind(this);
     this.promoteGroup = this.promoteGroup.bind(this);
@@ -24,15 +25,39 @@ class Inventories extends InstanceGroupsMixin(Base) {
   }
 
   readHosts(id, params) {
-    return this.http.get(`${this.baseUrl}${id}/hosts/`, { params });
+    return this.http.get(`${this.baseUrl}${id}/hosts/`, {
+      params,
+    });
+  }
+
+  async readHostDetail(inventoryId, hostId) {
+    const {
+      data: { results },
+    } = await this.http.get(
+      `${this.baseUrl}${inventoryId}/hosts/?id=${hostId}`
+    );
+
+    if (Array.isArray(results) && results.length) {
+      return results[0];
+    }
+
+    throw new Error(
+      `How did you get here? Host not found for Inventory ID: ${inventoryId}`
+    );
   }
 
   readGroups(id, params) {
-    return this.http.get(`${this.baseUrl}${id}/groups/`, { params });
+    return this.http.get(`${this.baseUrl}${id}/groups/`, {
+      params,
+    });
   }
 
   readGroupsOptions(id) {
     return this.http.options(`${this.baseUrl}${id}/groups/`);
+  }
+
+  readHostsOptions(id) {
+    return this.http.options(`${this.baseUrl}${id}/hosts/`);
   }
 
   promoteGroup(inventoryId, groupId) {
@@ -40,6 +65,34 @@ class Inventories extends InstanceGroupsMixin(Base) {
       id: groupId,
       disassociate: true,
     });
+  }
+
+  readSources(inventoryId, params) {
+    return this.http.get(`${this.baseUrl}${inventoryId}/inventory_sources/`, {
+      params,
+    });
+  }
+
+  async readSourceDetail(inventoryId, sourceId) {
+    const {
+      data: { results },
+    } = await this.http.get(
+      `${this.baseUrl}${inventoryId}/inventory_sources/?id=${sourceId}`
+    );
+
+    if (Array.isArray(results) && results.length) {
+      return results[0];
+    }
+
+    throw new Error(
+      `How did you get here? Source not found for Inventory ID: ${inventoryId}`
+    );
+  }
+
+  syncAllSources(inventoryId) {
+    return this.http.post(
+      `${this.baseUrl}${inventoryId}/update_inventory_sources/`
+    );
   }
 }
 

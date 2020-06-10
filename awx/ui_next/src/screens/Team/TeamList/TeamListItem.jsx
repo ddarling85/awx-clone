@@ -1,22 +1,31 @@
+import 'styled-components/macro';
 import React, { Fragment } from 'react';
 import { string, bool, func } from 'prop-types';
 import { withI18n } from '@lingui/react';
 import { t } from '@lingui/macro';
 import {
+  Button,
+  DataListAction as _DataListAction,
+  DataListCheck,
   DataListItem,
-  DataListItemRow,
   DataListItemCells,
+  DataListItemRow,
   Tooltip,
 } from '@patternfly/react-core';
+
+import styled from 'styled-components';
 import { Link } from 'react-router-dom';
 import { PencilAltIcon } from '@patternfly/react-icons';
+import DataListCell from '../../../components/DataListCell';
 
-import ActionButtonCell from '@components/ActionButtonCell';
-import DataListCell from '@components/DataListCell';
-import DataListCheck from '@components/DataListCheck';
-import ListActionButton from '@components/ListActionButton';
-import VerticalSeparator from '@components/VerticalSeparator';
-import { Team } from '@types';
+import { Team } from '../../../types';
+
+const DataListAction = styled(_DataListAction)`
+  align-items: center;
+  display: grid;
+  grid-gap: 16px;
+  grid-template-columns: 40px;
+`;
 
 class TeamListItem extends React.Component {
   static propTypes = {
@@ -29,6 +38,7 @@ class TeamListItem extends React.Component {
   render() {
     const { team, isSelected, onSelect, detailUrl, i18n } = this.props;
     const labelId = `check-action-${team.id}`;
+
     return (
       <DataListItem key={team.id} aria-labelledby={labelId} id={`${team.id}`}>
         <DataListItemRow>
@@ -40,8 +50,7 @@ class TeamListItem extends React.Component {
           />
           <DataListItemCells
             dataListCells={[
-              <DataListCell key="divider">
-                <VerticalSeparator />
+              <DataListCell key="name">
                 <Link id={labelId} to={`${detailUrl}`}>
                   <b>{team.name}</b>
                 </Link>
@@ -49,9 +58,7 @@ class TeamListItem extends React.Component {
               <DataListCell key="organization">
                 {team.summary_fields.organization && (
                   <Fragment>
-                    <b css={{ marginRight: '20px' }}>
-                      {i18n._(t`Organization`)}
-                    </b>
+                    <b>{i18n._(t`Organization`)}</b>{' '}
                     <Link
                       to={`/organizations/${team.summary_fields.organization.id}/details`}
                     >
@@ -60,21 +67,28 @@ class TeamListItem extends React.Component {
                   </Fragment>
                 )}
               </DataListCell>,
-              <ActionButtonCell lastcolumn="true" key="action">
-                {team.summary_fields.user_capabilities.edit && (
-                  <Tooltip content={i18n._(t`Edit Team`)} position="top">
-                    <ListActionButton
-                      variant="plain"
-                      component={Link}
-                      to={`/teams/${team.id}/edit`}
-                    >
-                      <PencilAltIcon />
-                    </ListActionButton>
-                  </Tooltip>
-                )}
-              </ActionButtonCell>,
             ]}
           />
+          <DataListAction
+            aria-label="actions"
+            aria-labelledby={labelId}
+            id={labelId}
+          >
+            {team.summary_fields.user_capabilities.edit ? (
+              <Tooltip content={i18n._(t`Edit Team`)} position="top">
+                <Button
+                  aria-label={i18n._(t`Edit Team`)}
+                  variant="plain"
+                  component={Link}
+                  to={`/teams/${team.id}/edit`}
+                >
+                  <PencilAltIcon />
+                </Button>
+              </Tooltip>
+            ) : (
+              ''
+            )}
+          </DataListAction>
         </DataListItemRow>
       </DataListItem>
     );

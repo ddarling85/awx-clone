@@ -148,7 +148,9 @@ def job_template_with_ids(job_template_factory):
         'testJT', project=proj, inventory=inv, credential=credential,
         cloud_credential=cloud_cred, network_credential=net_cred,
         persisted=False)
-    return jt_objects.job_template
+    jt = jt_objects.job_template
+    jt.organization = Organization(id=1, pk=1, name='fooOrg')
+    return jt
 
 
 def test_superuser(mocker):
@@ -180,51 +182,27 @@ def test_jt_existing_values_are_nonsensitive(job_template_with_ids, user_unit):
 def test_change_jt_sensitive_data(job_template_with_ids, mocker, user_unit):
     """Assure that can_add is called with all ForeignKeys."""
 
-    job_template_with_ids.admin_role = Role()
+    class RoleReturnsTrue(Role):
+        class Meta:
+            proxy = True
+            
+        def __contains__(self, accessor):
+            return True
 
-    data = {'inventory': job_template_with_ids.inventory.id + 1}
-    access = JobTemplateAccess(user_unit)
+    job_template_with_ids.admin_role = RoleReturnsTrue()
+    job_template_with_ids.organization.job_template_admin_role = RoleReturnsTrue()
 
-    mock_add = mock.MagicMock(return_value=False)
-    with mock.patch('awx.main.models.rbac.Role.__contains__', return_value=True):
-        with mocker.patch('awx.main.access.JobTemplateAccess.can_add', mock_add):
-            with mocker.patch('awx.main.access.JobTemplateAccess.can_read', return_value=True):
-                assert not access.can_change(job_template_with_ids, data)
-
-    mock_add.assert_called_once_with({
-        'inventory': data['inventory'],
-        'project': job_template_with_ids.project.id
-    })
-
-
-def test_jt_add_scan_job_check(job_template_with_ids, user_unit):
-    "Assure that permissions to add scan jobs work correctly"
+    inv2 = Inventory()
+    inv2.use_role = RoleReturnsTrue()
+    data = {'inventory': inv2}
 
     access = JobTemplateAccess(user_unit)
-    project = job_template_with_ids.project
-    inventory = job_template_with_ids.inventory
-    project.use_role = Role()
-    inventory.use_role = Role()
-    organization = Organization(name='test-org')
-    inventory.organization = organization
-    organization.admin_role = Role()
 
-    def mock_get_object(Class, **kwargs):
-        if Class == Project:
-            return project
-        elif Class == Inventory:
-            return inventory
-        else:
-            raise Exception('Item requested has not been mocked')
+    assert not access.changes_are_non_sensitive(job_template_with_ids, data)
 
-
-    with mock.patch('awx.main.models.rbac.Role.__contains__', return_value=True):
-        with mock.patch('awx.main.access.get_object_or_400', mock_get_object):
-            assert access.can_add({
-                'project': project.pk,
-                'inventory': inventory.pk,
-                'job_type': 'scan'
-            })
+    job_template_with_ids.inventory.use_role = RoleReturnsTrue()
+    job_template_with_ids.project.use_role = RoleReturnsTrue()
+    assert access.can_change(job_template_with_ids, data)
 
 
 def mock_raise_none(self, add_host=False, feature=None, check_expiration=True):

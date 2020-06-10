@@ -1,11 +1,12 @@
+import 'styled-components/macro';
 import React, { useState } from 'react';
 import ReactDOM from 'react-dom';
 import { func, bool, arrayOf, object } from 'prop-types';
-import AlertModal from '@components/AlertModal';
 import { withI18n } from '@lingui/react';
 import { t } from '@lingui/macro';
 import { Button, Radio } from '@patternfly/react-core';
 import styled from 'styled-components';
+import AlertModal from '../../../components/AlertModal';
 
 const ListItem = styled.li`
   display: flex;
@@ -27,7 +28,7 @@ const InventoryGroupsDeleteModal = ({
       isOpen={isModalOpen}
       variant="danger"
       title={
-        groups.length > 1 ? i18n._(t`Delete Groups`) : i18n._(t`Delete Group`)
+        groups.length > 1 ? i18n._(t`Delete Groups?`) : i18n._(t`Delete Group?`)
       }
       onClose={onClose}
       actions={[
@@ -60,7 +61,7 @@ const InventoryGroupsDeleteModal = ({
           return <ListItem key={group.id}>{group.name}</ListItem>;
         })}
       </div>
-      <div css="padding-left: 1px;">
+      <div>
         <Radio
           id="radio-delete"
           key="radio-delete"

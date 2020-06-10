@@ -7,7 +7,9 @@ class Users extends Base {
   }
 
   associateRole(userId, roleId) {
-    return this.http.post(`${this.baseUrl}${userId}/roles/`, { id: roleId });
+    return this.http.post(`${this.baseUrl}${userId}/roles/`, {
+      id: roleId,
+    });
   }
 
   disassociateRole(userId, roleId) {
@@ -15,6 +17,32 @@ class Users extends Base {
       id: roleId,
       disassociate: true,
     });
+  }
+
+  readOrganizations(userId, params) {
+    return this.http.get(`${this.baseUrl}${userId}/organizations/`, {
+      params,
+    });
+  }
+
+  readRoles(userId, params) {
+    return this.http.get(`${this.baseUrl}${userId}/roles/`, {
+      params,
+    });
+  }
+
+  readRoleOptions(userId) {
+    return this.http.options(`${this.baseUrl}${userId}/roles/`);
+  }
+
+  readTeams(userId, params) {
+    return this.http.get(`${this.baseUrl}${userId}/teams/`, {
+      params,
+    });
+  }
+
+  readTeamsOptions(userId) {
+    return this.http.options(`${this.baseUrl}${userId}/teams/`);
   }
 }
 

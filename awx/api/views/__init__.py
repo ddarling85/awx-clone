@@ -12,7 +12,7 @@ import socket
 import sys
 import time
 from base64 import b64encode
-from collections import OrderedDict, Iterable
+from collections import OrderedDict
 
 
 # Django
@@ -81,7 +81,8 @@ from awx.main.utils import (
     getattrd,
     get_pk_from_dict,
     schedule_task_manager,
-    ignore_inventory_computed_fields
+    ignore_inventory_computed_fields,
+    set_environ
 )
 from awx.main.utils.encryption import encrypt_value
 from awx.main.utils.filters import SmartFilter
@@ -110,6 +111,7 @@ from awx.api.views.organization import ( # noqa
     OrganizationUsersList,
     OrganizationAdminsList,
     OrganizationProjectsList,
+    OrganizationJobTemplatesList,
     OrganizationWorkflowJobTemplatesList,
     OrganizationTeamsList,
     OrganizationActivityStreamList,
@@ -1090,7 +1092,7 @@ class UserRolesList(SubListAttachDetachAPIView):
 
         credential_content_type = ContentType.objects.get_for_model(models.Credential)
         if role.content_type == credential_content_type:
-            if role.content_object.organization and user not in role.content_object.organization.member_role:
+            if 'disassociate' not in request.data and role.content_object.organization and user not in role.content_object.organization.member_role:
                 data = dict(msg=_("You cannot grant credential access to a user not in the credentials' organization"))
                 return Response(data, status=status.HTTP_400_BAD_REQUEST)
 
@@ -1606,7 +1608,8 @@ class HostInsights(GenericAPIView):
 
     def _call_insights_api(self, url, session, headers):
         try:
-            res = session.get(url, headers=headers, timeout=120)
+            with set_environ(**settings.AWX_TASK_ENV):
+                res = session.get(url, headers=headers, timeout=120)
         except requests.exceptions.SSLError:
             raise BadGateway(_('SSLError while trying to connect to {}').format(url))
         except requests.exceptions.Timeout:
@@ -2145,7 +2148,7 @@ class InventorySourceHostsList(HostRelatedSearchMixin, SubListDestroyAPIView):
                     host__inventory_sources=inv_source
                 ).delete()
                 r = super(InventorySourceHostsList, self).perform_list_destroy(instance_list)
-        update_inventory_computed_fields.delay(inv_source.inventory_id, True)
+        update_inventory_computed_fields.delay(inv_source.inventory_id)
         return r
 
 
@@ -2172,7 +2175,7 @@ class InventorySourceGroupsList(SubListDestroyAPIView):
                     group__inventory_sources=inv_source
                 ).delete()
                 r = super(InventorySourceGroupsList, self).perform_list_destroy(instance_list)
-        update_inventory_computed_fields.delay(inv_source.inventory_id, True)
+        update_inventory_computed_fields.delay(inv_source.inventory_id)
         return r
 
 
@@ -2334,70 +2337,24 @@ class JobTemplateLaunch(RetrieveAPIView):
         old field structure to launch endpoint
         TODO: delete this method with future API version changes
         '''
-        ignored_fields = {}
         modern_data = data.copy()
 
         id_fd = '{}_id'.format('inventory')
         if 'inventory' not in modern_data and id_fd in modern_data:
             modern_data['inventory'] = modern_data[id_fd]
 
-        # Automatically convert legacy launch credential arguments into a list of `.credentials`
-        if 'credentials' in modern_data and 'extra_credentials' in modern_data:
-            raise ParseError({"error": _(
-                "'credentials' cannot be used in combination with 'extra_credentials'."
-            )})
-
-        if 'extra_credentials' in modern_data:
-            # make a list of the current credentials
-            existing_credentials = obj.credentials.all()
-            template_credentials = list(existing_credentials)  # save copy of existing
-            new_credentials = []
-            if 'extra_credentials' in modern_data:
-                existing_credentials = [
-                    cred for cred in existing_credentials
-                    if cred.credential_type.kind not in ('cloud', 'net')
-                ]
-                prompted_value = modern_data.pop('extra_credentials')
-
-                # validate type, since these are not covered by a serializer
-                if not isinstance(prompted_value, Iterable):
-                    msg = _(
-                        "Incorrect type. Expected a list received {}."
-                    ).format(prompted_value.__class__.__name__)
-                    raise ParseError({'extra_credentials': [msg], 'credentials': [msg]})
-
-                # add the deprecated credential specified in the request
-                if not isinstance(prompted_value, Iterable) or isinstance(prompted_value, str):
-                    prompted_value = [prompted_value]
-
-                # If user gave extra_credentials, special case to use exactly
-                # the given list without merging with JT credentials
-                if prompted_value:
-                    obj._deprecated_credential_launch = True  # signal to not merge credentials
-                new_credentials.extend(prompted_value)
-
-            # combine the list of "new" and the filtered list of "old"
-            new_credentials.extend([cred.pk for cred in existing_credentials])
-            if new_credentials:
-                # If provided list doesn't contain the pre-existing credentials
-                # defined on the template, add them back here
-                for cred_obj in template_credentials:
-                    if cred_obj.pk not in new_credentials:
-                        new_credentials.append(cred_obj.pk)
-                modern_data['credentials'] = new_credentials
-
         # credential passwords were historically provided as top-level attributes
         if 'credential_passwords' not in modern_data:
             modern_data['credential_passwords'] = data.copy()
 
-        return (modern_data, ignored_fields)
+        return modern_data
 
 
     def post(self, request, *args, **kwargs):
         obj = self.get_object()
 
         try:
-            modern_data, ignored_fields = self.modernize_launch_payload(
+            modern_data = self.modernize_launch_payload(
                 data=request.data, obj=obj
             )
         except ParseError as exc:
@@ -2406,8 +2363,6 @@ class JobTemplateLaunch(RetrieveAPIView):
         serializer = self.serializer_class(data=modern_data, context={'template': obj})
         if not serializer.is_valid():
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-
-        ignored_fields.update(serializer._ignored_fields)
 
         if not request.user.can_access(models.JobLaunchConfig, 'add', serializer.validated_data, template=obj):
             raise PermissionDenied()
@@ -2424,11 +2379,11 @@ class JobTemplateLaunch(RetrieveAPIView):
             data = OrderedDict()
             if isinstance(new_job, models.WorkflowJob):
                 data['workflow_job'] = new_job.id
-                data['ignored_fields'] = self.sanitize_for_response(ignored_fields)
+                data['ignored_fields'] = self.sanitize_for_response(serializer._ignored_fields)
                 data.update(serializers.WorkflowJobSerializer(new_job, context=self.get_serializer_context()).to_representation(new_job))
             else:
                 data['job'] = new_job.id
-                data['ignored_fields'] = self.sanitize_for_response(ignored_fields)
+                data['ignored_fields'] = self.sanitize_for_response(serializer._ignored_fields)
                 data.update(serializers.JobSerializer(new_job, context=self.get_serializer_context()).to_representation(new_job))
             headers = {'Location': new_job.get_absolute_url(request)}
             return Response(data, status=status.HTTP_201_CREATED, headers=headers)
@@ -2706,22 +2661,6 @@ class JobTemplateCredentialsList(SubListCreateAttachDetachAPIView):
             return {'error': _('Cannot assign a Credential of kind `{}`.').format(kind)}
 
         return super(JobTemplateCredentialsList, self).is_valid_relation(parent, sub, created)
-
-
-class JobTemplateExtraCredentialsList(JobTemplateCredentialsList):
-
-    deprecated = True
-
-    def get_queryset(self):
-        sublist_qs = super(JobTemplateExtraCredentialsList, self).get_queryset()
-        sublist_qs = sublist_qs.filter(credential_type__kind__in=['cloud', 'net'])
-        return sublist_qs
-
-    def is_valid_relation(self, parent, sub, created=False):
-        valid = super(JobTemplateExtraCredentialsList, self).is_valid_relation(parent, sub, created)
-        if sub.credential_type.kind not in ('cloud', 'net'):
-            return {'error': _('Extra credentials must be network or cloud.')}
-        return valid
 
 
 class JobTemplateLabelList(DeleteLastUnattachLabelMixin, SubListCreateAttachDetachAPIView):
@@ -3263,7 +3202,7 @@ class WorkflowJobRelaunch(GenericAPIView):
             jt = obj.job_template
             if not jt:
                 raise ParseError(_('Cannot relaunch slice workflow job orphaned from job template.'))
-            elif not jt.inventory or min(jt.inventory.hosts.count(), jt.job_slice_count) != obj.workflow_nodes.count():
+            elif not obj.inventory or min(obj.inventory.hosts.count(), jt.job_slice_count) != obj.workflow_nodes.count():
                 raise ParseError(_('Cannot relaunch sliced workflow job after slice count has changed.'))
         new_workflow_job = obj.create_relaunch_workflow_job()
         new_workflow_job.signal_start()
@@ -3540,16 +3479,6 @@ class JobCredentialsList(SubListAPIView):
     relationship = 'credentials'
 
 
-class JobExtraCredentialsList(JobCredentialsList):
-
-    deprecated = True
-
-    def get_queryset(self):
-        sublist_qs = super(JobExtraCredentialsList, self).get_queryset()
-        sublist_qs = sublist_qs.filter(credential_type__kind__in=['cloud', 'net'])
-        return sublist_qs
-
-
 class JobLabelList(SubListAPIView):
 
     model = models.Label
@@ -3814,6 +3743,12 @@ class JobEventHostsList(HostRelatedSearchMixin, SubListAPIView):
     relationship = 'hosts'
     name = _('Job Event Hosts List')
 
+    def get_queryset(self):
+        parent_event = self.get_parent_object()
+        self.check_parent_access(parent_event)
+        qs = self.request.user.get_queryset(self.model).filter(job_events_as_primary_host=parent_event)
+        return qs
+
 
 class BaseJobEventsList(NoTruncateMixin, SubListAPIView):
 
@@ -3836,8 +3771,7 @@ class HostJobEventsList(BaseJobEventsList):
     def get_queryset(self):
         parent_obj = self.get_parent_object()
         self.check_parent_access(parent_obj)
-        qs = self.request.user.get_queryset(self.model).filter(
-            Q(host=parent_obj) | Q(hosts=parent_obj)).distinct()
+        qs = self.request.user.get_queryset(self.model).filter(host=parent_obj)
         return qs
 
 
@@ -3853,9 +3787,7 @@ class JobJobEventsList(BaseJobEventsList):
     def get_queryset(self):
         job = self.get_parent_object()
         self.check_parent_access(job)
-        qs = job.job_events
-        qs = qs.select_related('host')
-        qs = qs.prefetch_related('hosts', 'children')
+        qs = job.job_events.select_related('host').order_by('start_line')
         return qs.all()
 
 
@@ -4298,7 +4230,7 @@ class NotificationTemplateTest(GenericAPIView):
         msg = "Tower Notification Test {} {}".format(obj.id, settings.TOWER_URL_BASE)
         if obj.notification_type in ('email', 'pagerduty'):
             body = "Ansible Tower Test Notification {} {}".format(obj.id, settings.TOWER_URL_BASE)
-        elif obj.notification_type == 'webhook':
+        elif obj.notification_type in ('webhook', 'grafana'):
             body = '{{"body": "Ansible Tower Test Notification {} {}"}}'.format(obj.id, settings.TOWER_URL_BASE)
         else:
             body = {"body": "Ansible Tower Test Notification {} {}".format(obj.id, settings.TOWER_URL_BASE)}
@@ -4409,7 +4341,7 @@ class RoleUsersList(SubListAttachDetachAPIView):
 
         credential_content_type = ContentType.objects.get_for_model(models.Credential)
         if role.content_type == credential_content_type:
-            if role.content_object.organization and user not in role.content_object.organization.member_role:
+            if 'disassociate' not in request.data and role.content_object.organization and user not in role.content_object.organization.member_role:
                 data = dict(msg=_("You cannot grant credential access to a user not in the credentials' organization"))
                 return Response(data, status=status.HTTP_400_BAD_REQUEST)
 

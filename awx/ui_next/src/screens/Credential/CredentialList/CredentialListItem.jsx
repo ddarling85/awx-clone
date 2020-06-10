@@ -1,28 +1,31 @@
-import React from 'react';
+import React, { useState, useCallback } from 'react';
 import { string, bool, func } from 'prop-types';
 import { withI18n } from '@lingui/react';
 import { t } from '@lingui/macro';
 import { Link } from 'react-router-dom';
 import {
+  Button,
+  DataListAction as _DataListAction,
+  DataListCheck,
   DataListItem,
   DataListItemRow,
-  DataListItemCells as _DataListItemCells,
+  DataListItemCells,
   Tooltip,
 } from '@patternfly/react-core';
 import { PencilAltIcon } from '@patternfly/react-icons';
-
-import ActionButtonCell from '@components/ActionButtonCell';
-import DataListCell from '@components/DataListCell';
-import DataListCheck from '@components/DataListCheck';
-import ListActionButton from '@components/ListActionButton';
-import VerticalSeparator from '@components/VerticalSeparator';
 import styled from 'styled-components';
-import { Credential } from '@types';
+import DataListCell from '../../../components/DataListCell';
+import { timeOfDay } from '../../../util/dates';
 
-const DataListItemCells = styled(_DataListItemCells)`
-  ${DataListCell}:first-child {
-    flex-grow: 2;
-  }
+import { Credential } from '../../../types';
+import { CredentialsAPI } from '../../../api';
+import CopyButton from '../../../components/CopyButton';
+
+const DataListAction = styled(_DataListAction)`
+  align-items: center;
+  display: grid;
+  grid-gap: 16px;
+  grid-template-columns: repeat(2, 40px);
 `;
 
 function CredentialListItem({
@@ -31,9 +34,19 @@ function CredentialListItem({
   isSelected,
   onSelect,
   i18n,
+  fetchCredentials,
 }) {
+  const [isDisabled, setIsDisabled] = useState(false);
+
   const labelId = `check-action-${credential.id}`;
   const canEdit = credential.summary_fields.user_capabilities.edit;
+
+  const copyCredential = useCallback(async () => {
+    await CredentialsAPI.copy(credential.id, {
+      name: `${credential.name} @ ${timeOfDay()}`,
+    });
+    await fetchCredentials();
+  }, [credential.id, credential.name, fetchCredentials]);
 
   return (
     <DataListItem
@@ -43,6 +56,7 @@ function CredentialListItem({
     >
       <DataListItemRow>
         <DataListCheck
+          isDisabled={isDisabled}
           id={`select-credential-${credential.id}`}
           checked={isSelected}
           onChange={onSelect}
@@ -51,7 +65,6 @@ function CredentialListItem({
         <DataListItemCells
           dataListCells={[
             <DataListCell key="name">
-              <VerticalSeparator />
               <Link to={`${detailUrl}`}>
                 <b>{credential.name}</b>
               </Link>
@@ -59,21 +72,39 @@ function CredentialListItem({
             <DataListCell key="type">
               {credential.summary_fields.credential_type.name}
             </DataListCell>,
-            <ActionButtonCell lastcolumn="true" key="action">
-              {canEdit && (
-                <Tooltip content={i18n._(t`Edit Credential`)} position="top">
-                  <ListActionButton
-                    variant="plain"
-                    component={Link}
-                    to={`/credentials/${credential.id}/edit`}
-                  >
-                    <PencilAltIcon />
-                  </ListActionButton>
-                </Tooltip>
-              )}
-            </ActionButtonCell>,
           ]}
         />
+        <DataListAction
+          aria-label="actions"
+          aria-labelledby={labelId}
+          id={labelId}
+        >
+          {canEdit && (
+            <Tooltip content={i18n._(t`Edit Credential`)} position="top">
+              <Button
+                isDisabled={isDisabled}
+                aria-label={i18n._(t`Edit Credential`)}
+                variant="plain"
+                component={Link}
+                to={`/credentials/${credential.id}/edit`}
+              >
+                <PencilAltIcon />
+              </Button>
+            </Tooltip>
+          )}
+          {credential.summary_fields.user_capabilities.copy && (
+            <CopyButton
+              isDisabled={isDisabled}
+              onLoading={() => setIsDisabled(true)}
+              onDoneLoading={() => setIsDisabled(false)}
+              copyItem={copyCredential}
+              helperText={{
+                tooltip: i18n._(t`Copy Credential`),
+                errorMessage: i18n._(t`Failed to copy credential.`),
+              }}
+            />
+          )}
+        </DataListAction>
       </DataListItemRow>
     </DataListItem>
   );

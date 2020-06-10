@@ -1,19 +1,19 @@
-import React, { useEffect, useState } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useLocation, useRouteMatch } from 'react-router-dom';
 import { withI18n } from '@lingui/react';
 import { t } from '@lingui/macro';
 import { Card, PageSection } from '@patternfly/react-core';
 
-import { OrganizationsAPI } from '@api';
-import AlertModal from '@components/AlertModal';
-import DataListToolbar from '@components/DataListToolbar';
-import ErrorDetail from '@components/ErrorDetail';
+import { OrganizationsAPI } from '../../../api';
+import useRequest, { useDeleteItems } from '../../../util/useRequest';
+import AlertModal from '../../../components/AlertModal';
+import DataListToolbar from '../../../components/DataListToolbar';
+import ErrorDetail from '../../../components/ErrorDetail';
 import PaginatedDataList, {
   ToolbarAddButton,
   ToolbarDeleteButton,
-} from '@components/PaginatedDataList';
-import { getQSConfig, parseQueryString } from '@util/qs';
-
+} from '../../../components/PaginatedDataList';
+import { getQSConfig, parseQueryString } from '../../../util/qs';
 import OrganizationListItem from './OrganizationListItem';
 
 const QS_CONFIG = getQSConfig('organization', {
@@ -25,70 +25,70 @@ const QS_CONFIG = getQSConfig('organization', {
 function OrganizationsList({ i18n }) {
   const location = useLocation();
   const match = useRouteMatch();
-  const [contentError, setContentError] = useState(null);
-  const [deletionError, setDeletionError] = useState(null);
-  const [hasContentLoading, setHasContentLoading] = useState(true);
-  const [itemCount, setItemCount] = useState(0);
-  const [organizations, setOrganizations] = useState([]);
-  const [orgActions, setOrgActions] = useState(null);
+
   const [selected, setSelected] = useState([]);
 
   const addUrl = `${match.url}/add`;
-  const canAdd = orgActions && orgActions.POST;
+
+  const {
+    result: { organizations, organizationCount, actions },
+    error: contentError,
+    isLoading: isOrgsLoading,
+    request: fetchOrganizations,
+  } = useRequest(
+    useCallback(async () => {
+      const params = parseQueryString(QS_CONFIG, location.search);
+      const [orgs, orgActions] = await Promise.all([
+        OrganizationsAPI.read(params),
+        OrganizationsAPI.readOptions(),
+      ]);
+      return {
+        organizations: orgs.data.results,
+        organizationCount: orgs.data.count,
+        actions: orgActions.data.actions,
+      };
+    }, [location]),
+    {
+      organizations: [],
+      organizationCount: 0,
+      actions: {},
+    }
+  );
+
+  useEffect(() => {
+    fetchOrganizations();
+  }, [fetchOrganizations]);
+
   const isAllSelected =
     selected.length === organizations.length && selected.length > 0;
-
-  const loadOrganizations = async ({ search }) => {
-    const params = parseQueryString(QS_CONFIG, search);
-    setContentError(null);
-    setHasContentLoading(true);
-    try {
-      const [
-        {
-          data: { count, results },
-        },
-        {
-          data: { actions },
-        },
-      ] = await Promise.all([
-        OrganizationsAPI.read(params),
-        loadOrganizationActions(),
-      ]);
-      setItemCount(count);
-      setOrganizations(results);
-      setOrgActions(actions);
-      setSelected([]);
-    } catch (error) {
-      setContentError(error);
-    } finally {
-      setHasContentLoading(false);
+  const {
+    isLoading: isDeleteLoading,
+    deleteItems: deleteOrganizations,
+    deletionError,
+    clearDeletionError,
+  } = useDeleteItems(
+    useCallback(async () => {
+      return Promise.all(
+        selected.map(({ id }) => OrganizationsAPI.destroy(id))
+      );
+    }, [selected]),
+    {
+      qsConfig: QS_CONFIG,
+      allItemsSelected: isAllSelected,
+      fetchItems: fetchOrganizations,
     }
-  };
-
-  const loadOrganizationActions = () => {
-    if (orgActions) {
-      return Promise.resolve({ data: { actions: orgActions } });
-    }
-    return OrganizationsAPI.readOptions();
-  };
+  );
 
   const handleOrgDelete = async () => {
-    setHasContentLoading(true);
-    try {
-      await Promise.all(selected.map(({ id }) => OrganizationsAPI.destroy(id)));
-    } catch (error) {
-      setDeletionError(error);
-    } finally {
-      await loadOrganizations(location);
-    }
+    await deleteOrganizations();
+    setSelected([]);
   };
 
+  const hasContentLoading = isDeleteLoading || isOrgsLoading;
+  const canAdd = actions && actions.POST;
+
   const handleSelectAll = isSelected => {
-    if (isSelected) {
-      setSelected(organizations);
-    } else {
-      setSelected([]);
-    }
+    setSelected(isSelected ? [...organizations] : []);
   };
 
   const handleSelect = row => {
@@ -99,14 +99,6 @@ function OrganizationsList({ i18n }) {
     }
   };
 
-  const handleDeleteErrorClose = () => {
-    setDeletionError(null);
-  };
-
-  useEffect(() => {
-    loadOrganizations(location);
-  }, [location]); // eslint-disable-line react-hooks/exhaustive-deps
-
   return (
     <>
       <PageSection>
@@ -115,8 +107,8 @@ function OrganizationsList({ i18n }) {
             contentError={contentError}
             hasContentLoading={hasContentLoading}
             items={organizations}
-            itemCount={itemCount}
-            pluralizedItemName="Organizations"
+            itemCount={organizationCount}
+            pluralizedItemName={i18n._(t`Organizations`)}
             qsConfig={QS_CONFIG}
             onRowClick={handleSelect}
             toolbarSearchColumns={[
@@ -148,15 +140,15 @@ function OrganizationsList({ i18n }) {
                 onSelectAll={handleSelectAll}
                 qsConfig={QS_CONFIG}
                 additionalControls={[
+                  ...(canAdd
+                    ? [<ToolbarAddButton key="add" linkTo={addUrl} />]
+                    : []),
                   <ToolbarDeleteButton
                     key="delete"
                     onDelete={handleOrgDelete}
                     itemsToDelete={selected}
                     pluralizedItemName="Organizations"
                   />,
-                  canAdd ? (
-                    <ToolbarAddButton key="add" linkTo={addUrl} />
-                  ) : null,
                 ]}
               />
             )}
@@ -177,9 +169,9 @@ function OrganizationsList({ i18n }) {
       </PageSection>
       <AlertModal
         isOpen={deletionError}
-        variant="danger"
+        variant="error"
         title={i18n._(t`Error!`)}
-        onClose={handleDeleteErrorClose}
+        onClose={clearDeletionError}
       >
         {i18n._(t`Failed to delete one or more organizations.`)}
         <ErrorDetail error={deletionError} />

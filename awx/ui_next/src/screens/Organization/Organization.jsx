@@ -2,17 +2,17 @@ import React, { Component } from 'react';
 import { withI18n } from '@lingui/react';
 import { t } from '@lingui/macro';
 import { Switch, Route, withRouter, Redirect, Link } from 'react-router-dom';
-import { Card, PageSection } from '@patternfly/react-core';
-import CardCloseButton from '@components/CardCloseButton';
-import { TabbedCardHeader } from '@components/Card';
-import RoutedTabs from '@components/RoutedTabs';
-import ContentError from '@components/ContentError';
-import NotificationList from '@components/NotificationList/NotificationList';
-import { ResourceAccessList } from '@components/ResourceAccessList';
+import { Card, CardActions, PageSection } from '@patternfly/react-core';
+import CardCloseButton from '../../components/CardCloseButton';
+import { TabbedCardHeader } from '../../components/Card';
+import RoutedTabs from '../../components/RoutedTabs';
+import ContentError from '../../components/ContentError';
+import NotificationList from '../../components/NotificationList/NotificationList';
+import { ResourceAccessList } from '../../components/ResourceAccessList';
 import OrganizationDetail from './OrganizationDetail';
 import OrganizationEdit from './OrganizationEdit';
 import OrganizationTeams from './OrganizationTeams';
-import { OrganizationsAPI } from '@api';
+import { OrganizationsAPI } from '../../api';
 
 class Organization extends Component {
   constructor(props) {
@@ -97,7 +97,7 @@ class Organization extends Component {
   }
 
   render() {
-    const { location, match, me, history, i18n } = this.props;
+    const { location, match, me, i18n } = this.props;
 
     const {
       organization,
@@ -131,21 +131,14 @@ class Organization extends Component {
 
     let cardHeader = (
       <TabbedCardHeader>
-        <RoutedTabs
-          match={match}
-          history={history}
-          labeltext={i18n._(t`Organization detail tabs`)}
-          tabsArray={tabsArray}
-        />
-        <CardCloseButton linkTo="/organizations" />
+        <RoutedTabs tabsArray={tabsArray} />
+        <CardActions>
+          <CardCloseButton linkTo="/organizations" />
+        </CardActions>
       </TabbedCardHeader>
     );
 
     if (!isInitialized) {
-      cardHeader = null;
-    }
-
-    if (!match) {
       cardHeader = null;
     }
 
@@ -156,7 +149,7 @@ class Organization extends Component {
     if (!hasContentLoading && contentError) {
       return (
         <PageSection>
-          <Card className="awx-c-card">
+          <Card>
             <ContentError error={contentError}>
               {contentError.response.status === 404 && (
                 <span>
@@ -174,7 +167,7 @@ class Organization extends Component {
 
     return (
       <PageSection>
-        <Card className="awx-c-card">
+        <Card>
           {cardHeader}
           <Switch>
             <Redirect
@@ -183,66 +176,46 @@ class Organization extends Component {
               exact
             />
             {organization && (
-              <Route
-                path="/organizations/:id/edit"
-                render={() => (
-                  <OrganizationEdit match={match} organization={organization} />
-                )}
-              />
+              <Route path="/organizations/:id/edit">
+                <OrganizationEdit organization={organization} />
+              </Route>
             )}
             {organization && (
-              <Route
-                path="/organizations/:id/details"
-                render={() => (
-                  <OrganizationDetail
-                    match={match}
-                    organization={organization}
-                  />
-                )}
-              />
+              <Route path="/organizations/:id/details">
+                <OrganizationDetail organization={organization} />
+              </Route>
             )}
             {organization && (
-              <Route
-                path="/organizations/:id/access"
-                render={() => (
-                  <ResourceAccessList
-                    resource={organization}
-                    apiModel={OrganizationsAPI}
-                  />
-                )}
-              />
+              <Route path="/organizations/:id/access">
+                <ResourceAccessList
+                  resource={organization}
+                  apiModel={OrganizationsAPI}
+                />
+              </Route>
             )}
-            <Route
-              path="/organizations/:id/teams"
-              render={() => <OrganizationTeams id={Number(match.params.id)} />}
-            />
+            <Route path="/organizations/:id/teams">
+              <OrganizationTeams id={Number(match.params.id)} />
+            </Route>
             {canSeeNotificationsTab && (
-              <Route
-                path="/organizations/:id/notifications"
-                render={() => (
-                  <NotificationList
-                    id={Number(match.params.id)}
-                    canToggleNotifications={canToggleNotifications}
-                    apiModel={OrganizationsAPI}
-                  />
-                )}
-              />
+              <Route path="/organizations/:id/notifications">
+                <NotificationList
+                  id={Number(match.params.id)}
+                  canToggleNotifications={canToggleNotifications}
+                  apiModel={OrganizationsAPI}
+                />
+              </Route>
             )}
-            <Route
-              key="not-found"
-              path="*"
-              render={() =>
-                !hasContentLoading && (
-                  <ContentError isNotFound>
-                    {match.params.id && (
-                      <Link to={`/organizations/${match.params.id}/details`}>
-                        {i18n._(`View Organization Details`)}
-                      </Link>
-                    )}
-                  </ContentError>
-                )
-              }
-            />
+            <Route key="not-found" path="*">
+              {!hasContentLoading && (
+                <ContentError isNotFound>
+                  {match.params.id && (
+                    <Link to={`/organizations/${match.params.id}/details`}>
+                      {i18n._(`View Organization Details`)}
+                    </Link>
+                  )}
+                </ContentError>
+              )}
+            </Route>
             ,
           </Switch>
         </Card>

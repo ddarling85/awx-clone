@@ -6,26 +6,27 @@ PACKER ?= packer
 PACKER_BUILD_OPTS ?= -var 'official=$(OFFICIAL)' -var 'aw_repo_url=$(AW_REPO_URL)'
 NODE ?= node
 NPM_BIN ?= npm
+CHROMIUM_BIN=/tmp/chrome-linux/chrome
 DEPS_SCRIPT ?= packaging/bundle/deps.py
 GIT_BRANCH ?= $(shell git rev-parse --abbrev-ref HEAD)
 MANAGEMENT_COMMAND ?= awx-manage
 IMAGE_REPOSITORY_AUTH ?=
 IMAGE_REPOSITORY_BASE ?= https://gcr.io
 VERSION := $(shell cat VERSION)
+PYCURL_SSL_LIBRARY ?= openssl
 
 # NOTE: This defaults the container image version to the branch that's active
 COMPOSE_TAG ?= $(GIT_BRANCH)
 COMPOSE_HOST ?= $(shell hostname)
 
 VENV_BASE ?= /venv
-COLLECTION_VENV ?= /awx_devel/awx_collection_test_venv
 SCL_PREFIX ?=
 CELERY_SCHEDULE_FILE ?= /var/lib/awx/beat.db
 
 DEV_DOCKER_TAG_BASE ?= gcr.io/ansible-tower-engineering
 # Python packages to install only from source (not from binary wheels)
 # Comma separated list
-SRC_ONLY_PKGS ?= cffi,pycparser,psycopg2,twilio
+SRC_ONLY_PKGS ?= cffi,pycparser,psycopg2,twilio,pycurl
 # These should be upgraded in the AWX and Ansible venv before attempting
 # to install the actual requirements
 VENV_BOOTSTRAP ?= pip==19.3.1 setuptools==41.6.0
@@ -122,7 +123,7 @@ clean-api:
 	rm -rf awx/projects
 
 clean-awxkit:
-	rm -rf awxkit/*.egg-info awxkit/.tox
+	rm -rf awxkit/*.egg-info awxkit/.tox awxkit/build/*
 
 # convenience target to assert environment variables are defined
 guard-%:
@@ -167,17 +168,16 @@ virtualenv_awx:
 		fi; \
 		if [ ! -d "$(VENV_BASE)/awx" ]; then \
 			virtualenv -p $(PYTHON) $(VENV_BASE)/awx; \
-			$(VENV_BASE)/awx/bin/pip install $(PIP_OPTIONS) $(VENV_BOOTSTRAP) && \
-			$(VENV_BASE)/awx/bin/pip install $(PIP_OPTIONS) flit; \
+			$(VENV_BASE)/awx/bin/pip install $(PIP_OPTIONS) $(VENV_BOOTSTRAP); \
 		fi; \
 	fi
 
 # --ignore-install flag is not used because *.txt files should specify exact versions
 requirements_ansible: virtualenv_ansible
 	if [[ "$(PIP_OPTIONS)" == *"--no-index"* ]]; then \
-	    cat requirements/requirements_ansible.txt requirements/requirements_ansible_local.txt | $(VENV_BASE)/ansible/bin/pip install $(PIP_OPTIONS) -r /dev/stdin ; \
+	    cat requirements/requirements_ansible.txt requirements/requirements_ansible_local.txt | PYCURL_SSL_LIBRARY=$(PYCURL_SSL_LIBRARY) $(VENV_BASE)/ansible/bin/pip install $(PIP_OPTIONS) -r /dev/stdin ; \
 	else \
-	    cat requirements/requirements_ansible.txt requirements/requirements_ansible_git.txt | $(VENV_BASE)/ansible/bin/pip install $(PIP_OPTIONS) --no-binary $(SRC_ONLY_PKGS) -r /dev/stdin ; \
+	    cat requirements/requirements_ansible.txt requirements/requirements_ansible_git.txt | PYCURL_SSL_LIBRARY=$(PYCURL_SSL_LIBRARY) $(VENV_BASE)/ansible/bin/pip install $(PIP_OPTIONS) --no-binary $(SRC_ONLY_PKGS) -r /dev/stdin ; \
 	fi
 	$(VENV_BASE)/ansible/bin/pip uninstall --yes -r requirements/requirements_ansible_uninstall.txt
 	# Same effect as using --system-site-packages flag on venv creation
@@ -185,9 +185,9 @@ requirements_ansible: virtualenv_ansible
 
 requirements_ansible_py3: virtualenv_ansible_py3
 	if [[ "$(PIP_OPTIONS)" == *"--no-index"* ]]; then \
-	    cat requirements/requirements_ansible.txt requirements/requirements_ansible_local.txt | $(VENV_BASE)/ansible/bin/pip3 install $(PIP_OPTIONS) -r /dev/stdin ; \
+	    cat requirements/requirements_ansible.txt requirements/requirements_ansible_local.txt | PYCURL_SSL_LIBRARY=$(PYCURL_SSL_LIBRARY) $(VENV_BASE)/ansible/bin/pip3 install $(PIP_OPTIONS) -r /dev/stdin ; \
 	else \
-	    cat requirements/requirements_ansible.txt requirements/requirements_ansible_git.txt | $(VENV_BASE)/ansible/bin/pip3 install $(PIP_OPTIONS) --no-binary $(SRC_ONLY_PKGS) -r /dev/stdin ; \
+	    cat requirements/requirements_ansible.txt requirements/requirements_ansible_git.txt | PYCURL_SSL_LIBRARY=$(PYCURL_SSL_LIBRARY) $(VENV_BASE)/ansible/bin/pip3 install $(PIP_OPTIONS) --no-binary $(SRC_ONLY_PKGS) -r /dev/stdin ; \
 	fi
 	$(VENV_BASE)/ansible/bin/pip3 uninstall --yes -r requirements/requirements_ansible_uninstall.txt
 	# Same effect as using --system-site-packages flag on venv creation
@@ -211,7 +211,11 @@ requirements_awx: virtualenv_awx
 requirements_awx_dev:
 	$(VENV_BASE)/awx/bin/pip install -r requirements/requirements_dev.txt
 
-requirements: requirements_ansible requirements_awx
+requirements_collections:
+	mkdir -p $(COLLECTION_BASE)
+	ansible-galaxy collection install -r requirements/collections_requirements.yml -p $(COLLECTION_BASE)
+
+requirements: requirements_ansible requirements_awx requirements_collections
 
 requirements_dev: requirements_awx requirements_ansible_py3 requirements_awx_dev requirements_ansible_dev
 
@@ -266,28 +270,6 @@ migrate:
 dbchange:
 	$(MANAGEMENT_COMMAND) makemigrations
 
-server_noattach:
-	tmux new-session -d -s awx 'exec make uwsgi'
-	tmux rename-window 'AWX'
-	tmux select-window -t awx:0
-	tmux split-window -v 'exec make dispatcher'
-	tmux new-window 'exec make daphne'
-	tmux select-window -t awx:1
-	tmux rename-window 'WebSockets'
-	tmux split-window -h 'exec make runworker'
-	tmux split-window -v 'exec make nginx'
-	tmux new-window 'exec make receiver'
-	tmux select-window -t awx:2
-	tmux rename-window 'Extra Services'
-	tmux select-window -t awx:0
-
-server: server_noattach
-	tmux -2 attach-session -t awx
-
-# Use with iterm2's native tmux protocol support
-servercc: server_noattach
-	tmux -2 -CC attach-session -t awx
-
 supervisor:
 	@if [ "$(VENV_BASE)" ]; then \
 		. $(VENV_BASE)/awx/bin/activate; \
@@ -312,18 +294,11 @@ daphne:
 	fi; \
 	daphne -b 127.0.0.1 -p 8051 awx.asgi:channel_layer
 
-runworker:
+wsbroadcast:
 	@if [ "$(VENV_BASE)" ]; then \
 		. $(VENV_BASE)/awx/bin/activate; \
 	fi; \
-	$(PYTHON) manage.py runworker --only-channels websocket.*
-
-# Run the built-in development webserver (by default on http://localhost:8013).
-runserver:
-	@if [ "$(VENV_BASE)" ]; then \
-		. $(VENV_BASE)/awx/bin/activate; \
-	fi; \
-	$(PYTHON) manage.py runserver
+	$(PYTHON) manage.py run_wsbroadcast
 
 # Run to start the background task dispatcher for development.
 dispatcher:
@@ -380,8 +355,7 @@ swagger: reports
 check: flake8 pep8 # pyflakes pylint
 
 awx-link:
-	cp -R /tmp/awx.egg-info /awx_devel/ || true
-	sed -i "s/placeholder/$(shell cat VERSION)/" /awx_devel/awx.egg-info/PKG-INFO
+	[ -d "/awx_devel/awx.egg-info" ] || python3 /awx_devel/setup.py egg_info_dev
 	cp -f /tmp/awx.egg-link /venv/awx/lib/python$(PYTHON_VERSION)/site-packages/awx.egg-link
 
 TEST_DIRS ?= awx/main/tests/unit awx/main/tests/functional awx/conf/tests awx/sso/tests
@@ -392,43 +366,51 @@ test:
 		. $(VENV_BASE)/awx/bin/activate; \
 	fi; \
 	PYTHONDONTWRITEBYTECODE=1 py.test -p no:cacheprovider -n auto $(TEST_DIRS)
+	cmp VERSION awxkit/VERSION || "VERSION and awxkit/VERSION *must* match"
 	cd awxkit && $(VENV_BASE)/awx/bin/tox -re py2,py3
 	awx-manage check_migrations --dry-run --check  -n 'vNNN_missing_migration_file'
 
-prepare_collection_venv:
-	rm -rf $(COLLECTION_VENV)
-	mkdir $(COLLECTION_VENV)
-	$(VENV_BASE)/awx/bin/pip install --target=$(COLLECTION_VENV) git+https://github.com/ansible/tower-cli.git
-
 COLLECTION_TEST_DIRS ?= awx_collection/test/awx
+COLLECTION_TEST_TARGET ?=
 COLLECTION_PACKAGE ?= awx
 COLLECTION_NAMESPACE ?= awx
+COLLECTION_INSTALL = ~/.ansible/collections/ansible_collections/$(COLLECTION_NAMESPACE)/$(COLLECTION_PACKAGE)
 
 test_collection:
 	@if [ "$(VENV_BASE)" ]; then \
 		. $(VENV_BASE)/awx/bin/activate; \
 	fi; \
-	PYTHONPATH=$(COLLECTION_VENV):/awx_devel/awx_collection:$PYTHONPATH:/usr/lib/python3.6/site-packages py.test $(COLLECTION_TEST_DIRS)
+	PYTHONPATH=$(PYTHONPATH):$(VENV_BASE)/awx/lib/python3.6/site-packages:/usr/lib/python3.6/site-packages py.test $(COLLECTION_TEST_DIRS)
+	# The python path needs to be modified so that the tests can find Ansible within the container
+	# First we will use anything expility set as PYTHONPATH
+	# Second we will load any libraries out of the virtualenv (if it's unspecified that should be ok because python should not load out of an empty directory)
+	# Finally we will add the system path so that the tests can find the ansible libraries
 
 flake8_collection:
 	flake8 awx_collection/  # Different settings, in main exclude list
 
-test_collection_all: prepare_collection_venv test_collection flake8_collection
+test_collection_all: test_collection flake8_collection
 
-test_collection_sanity:
-	rm -rf sanity
-	mkdir -p sanity/ansible_collections/awx
-	cp -Ra awx_collection sanity/ansible_collections/awx/awx  # symlinks do not work
-	cd sanity/ansible_collections/awx/awx && git init && git add . # requires both this file structure and a git repo, so there you go
-	cd sanity/ansible_collections/awx/awx && ansible-test sanity
+# WARNING: symlinking a collection is fundamentally unstable
+# this is for rapid development iteration with playbooks, do not use with other test targets
+symlink_collection:
+	rm -rf $(COLLECTION_INSTALL)
+	mkdir -p ~/.ansible/collections/ansible_collections/$(COLLECTION_NAMESPACE)  # in case it does not exist
+	ln -s $(shell pwd)/awx_collection $(COLLECTION_INSTALL)
 
 build_collection:
-	ansible-playbook -i localhost, awx_collection/template_galaxy.yml -e collection_package=$(COLLECTION_PACKAGE) -e collection_namespace=$(COLLECTION_NAMESPACE) -e collection_version=$(VERSION)
+	ansible-playbook -i localhost, awx_collection/tools/template_galaxy.yml -e collection_package=$(COLLECTION_PACKAGE) -e collection_namespace=$(COLLECTION_NAMESPACE) -e collection_version=$(VERSION) -e '{"awx_template_version":false}'
 	ansible-galaxy collection build awx_collection --force --output-path=awx_collection
 
 install_collection: build_collection
-	rm -rf ~/.ansible/collections/ansible_collections/awx/awx
-	ansible-galaxy collection install awx_collection/awx-awx-$(VERSION).tar.gz
+	rm -rf $(COLLECTION_INSTALL)
+	ansible-galaxy collection install awx_collection/$(COLLECTION_NAMESPACE)-$(COLLECTION_PACKAGE)-$(VERSION).tar.gz
+
+test_collection_sanity: install_collection
+	cd $(COLLECTION_INSTALL) && ansible-test sanity
+
+test_collection_integration: install_collection
+	cd $(COLLECTION_INSTALL) && ansible-test integration $(COLLECTION_TEST_TARGET)
 
 test_unit:
 	@if [ "$(VENV_BASE)" ]; then \
@@ -571,11 +553,13 @@ jshint: $(UI_DEPS_FLAG_FILE)
 	$(NPM_BIN) run --prefix awx/ui jshint
 	$(NPM_BIN) run --prefix awx/ui lint
 
-ui-zuul-lint-and-test: $(UI_DEPS_FLAG_FILE)
-	$(NPM_BIN) run --prefix awx/ui jshint
-	$(NPM_BIN) run --prefix awx/ui lint
-	$(NPM_BIN) --prefix awx/ui run test:ci
-	$(NPM_BIN) --prefix awx/ui run unit
+ui-zuul-lint-and-test:
+	CHROMIUM_BIN=$(CHROMIUM_BIN) ./awx/ui/build/zuul_download_chromium.sh
+	CHROMIUM_BIN=$(CHROMIUM_BIN) PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=1 $(NPM_BIN) --unsafe-perm --prefix awx/ui ci --no-save awx/ui
+	CHROMIUM_BIN=$(CHROMIUM_BIN) $(NPM_BIN) run --prefix awx/ui jshint
+	CHROMIUM_BIN=$(CHROMIUM_BIN) $(NPM_BIN) run --prefix awx/ui lint
+	CHROME_BIN=$(CHROMIUM_BIN) $(NPM_BIN) --prefix awx/ui run test:ci
+	CHROME_BIN=$(CHROMIUM_BIN) $(NPM_BIN) --prefix awx/ui run unit
 
 # END UI TASKS
 # --------------------------------------
@@ -664,7 +648,7 @@ docker-compose-runtest: awx/projects
 	cd tools && CURRENT_UID=$(shell id -u) TAG=$(COMPOSE_TAG) DEV_DOCKER_TAG_BASE=$(DEV_DOCKER_TAG_BASE) docker-compose run --rm --service-ports awx /start_tests.sh
 
 docker-compose-build-swagger: awx/projects
-	cd tools && CURRENT_UID=$(shell id -u) TAG=$(COMPOSE_TAG) DEV_DOCKER_TAG_BASE=$(DEV_DOCKER_TAG_BASE) docker-compose run --rm --service-ports awx /start_tests.sh swagger
+	cd tools && CURRENT_UID=$(shell id -u) TAG=$(COMPOSE_TAG) DEV_DOCKER_TAG_BASE=$(DEV_DOCKER_TAG_BASE) docker-compose run --rm --service-ports --no-deps awx /start_tests.sh swagger
 
 detect-schema-change: genschema
 	curl https://s3.amazonaws.com/awx-public-ci-files/schema.json -o reference-schema.json
@@ -672,29 +656,28 @@ detect-schema-change: genschema
 	diff -u -b reference-schema.json schema.json
 
 docker-compose-clean: awx/projects
-	cd tools && CURRENT_UID=$(shell id -u) TAG=$(COMPOSE_TAG) DEV_DOCKER_TAG_BASE=$(DEV_DOCKER_TAG_BASE) docker-compose run --rm -w /awx_devel --service-ports awx make clean
 	cd tools && TAG=$(COMPOSE_TAG) DEV_DOCKER_TAG_BASE=$(DEV_DOCKER_TAG_BASE) docker-compose rm -sf
 
-docker-compose-build: awx-devel-build
-
 # Base development image build
-awx-devel-build:
+docker-compose-build:
+	ansible localhost -m template -a "src=installer/roles/image_build/templates/Dockerfile.j2 dest=tools/docker-compose/Dockerfile" -e build_dev=True
 	docker build -t ansible/awx_devel -f tools/docker-compose/Dockerfile \
 		--cache-from=$(DEV_DOCKER_TAG_BASE)/awx_devel:$(COMPOSE_TAG) .
 	docker tag ansible/awx_devel $(DEV_DOCKER_TAG_BASE)/awx_devel:$(COMPOSE_TAG)
 	#docker push $(DEV_DOCKER_TAG_BASE)/awx_devel:$(COMPOSE_TAG)
 
 # For use when developing on "isolated" AWX deployments
-docker-compose-isolated-build: awx-devel-build
+docker-compose-isolated-build: docker-compose-build
 	docker build -t ansible/awx_isolated -f tools/docker-isolated/Dockerfile .
 	docker tag ansible/awx_isolated $(DEV_DOCKER_TAG_BASE)/awx_isolated:$(COMPOSE_TAG)
 	#docker push $(DEV_DOCKER_TAG_BASE)/awx_isolated:$(COMPOSE_TAG)
 
-MACHINE?=default
 docker-clean:
-	eval $$(docker-machine env $(MACHINE))
 	$(foreach container_id,$(shell docker ps -f name=tools_awx -aq),docker stop $(container_id); docker rm -f $(container_id);)
-	-docker images | grep "awx_devel" | awk '{print $$1 ":" $$2}' | xargs docker rmi
+	docker images | grep "awx_devel" | awk '{print $$1 ":" $$2}' | xargs docker rmi
+
+docker-clean-volumes: docker-compose-clean
+	docker volume rm tools_awx_db
 
 docker-refresh: docker-clean docker-compose
 
@@ -707,9 +690,6 @@ docker-compose-cluster-elk: docker-auth awx/projects
 
 prometheus:
 	docker run -u0 --net=tools_default --link=`docker ps | egrep -o "tools_awx(_run)?_([^ ]+)?"`:awxweb --volume `pwd`/tools/prometheus:/prometheus --name prometheus -d -p 0.0.0.0:9090:9090 prom/prometheus --web.enable-lifecycle --config.file=/prometheus/prometheus.yml
-
-minishift-dev:
-	ansible-playbook -i localhost, -e devtree_directory=$(CURDIR) tools/clusterdevel/start_minishift_dev.yml
 
 clean-elk:
 	docker stop tools_kibana_1

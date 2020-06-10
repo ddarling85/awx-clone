@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { oneOf, bool, number, string, func } from 'prop-types';
 import { Controlled as ReactCodeMirror } from 'react-codemirror2';
 import styled from 'styled-components';
@@ -17,7 +17,8 @@ const CodeMirror = styled(ReactCodeMirror)`
   }
 
   & > .CodeMirror {
-    height: ${props => props.rows * LINE_HEIGHT + PADDING}px;
+    height: ${props =>
+      props.fullHeight ? 'auto' : `${props.rows * LINE_HEIGHT + PADDING}px`};
     font-family: var(--pf-global--FontFamily--monospace);
   }
 
@@ -63,8 +64,23 @@ function CodeMirrorInput({
   readOnly,
   hasErrors,
   rows,
+  fullHeight,
   className,
 }) {
+  // Workaround for CodeMirror bug: If CodeMirror renders in a modal on the
+  // modal's initial render, it appears as an empty box due to mis-calculated
+  // element height. Forcing an initial render before mounting <CodeMirror>
+  // fixes this.
+  const [isInitialized, setIsInitialized] = useState(false);
+  useEffect(() => {
+    if (!isInitialized) {
+      setIsInitialized(true);
+    }
+  }, [isInitialized]);
+  if (!isInitialized) {
+    return <div />;
+  }
+
   return (
     <CodeMirror
       className={`pf-c-form-control ${className}`}
@@ -75,8 +91,10 @@ function CodeMirrorInput({
       options={{
         smartIndent: false,
         lineNumbers: true,
+        lineWrapping: true,
         readOnly,
       }}
+      fullHeight={fullHeight}
       rows={rows}
     />
   );
@@ -87,12 +105,14 @@ CodeMirrorInput.propTypes = {
   mode: oneOf(['javascript', 'yaml', 'jinja2']).isRequired,
   readOnly: bool,
   hasErrors: bool,
+  fullHeight: bool,
   rows: number,
 };
 CodeMirrorInput.defaultProps = {
   readOnly: false,
   onChange: () => {},
   rows: 6,
+  fullHeight: false,
   hasErrors: false,
 };
 

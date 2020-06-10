@@ -1,11 +1,22 @@
 import React from 'react';
 import { act } from 'react-dom/test-utils';
-import { mountWithContexts, waitForElement } from '@testUtils/enzymeHelpers';
-import { sleep } from '@testUtils/testUtils';
+import { Route } from 'react-router-dom';
+import { createMemoryHistory } from 'history';
+import {
+  mountWithContexts,
+  waitForElement,
+} from '../../../../testUtils/enzymeHelpers';
+import { sleep } from '../../../../testUtils/testUtils';
 import JobTemplateForm from './JobTemplateForm';
-import { LabelsAPI, JobTemplatesAPI, ProjectsAPI, CredentialsAPI } from '@api';
+import {
+  LabelsAPI,
+  JobTemplatesAPI,
+  ProjectsAPI,
+  CredentialsAPI,
+  CredentialTypesAPI,
+} from '../../../api';
 
-jest.mock('@api');
+jest.mock('../../../api');
 
 describe('<JobTemplateForm />', () => {
   const mockData = {
@@ -17,6 +28,8 @@ describe('<JobTemplateForm />', () => {
     project: 3,
     playbook: 'Baz',
     type: 'job_template',
+    scm_branch: 'Foo',
+    limit: '5000',
     summary_fields: {
       inventory: {
         id: 2,
@@ -27,12 +40,21 @@ describe('<JobTemplateForm />', () => {
         id: 3,
         name: 'qux',
       },
-      labels: { results: [{ name: 'Sushi', id: 1 }, { name: 'Major', id: 2 }] },
+      labels: {
+        results: [
+          { name: 'Sushi', id: 1 },
+          { name: 'Major', id: 2 },
+        ],
+      },
       credentials: [
         { id: 1, kind: 'cloud', name: 'Foo' },
         { id: 2, kind: 'ssh', name: 'Bar' },
       ],
     },
+    related: { webhook_receiver: '/api/v2/job_templates/57/gitlab/' },
+    webhook_key: 'webhook key',
+    webhook_service: 'github',
+    webhook_credential: 7,
   };
   const mockInstanceGroups = [
     {
@@ -79,14 +101,23 @@ describe('<JobTemplateForm />', () => {
     LabelsAPI.read.mockReturnValue({
       data: mockData.summary_fields.labels,
     });
+    CredentialTypesAPI.loadAllTypes.mockResolvedValue([]);
     CredentialsAPI.read.mockReturnValue({
       data: { results: mockCredentials },
     });
     JobTemplatesAPI.readInstanceGroups.mockReturnValue({
       data: { results: mockInstanceGroups },
     });
+    JobTemplatesAPI.updateWebhookKey.mockReturnValue({
+      data: { webhook_key: 'webhook key' },
+    });
     ProjectsAPI.readPlaybooks.mockReturnValue({
       data: ['debug.yml'],
+    });
+    ProjectsAPI.readDetail.mockReturnValue({
+      name: 'foo',
+      id: 1,
+      allow_override: true,
     });
   });
 
@@ -126,48 +157,204 @@ describe('<JobTemplateForm />', () => {
         />
       );
     });
-
     await waitForElement(wrapper, 'EmptyStateBody', el => el.length === 0);
-    const form = wrapper.find('Formik');
-    wrapper.find('input#template-name').simulate('change', {
-      target: { value: 'new foo', name: 'name' },
-    });
-    expect(form.state('values').name).toEqual('new foo');
-    wrapper.find('input#template-description').simulate('change', {
-      target: { value: 'new bar', name: 'description' },
-    });
-    expect(form.state('values').description).toEqual('new bar');
-    wrapper.find('AnsibleSelect[name="job_type"]').simulate('change', {
-      target: { value: 'new job type', name: 'job_type' },
-    });
-    expect(form.state('values').job_type).toEqual('new job type');
-    wrapper.find('InventoryLookup').invoke('onChange')({
-      id: 3,
-      name: 'inventory',
-    });
-    expect(form.state('values').inventory).toEqual(3);
     await act(async () => {
+      wrapper.find('input#template-name').simulate('change', {
+        target: { value: 'new foo', name: 'name' },
+      });
+      wrapper.find('input#template-description').simulate('change', {
+        target: { value: 'new bar', name: 'description' },
+      });
+      wrapper.find('AnsibleSelect#template-job-type').prop('onChange')(
+        null,
+        'check'
+      );
       wrapper.find('ProjectLookup').invoke('onChange')({
         id: 4,
         name: 'project',
+        allow_override: true,
       });
     });
-    expect(form.state('values').project).toEqual(4);
-    wrapper.find('AnsibleSelect[name="playbook"]').simulate('change', {
-      target: { value: 'new baz type', name: 'playbook' },
+    wrapper.update();
+    await act(async () => {
+      wrapper.find('InventoryLookup').invoke('onChange')({
+        id: 3,
+        name: 'inventory',
+      });
     });
-    expect(form.state('values').playbook).toEqual('new baz type');
+
+    wrapper.update();
+    await act(async () => {
+      wrapper.find('TextInputBase#template-scm-branch').prop('onChange')(
+        'devel'
+      );
+      wrapper.find('TextInputBase#template-limit').prop('onChange')(1234567890);
+      wrapper.find('AnsibleSelect[name="playbook"]').simulate('change', {
+        target: { value: 'new baz type', name: 'playbook' },
+      });
+    });
+
     await act(async () => {
       wrapper
         .find('CredentialChip')
         .at(0)
         .prop('onClick')();
     });
-    expect(form.state('values').credentials).toEqual([
-      { id: 2, kind: 'ssh', name: 'Bar' },
+    wrapper.update();
+
+    expect(wrapper.find('input#template-name').prop('value')).toEqual(
+      'new foo'
+    );
+    expect(wrapper.find('input#template-description').prop('value')).toEqual(
+      'new bar'
+    );
+    expect(
+      wrapper.find('AnsibleSelect[name="job_type"]').prop('value')
+    ).toEqual('check');
+    expect(wrapper.find('InventoryLookup').prop('value')).toEqual({
+      id: 3,
+      name: 'inventory',
+    });
+    expect(wrapper.find('ProjectLookup').prop('value')).toEqual({
+      id: 4,
+      name: 'project',
+      allow_override: true,
+    });
+    expect(wrapper.find('input#template-scm-branch').prop('value')).toEqual(
+      'devel'
+    );
+    expect(wrapper.find('input#template-limit').prop('value')).toEqual(
+      1234567890
+    );
+    expect(
+      wrapper.find('AnsibleSelect[name="playbook"]').prop('value')
+    ).toEqual('new baz type');
+    expect(wrapper.find('MultiCredentialsLookup').prop('value')).toEqual([
+      {
+        id: 2,
+        kind: 'ssh',
+        name: 'Bar',
+      },
     ]);
   });
 
+  test('webhooks and enable concurrent jobs functions properly', async () => {
+    let wrapper;
+    const history = createMemoryHistory({
+      initialEntries: ['/templates/job_template/1/edit'],
+    });
+    await act(async () => {
+      wrapper = mountWithContexts(
+        <Route
+          path="/templates/job_template/:id/edit"
+          component={() => (
+            <JobTemplateForm
+              template={mockData}
+              handleSubmit={jest.fn()}
+              handleCancel={jest.fn()}
+            />
+          )}
+        />,
+        {
+          context: {
+            router: {
+              history,
+              route: {
+                location: history.location,
+                match: { params: { id: 1 } },
+              },
+            },
+          },
+        }
+      );
+    });
+    act(() => {
+      wrapper.find('Checkbox[aria-label="Enable Webhook"]').invoke('onChange')(
+        true,
+        {
+          currentTarget: { value: true, type: 'change', checked: true },
+        }
+      );
+    });
+    wrapper.update();
+    expect(
+      wrapper.find('Checkbox[aria-label="Enable Webhook"]').prop('isChecked')
+    ).toBe(true);
+
+    expect(
+      wrapper.find('input[aria-label="wfjt-webhook-key"]').prop('readOnly')
+    ).toBe(true);
+    expect(
+      wrapper.find('input[aria-label="wfjt-webhook-key"]').prop('value')
+    ).toBe('webhook key');
+    await act(() =>
+      wrapper.find('Button[aria-label="Update webhook key"]').prop('onClick')()
+    );
+    expect(JobTemplatesAPI.updateWebhookKey).toBeCalledWith('1');
+    expect(
+      wrapper.find('TextInputBase[aria-label="Webhook URL"]').prop('value')
+    ).toContain('/api/v2/job_templates/57/gitlab/');
+
+    wrapper.update();
+
+    expect(wrapper.find('FormGroup[name="webhook_service"]').length).toBe(1);
+
+    await act(async () =>
+      wrapper.find('AnsibleSelect#webhook_service').prop('onChange')(
+        {},
+        'gitlab'
+      )
+    );
+    wrapper.update();
+
+    expect(wrapper.find('AnsibleSelect#webhook_service').prop('value')).toBe(
+      'gitlab'
+    );
+  });
+
+  test('webhooks should render properly, without data', async () => {
+    let wrapper;
+    const history = createMemoryHistory({
+      initialEntries: ['/templates/job_template/1/edit'],
+    });
+    await act(async () => {
+      wrapper = mountWithContexts(
+        <Route
+          path="/templates/job_template/:id/edit"
+          component={() => (
+            <JobTemplateForm
+              template={{
+                ...mockData,
+                webhook_credential: null,
+                webhook_key: '',
+                webhook_service: 'github',
+                related: { webhook_receiver: '' },
+              }}
+              handleSubmit={jest.fn()}
+              handleCancel={jest.fn()}
+            />
+          )}
+        />,
+        {
+          context: {
+            router: {
+              history,
+              route: {
+                location: history.location,
+                match: { params: { id: 1 } },
+              },
+            },
+          },
+        }
+      );
+    });
+    expect(
+      wrapper.find('TextInputBase#template-webhook_key').prop('value')
+    ).toBe('A NEW WEBHOOK KEY WILL BE GENERATED ON SAVE.');
+    expect(
+      wrapper.find('Button[aria-label="Update webhook key"]').prop('isDisabled')
+    ).toBe(true);
+  });
   test('should call handleSubmit when Submit button is clicked', async () => {
     const handleSubmit = jest.fn();
     let wrapper;

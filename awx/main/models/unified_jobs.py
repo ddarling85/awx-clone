@@ -3,6 +3,7 @@
 
 # Python
 from io import StringIO
+import datetime
 import codecs
 import json
 import logging
@@ -35,6 +36,7 @@ from awx.main.models.base import (
     NotificationFieldsModel,
     prevent_search
 )
+from awx.main.dispatch import get_local_queuename
 from awx.main.dispatch.control import Control as ControlDispatcher
 from awx.main.registrar import activity_stream_registrar
 from awx.main.models.mixins import ResourceMixin, TaskManagerUnifiedJobMixin
@@ -101,7 +103,7 @@ class UnifiedJobTemplate(PolymorphicModel, CommonModelNameNotUnique, Notificatio
         ordering = ('name',)
         # unique_together here is intentionally commented out. Please make sure sub-classes of this model
         # contain at least this uniqueness restriction: SOFT_UNIQUE_TOGETHER = [('polymorphic_ctype', 'name')]
-        #unique_together = [('polymorphic_ctype', 'name')]
+        #unique_together = [('polymorphic_ctype', 'name', 'organization')]
 
     old_pk = models.PositiveIntegerField(
         null=True,
@@ -148,13 +150,21 @@ class UnifiedJobTemplate(PolymorphicModel, CommonModelNameNotUnique, Notificatio
         default=None,
         editable=False,
         related_name='%(class)s_as_next_schedule+',
-        on_delete=models.SET_NULL,
+        on_delete=polymorphic.SET_NULL,
     )
     status = models.CharField(
         max_length=32,
         choices=ALL_STATUS_CHOICES,
         default='ok',
         editable=False,
+    )
+    organization = models.ForeignKey(
+        'Organization',
+        blank=True,
+        null=True,
+        on_delete=polymorphic.SET_NULL,
+        related_name='%(class)ss',
+        help_text=_('The organization used to determine access to this template.'),
     )
     credentials = models.ManyToManyField(
         'Credential',
@@ -403,9 +413,8 @@ class UnifiedJobTemplate(PolymorphicModel, CommonModelNameNotUnique, Notificatio
         if 'extra_vars' in validated_kwargs:
             unified_job.handle_extra_data(validated_kwargs['extra_vars'])
 
-        if not getattr(self, '_deprecated_credential_launch', False):
-            # Create record of provided prompts for relaunch and rescheduling
-            unified_job.create_config_from_prompts(kwargs, parent=self)
+        # Create record of provided prompts for relaunch and rescheduling
+        unified_job.create_config_from_prompts(kwargs, parent=self)
 
         # manually issue the create activity stream entry _after_ M2M relations
         # have been associated to the UJ
@@ -577,7 +586,7 @@ class UnifiedJob(PolymorphicModel, PasswordFieldsModel, CommonModelNameNotUnique
         null=True,
         default=None,
         editable=False,
-        on_delete=models.SET_NULL,
+        on_delete=polymorphic.SET_NULL,
     )
     dependent_jobs = models.ManyToManyField(
         'self',
@@ -622,6 +631,11 @@ class UnifiedJob(PolymorphicModel, PasswordFieldsModel, CommonModelNameNotUnique
         default=None,
         editable=False,
         help_text=_("The date and time the job was queued for starting."),
+    )
+    dependencies_processed = models.BooleanField(
+        default=False,
+        editable=False,
+        help_text=_("If True, the task manager has already processed potential dependencies for this job.")
     )
     finished = models.DateTimeField(
         null=True,
@@ -692,7 +706,15 @@ class UnifiedJob(PolymorphicModel, PasswordFieldsModel, CommonModelNameNotUnique
         null=True,
         default=None,
         on_delete=polymorphic.SET_NULL,
-        help_text=_('The Rampart/Instance group the job was run under'),
+        help_text=_('The Instance group the job was run under'),
+    )
+    organization = models.ForeignKey(
+        'Organization',
+        blank=True,
+        null=True,
+        on_delete=polymorphic.SET_NULL,
+        related_name='%(class)ss',
+        help_text=_('The organization used to determine access to this unified job.'),
     )
     credentials = models.ManyToManyField(
         'Credential',
@@ -842,7 +864,7 @@ class UnifiedJob(PolymorphicModel, PasswordFieldsModel, CommonModelNameNotUnique
                 update_fields.append('unified_job_template')
         
         if self.cancel_flag and not self.canceled_on:
-        # Record the 'canceled' time. 
+            # Record the 'canceled' time.
             self.canceled_on = now()
             if 'canceled_on' not in update_fields:
                 update_fields.append('canceled_on')
@@ -1009,6 +1031,8 @@ class UnifiedJob(PolymorphicModel, PasswordFieldsModel, CommonModelNameNotUnique
                 dir=settings.JOBOUTPUT_ROOT,
                 encoding='utf-8'
             )
+            from awx.main.tasks import purge_old_stdout_files  # circular import
+            purge_old_stdout_files.apply_async()
 
         # Before the addition of event-based stdout, older versions of
         # awx stored stdout as raw text blobs in a certain database column
@@ -1211,12 +1235,17 @@ class UnifiedJob(PolymorphicModel, PasswordFieldsModel, CommonModelNameNotUnique
                     status_data['instance_group_name'] = self.instance_group.name
                 else:
                     status_data['instance_group_name'] = None
+            elif status in ['successful', 'failed', 'canceled'] and self.finished:
+                status_data['finished'] = datetime.datetime.strftime(self.finished, "%Y-%m-%dT%H:%M:%S.%fZ")
             status_data.update(self.websocket_emit_data())
             status_data['group_name'] = 'jobs'
+            if getattr(self, 'unified_job_template_id', None):
+                status_data['unified_job_template_id'] = self.unified_job_template_id
             emit_channel_notification('jobs-status_changed', status_data)
 
             if self.spawned_by_workflow:
                 status_data['group_name'] = "workflow_events"
+                status_data['workflow_job_template_id'] = self.unified_job_template.id
                 emit_channel_notification('workflow_events-' + str(self.workflow_job_id), status_data)
         except IOError:  # includes socket errors
             logger.exception('%s failed to emit channel msg about status change', self.log_format)
@@ -1331,7 +1360,7 @@ class UnifiedJob(PolymorphicModel, PasswordFieldsModel, CommonModelNameNotUnique
             timeout = 5
             try:
                 running = self.celery_task_id in ControlDispatcher(
-                    'dispatcher', self.execution_node
+                    'dispatcher', self.controller_node or self.execution_node
                 ).running(timeout=timeout)
             except socket.timeout:
                 logger.error('could not reach dispatcher on {} within {}s'.format(
@@ -1437,7 +1466,7 @@ class UnifiedJob(PolymorphicModel, PasswordFieldsModel, CommonModelNameNotUnique
         return r
 
     def get_queue_name(self):
-        return self.controller_node or self.execution_node or settings.CELERY_DEFAULT_QUEUE
+        return self.controller_node or self.execution_node or get_local_queuename()
 
     def is_isolated(self):
         return bool(self.controller_node)

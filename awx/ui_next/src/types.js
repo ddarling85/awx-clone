@@ -73,6 +73,12 @@ export const JobTemplate = shape({
   project: number,
 });
 
+export const WorkFlowJobTemplate = shape({
+  name: string.isRequired,
+  description: string,
+  inventory: number,
+});
+
 export const Inventory = shape({
   id: number.isRequired,
   name: string,
@@ -271,3 +277,50 @@ export const SortColumns = arrayOf(
     key: string.isRequired,
   })
 );
+
+export const Schedule = shape({
+  rrule: string.isRequired,
+  id: number.isRequired,
+  type: string,
+  url: string,
+  related: shape({}),
+  summary_fields: shape({}),
+  created: string,
+  modified: string,
+  name: string.isRequired,
+  description: string,
+  extra_data: oneOfType([string, shape({})]),
+  inventory: number,
+  scm_branch: string,
+  job_type: string,
+  job_tags: string,
+  skip_tags: string,
+  limit: string,
+  diff_mode: bool,
+  verbosity: number,
+  unified_job_template: number,
+  enabled: bool,
+  dtstart: string,
+  dtend: string,
+  next_run: string,
+  timezone: string,
+  until: string,
+});
+
+export const SurveyQuestion = shape({
+  question_name: string,
+  question_description: string,
+  required: bool,
+  type: string,
+  variable: string,
+  min: number,
+  max: number,
+  default: string,
+  choices: string,
+});
+
+export const Survey = shape({
+  name: string,
+  description: string,
+  spec: arrayOf(SurveyQuestion),
+});

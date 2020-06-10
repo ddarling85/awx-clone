@@ -15,7 +15,6 @@ import awx
 from awx.main.utils import (
     get_system_task_capacity
 )
-from awx.main.queue import CallbackQueueDispatcher
 
 logger = logging.getLogger('awx.isolated.manager')
 playbook_logger = logging.getLogger('awx.isolated.manager.playbooks')
@@ -32,12 +31,14 @@ def set_pythonpath(venv_libdir, env):
 
 class IsolatedManager(object):
 
-    def __init__(self, canceled_callback=None, check_callback=None, pod_manager=None):
+    def __init__(self, event_handler, canceled_callback=None, check_callback=None, pod_manager=None):
         """
+        :param event_handler: a callable used to persist event data from isolated nodes
         :param canceled_callback:  a callable - which returns `True` or `False`
                                     - signifying if the job has been prematurely
                                       canceled
         """
+        self.event_handler = event_handler
         self.canceled_callback = canceled_callback
         self.check_callback = check_callback
         self.started_at = None
@@ -57,7 +58,7 @@ class IsolatedManager(object):
                 os.chmod(temp.name, stat.S_IRUSR | stat.S_IWUSR | stat.S_IXUSR)
             for host in hosts:
                 inventory['all']['hosts'][host] = {
-                    "ansible_connection": "kubectl",
+                    "ansible_connection": "community.kubernetes.kubectl",
                     "ansible_kubectl_config": path,
                 }
         else:
@@ -73,6 +74,7 @@ class IsolatedManager(object):
         env['ANSIBLE_RETRY_FILES_ENABLED'] = 'False'
         env['ANSIBLE_HOST_KEY_CHECKING'] = str(settings.AWX_ISOLATED_HOST_KEY_CHECKING)
         env['ANSIBLE_LIBRARY'] = os.path.join(os.path.dirname(awx.__file__), 'plugins', 'isolated')
+        env['ANSIBLE_COLLECTIONS_PATHS'] = settings.AWX_ANSIBLE_COLLECTIONS_PATHS
         set_pythonpath(os.path.join(settings.ANSIBLE_VENV_PATH, 'lib'), env)
 
         def finished_callback(runner_obj):
@@ -108,7 +110,6 @@ class IsolatedManager(object):
             'cancel_callback': self.canceled_callback,
             'settings': {
                 'job_timeout': settings.AWX_ISOLATED_LAUNCH_TIMEOUT,
-                'pexpect_timeout': getattr(settings, 'PEXPECT_TIMEOUT', 5),
                 'suppress_ansible_output': True,
             },
         }
@@ -208,7 +209,6 @@ class IsolatedManager(object):
         status = 'failed'
         rc = None
         last_check = time.time()
-        dispatcher = CallbackQueueDispatcher()
 
         while status == 'failed':
             canceled = self.canceled_callback() if self.canceled_callback else False
@@ -238,7 +238,7 @@ class IsolatedManager(object):
                     except json.decoder.JSONDecodeError:  # Just in case it's not fully here yet.
                         pass
 
-            self.consume_events(dispatcher)
+            self.consume_events()
 
             last_check = time.time()
 
@@ -266,19 +266,11 @@ class IsolatedManager(object):
 
         # consume events one last time just to be sure we didn't miss anything
         # in the final sync
-        self.consume_events(dispatcher)
-
-        # emit an EOF event
-        event_data = {
-            'event': 'EOF',
-            'final_counter': len(self.handled_events)
-        }
-        event_data.setdefault(self.event_data_key, self.instance.id)
-        dispatcher.dispatch(event_data)
+        self.consume_events()
 
         return status, rc
 
-    def consume_events(self, dispatcher):
+    def consume_events(self):
         # discover new events and ingest them
         events_path = self.path_to('artifacts', self.ident, 'job_events')
 
@@ -288,7 +280,7 @@ class IsolatedManager(object):
         if os.path.exists(events_path):
             for event in set(os.listdir(events_path)) - self.handled_events:
                 path = os.path.join(events_path, event)
-                if os.path.exists(path):
+                if os.path.exists(path) and os.path.isfile(path):
                     try:
                         event_data = json.load(
                             open(os.path.join(events_path, event), 'r')
@@ -302,15 +294,9 @@ class IsolatedManager(object):
                         # practice
                         # in this scenario, just ignore this event and try it
                         # again on the next sync
-                        pass
-                    event_data.setdefault(self.event_data_key, self.instance.id)
-                    dispatcher.dispatch(event_data)
+                        continue
+                    self.event_handler(event_data)
                     self.handled_events.add(event)
-
-                    # handle artifacts
-                    if event_data.get('event_data', {}).get('artifact_data', {}):
-                        self.instance.artifacts = event_data['event_data']['artifact_data']
-                        self.instance.save(update_fields=['artifacts'])
 
 
     def cleanup(self):
@@ -370,39 +356,37 @@ class IsolatedManager(object):
                 private_data_dir
             )
 
-            if runner_obj.status == 'successful':
-                for instance in instance_qs:
-                    task_result = {}
-                    try:
-                        task_result = runner_obj.get_fact_cache(instance.hostname)
-                    except Exception:
-                        logger.exception('Failed to read status from isolated instances')
-                    if 'awx_capacity_cpu' in task_result and 'awx_capacity_mem' in task_result:
-                        task_result = {
-                            'cpu': task_result['awx_cpu'],
-                            'mem': task_result['awx_mem'],
-                            'capacity_cpu': task_result['awx_capacity_cpu'],
-                            'capacity_mem': task_result['awx_capacity_mem'],
-                            'version': task_result['awx_capacity_version']
-                        }
-                        IsolatedManager.update_capacity(instance, task_result)
-                        logger.debug('Isolated instance {} successful heartbeat'.format(instance.hostname))
-                    elif instance.capacity == 0:
-                        logger.debug('Isolated instance {} previously marked as lost, could not re-join.'.format(
-                            instance.hostname))
-                    else:
-                        logger.warning('Could not update status of isolated instance {}'.format(instance.hostname))
-                        if instance.is_lost(isolated=True):
-                            instance.capacity = 0
-                            instance.save(update_fields=['capacity'])
-                            logger.error('Isolated instance {} last checked in at {}, marked as lost.'.format(
-                                instance.hostname, instance.modified))
+            for instance in instance_qs:
+                task_result = {}
+                try:
+                    task_result = runner_obj.get_fact_cache(instance.hostname)
+                except Exception:
+                    logger.exception('Failed to read status from isolated instances')
+                if 'awx_capacity_cpu' in task_result and 'awx_capacity_mem' in task_result:
+                    task_result = {
+                        'cpu': task_result['awx_cpu'],
+                        'mem': task_result['awx_mem'],
+                        'capacity_cpu': task_result['awx_capacity_cpu'],
+                        'capacity_mem': task_result['awx_capacity_mem'],
+                        'version': task_result['awx_capacity_version']
+                    }
+                    IsolatedManager.update_capacity(instance, task_result)
+                    logger.debug('Isolated instance {} successful heartbeat'.format(instance.hostname))
+                elif instance.capacity == 0:
+                    logger.debug('Isolated instance {} previously marked as lost, could not re-join.'.format(
+                        instance.hostname))
+                else:
+                    logger.warning('Could not update status of isolated instance {}'.format(instance.hostname))
+                    if instance.is_lost(isolated=True):
+                        instance.capacity = 0
+                        instance.save(update_fields=['capacity'])
+                        logger.error('Isolated instance {} last checked in at {}, marked as lost.'.format(
+                            instance.hostname, instance.modified))
         finally:
             if os.path.exists(private_data_dir):
                 shutil.rmtree(private_data_dir)
 
-    def run(self, instance, private_data_dir, playbook, module, module_args,
-            event_data_key, ident=None):
+    def run(self, instance, private_data_dir, playbook, module, module_args, ident=None):
         """
         Run a job on an isolated host.
 
@@ -413,14 +397,12 @@ class IsolatedManager(object):
         :param playbook:         the playbook to run
         :param module:           the module to run
         :param module_args:      the module args to use
-        :param event_data_key:   e.g., job_id, inventory_id, ...
 
         For a completed job run, this function returns (status, rc),
         representing the status and return code of the isolated
         `ansible-playbook` run.
         """
         self.ident = ident
-        self.event_data_key = event_data_key
         self.instance = instance
         self.private_data_dir = private_data_dir
         self.runner_params = self.build_runner_params(
@@ -431,9 +413,4 @@ class IsolatedManager(object):
         status, rc = self.dispatch(playbook, module, module_args)
         if status == 'successful':
             status, rc = self.check()
-        else:
-            # emit an EOF event
-            event_data = {'event': 'EOF', 'final_counter': 0}
-            event_data.setdefault(self.event_data_key, self.instance.id)
-            CallbackQueueDispatcher().dispatch(event_data)
         return status, rc

@@ -103,7 +103,8 @@ class TestComputedFields:
             Schedule.objects.filter(pk=s.pk).update(next_run=old_next_run)
             s.next_run = old_next_run
             prior_modified = s.modified
-            s.update_computed_fields()
+            with mock.patch('awx.main.models.schedules.emit_channel_notification'):
+                s.update_computed_fields()
             assert s.next_run != old_next_run
             assert s.modified == prior_modified
 
@@ -133,7 +134,8 @@ class TestComputedFields:
             assert s.next_run is None
             assert job_template.next_schedule is None
             s.rrule = self.distant_rrule
-            s.update_computed_fields()
+            with mock.patch('awx.main.models.schedules.emit_channel_notification'):
+                s.update_computed_fields()
             assert s.next_run is not None
             assert job_template.next_schedule == s
 
@@ -323,16 +325,19 @@ def test_dst_phantom_hour(job_template):
 
 
 @pytest.mark.django_db
+@pytest.mark.timeout(3)
 def test_beginning_of_time(job_template):
     # ensure that really large generators don't have performance issues
+    start = now()
     rrule = 'DTSTART:19700101T000000Z RRULE:FREQ=MINUTELY;INTERVAL=1'
     s = Schedule(
         name='Some Schedule',
         rrule=rrule,
         unified_job_template=job_template
     )
-    with pytest.raises(ValueError):
-        s.save()
+    s.save()
+    assert s.next_run > start
+    assert (s.next_run - start).total_seconds() < 60
 
 
 @pytest.mark.django_db
