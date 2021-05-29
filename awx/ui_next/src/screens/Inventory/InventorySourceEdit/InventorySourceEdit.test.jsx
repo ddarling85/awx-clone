@@ -8,9 +8,7 @@ import {
 import InventorySourceEdit from './InventorySourceEdit';
 import { CredentialsAPI, InventorySourcesAPI, ProjectsAPI } from '../../../api';
 
-jest.mock('../../../api/models/Projects');
-jest.mock('../../../api/models/Credentials');
-jest.mock('../../../api/models/InventorySources');
+jest.mock('../../../api');
 jest.mock('react-router-dom', () => ({
   ...jest.requireActual('react-router-dom'),
   useParams: () => ({
@@ -18,9 +16,8 @@ jest.mock('react-router-dom', () => ({
   }),
 }));
 
-describe('<InventorySourceAdd />', () => {
+describe('<InventorySourceEdit />', () => {
   let wrapper;
-  let history;
   const mockInvSrc = {
     id: 23,
     description: 'bar',
@@ -37,70 +34,76 @@ describe('<InventorySourceAdd />', () => {
     update_on_project_update: false,
     verbosity: 1,
   };
-  InventorySourcesAPI.readOptions.mockResolvedValue({
-    data: {
-      actions: {
-        GET: {
-          source: {
-            choices: [
-              ['file', 'File, Directory or Script'],
-              ['scm', 'Sourced from a Project'],
-              ['ec2', 'Amazon EC2'],
-              ['gce', 'Google Compute Engine'],
-              ['azure_rm', 'Microsoft Azure Resource Manager'],
-              ['vmware', 'VMware vCenter'],
-              ['satellite6', 'Red Hat Satellite 6'],
-              ['cloudforms', 'Red Hat CloudForms'],
-              ['openstack', 'OpenStack'],
-              ['rhv', 'Red Hat Virtualization'],
-              ['tower', 'Ansible Tower'],
-              ['custom', 'Custom Script'],
-            ],
+  const mockInventory = {
+    id: 1,
+    name: 'Foo',
+    organization: 1,
+  };
+  const history = createMemoryHistory();
+
+  beforeEach(async () => {
+    InventorySourcesAPI.readOptions.mockResolvedValue({
+      data: {
+        actions: {
+          GET: {
+            source: {
+              choices: [
+                ['file', 'File, Directory or Script'],
+                ['scm', 'Sourced from a Project'],
+                ['ec2', 'Amazon EC2'],
+                ['gce', 'Google Compute Engine'],
+                ['azure_rm', 'Microsoft Azure Resource Manager'],
+                ['vmware', 'VMware vCenter'],
+                ['satellite6', 'Red Hat Satellite 6'],
+                ['openstack', 'OpenStack'],
+                ['rhv', 'Red Hat Virtualization'],
+                ['tower', 'Ansible Tower'],
+              ],
+            },
           },
         },
       },
-    },
-  });
-  InventorySourcesAPI.replace.mockResolvedValue({
-    data: {
-      ...mockInvSrc,
-    },
-  });
-  ProjectsAPI.readInventories.mockResolvedValue({
-    data: [],
-  });
-  CredentialsAPI.read.mockResolvedValue({
-    data: { count: 0, results: [] },
-  });
-  ProjectsAPI.read.mockResolvedValue({
-    data: {
-      count: 2,
-      results: [
-        {
-          id: 1,
-          name: 'mock proj one',
-        },
-        {
-          id: 2,
-          name: 'mock proj two',
-        },
-      ],
-    },
-  });
+    });
+    InventorySourcesAPI.replace.mockResolvedValue({
+      data: {
+        ...mockInvSrc,
+      },
+    });
+    ProjectsAPI.readInventories.mockResolvedValue({
+      data: [],
+    });
+    CredentialsAPI.read.mockResolvedValue({
+      data: { count: 0, results: [] },
+    });
+    ProjectsAPI.read.mockResolvedValue({
+      data: {
+        count: 2,
+        results: [
+          {
+            id: 1,
+            name: 'mock proj one',
+          },
+          {
+            id: 2,
+            name: 'mock proj two',
+          },
+        ],
+      },
+    });
 
-  beforeAll(async () => {
-    history = createMemoryHistory();
     await act(async () => {
-      wrapper = mountWithContexts(<InventorySourceEdit source={mockInvSrc} />, {
-        context: { router: { history } },
-      });
+      wrapper = mountWithContexts(
+        <InventorySourceEdit inventory={mockInventory} source={mockInvSrc} />,
+        {
+          context: { router: { history } },
+        }
+      );
     });
     await waitForElement(wrapper, 'ContentLoading', el => el.length === 0);
   });
 
   afterAll(() => {
     jest.clearAllMocks();
-    wrapper.unmount();
   });
 
   test('handleSubmit should call api update', async () => {
@@ -118,7 +121,7 @@ describe('<InventorySourceAdd />', () => {
     );
   });
 
-  test('should navigate to inventory sources list when cancel is clicked', async () => {
+  test('should navigate to inventory source detail when cancel is clicked', async () => {
     await act(async () => {
       wrapper.find('button[aria-label="Cancel"]').invoke('onClick')();
     });
@@ -135,7 +138,9 @@ describe('<InventorySourceAdd />', () => {
     };
     InventorySourcesAPI.replace.mockImplementation(() => Promise.reject(error));
     await act(async () => {
-      wrapper = mountWithContexts(<InventorySourceEdit source={mockInvSrc} />);
+      wrapper = mountWithContexts(
+        <InventorySourceEdit inventory={mockInventory} source={mockInvSrc} />
+      );
     });
     expect(wrapper.find('FormSubmitError').length).toBe(0);
     await act(async () => {

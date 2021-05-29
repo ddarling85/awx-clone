@@ -5,6 +5,7 @@
 
 - name: generate random string for project
   set_fact:
+    org_name: "AWX-Collection-tests-tower_organization-org-{{ test_id }}"
     cred1: "AWX-Collection-tests-tower_job_template-cred1-{{ test_id }}"
     cred2: "AWX-Collection-tests-tower_job_template-cred2-{{ test_id }}"
     cred3: "AWX-Collection-tests-tower_job_template-cred3-{{ test_id }}"
@@ -13,7 +14,15 @@
     jt2: "AWX-Collection-tests-tower_job_template-jt2-{{ test_id }}"
     lab1: "AWX-Collection-tests-tower_job_template-lab1-{{ test_id }}"
     email_not: "AWX-Collection-tests-tower_job_template-email-not-{{ test_id }}"
-    webhook_not: "AWX-Collection-tests-tower_notification-wehbook-not-{{ test_id }}"
+    webhook_not: "AWX-Collection-tests-tower_notification_template-wehbook-not-{{ test_id }}"
+    group_name1: "AWX-Collection-tests-tower_instance_group-group1-{{ test_id }}"
+
+- name: "Create a new organization"
+  tower_organization:
+    name: "{{ org_name }}"
+    galaxy_credentials:
+      - Ansible Galaxy
+  register: result
 
 - name: Create a Demo Project
   tower_project:
@@ -22,14 +31,14 @@
     state: present
     scm_type: git
     scm_url: https://github.com/ansible/ansible-tower-samples.git
-
-  register: result
+  register: proj_result
 
 - name: Create Credential1
   tower_credential:
     name: "{{ cred1 }}"
     organization: Default
     kind: tower
+  register: cred1_result
 
 - name: Create Credential2
   tower_credential:
@@ -43,13 +52,26 @@
     organization: Default
     kind: ssh
 
-- name: Create Label
+- name: Create Labels
   tower_label:
     name: "{{ lab1 }}"
-    organization: Default
+    organization: "{{ item }}"
+  loop:
+    - Default
+    - "{{ org_name }}"
+
+- name: Create an Instance Group
+  tower_instance_group:
+    name: "{{ group_name1 }}"
+    state: present
+  register: result
+
+- assert:
+    that:
+      - "result is changed"
 
 - name: Add email notification
-  tower_notification:
+  tower_notification_template:
     name: "{{ email_not }}"
     organization: Default
     notification_type: email
@@ -65,7 +87,7 @@
     state: present
 
 - name: Add webhook notification
-  tower_notification:
+  tower_notification_template:
     name: "{{ webhook_not }}"
     organization: Default
     notification_type: webhook
@@ -81,22 +103,26 @@
     project: "{{ proj1 }}"
     inventory: Demo Inventory
     playbook: hello_world.yml
-    credentials: ["{{ cred1 }}", "{{ cred2 }}"]
+    credentials:
+      - "{{ cred1 }}"
+      - "{{ cred2 }}"
+    instance_groups:
+      - "{{ group_name1 }}"
     job_type: run
     state: present
-  register: result
+  register: jt1_result
 
 - assert:
     that:
-      - "result is changed"
+      - "jt1_result is changed"
 
 - name: Add a credential to this JT
   tower_job_template:
     name: "{{ jt1 }}"
-    project: "{{ proj1 }}"
+    project: "{{ proj_result.id }}"
     playbook: hello_world.yml
     credentials:
-      - "{{ cred1 }}"
+      - "{{ cred1_result.id }}"
   register: result
 
 - assert:
@@ -105,7 +131,7 @@
 
 - name: Try to add the same credential to this JT
   tower_job_template:
-    name: "{{ jt1 }}"
+    name: "{{ jt1_result.id }}"
     project: "{{ proj1 }}"
     playbook: hello_world.yml
     credentials:
@@ -155,6 +181,19 @@
     that:
       - "result is changed"
 
+- name: Copy Job Template
+  tower_job_template:
+    name: "copy_{{ jt1 }}"
+    copy_from: "{{ jt1 }}"
+    state: "present"
+
+- name: Delete copied Job Template
+  tower_job_template:
+    name: "copy_{{ jt1 }}"
+    job_type: run
+    state: absent
+  register: result
+
 # This doesnt work if you include the credentials parameter
 - name: Delete Job Template 1
   tower_job_template:
@@ -174,6 +213,7 @@
 - name: Create Job Template 2
   tower_job_template:
     name: "{{ jt2 }}"
+    organization: Default
     project: "{{ proj1 }}"
     inventory: Demo Inventory
     playbook: hello_world.yml
@@ -366,13 +406,24 @@
 # You can't delete a label directly so no cleanup needed
 
 - name: Delete email notification
-  tower_notification:
+  tower_notification_template:
     name: "{{ email_not }}"
     organization: Default
     state: absent
 
+- name: Delete the instance groups
+  tower_instance_group:
+    name: "{{ group_name1 }}"
+    state: absent
+
 - name: Delete webhook notification
-  tower_notification:
+  tower_notification_template:
     name: "{{ webhook_not }}"
     organization: Default
     state: absent
+
+- name: "Remove the organization"
+  tower_organization:
+    name: "{{ org_name }}"
+    state: absent
+  register: result

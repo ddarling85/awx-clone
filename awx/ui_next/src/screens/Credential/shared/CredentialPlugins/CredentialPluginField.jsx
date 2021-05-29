@@ -1,6 +1,6 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import PropTypes from 'prop-types';
-import { withI18n } from '@lingui/react';
+
 import { t } from '@lingui/macro';
 import { useField } from 'formik';
 import {
@@ -11,59 +11,57 @@ import {
   Tooltip,
 } from '@patternfly/react-core';
 import { KeyIcon } from '@patternfly/react-icons';
+import styles from '@patternfly/react-styles/css/components/Form/form';
+import { css } from '@patternfly/react-styles';
+import FieldWithPrompt from '../../../../components/FieldWithPrompt';
+import Popover from '../../../../components/Popover';
 import { CredentialPluginPrompt } from './CredentialPluginPrompt';
 import CredentialPluginSelected from './CredentialPluginSelected';
 
-function CredentialPluginField(props) {
-  const {
-    children,
-    id,
-    name,
-    label,
-    validate,
-    isRequired,
-    isDisabled,
-    i18n,
-  } = props;
+function CredentialPluginInput(props) {
+  const { children, isDisabled, isRequired, validated, fieldOptions } = props;
   const [showPluginWizard, setShowPluginWizard] = useState(false);
-  const [field, meta, helpers] = useField({ name, validate });
-  const isValid = !(meta.touched && meta.error);
+  const [inputField, meta, helpers] = useField(`inputs.${fieldOptions.id}`);
+  const [passwordPromptField] = useField(`passwordPrompts.${fieldOptions.id}`);
+
+  const disableFieldAndButtons =
+    !!passwordPromptField.value ||
+    !!(
+      meta.initialValue &&
+      meta.initialValue !== '' &&
+      meta.value === meta.initialValue
+    );
 
   return (
-    <FormGroup
-      fieldId={id}
-      helperTextInvalid={meta.error}
-      isRequired={isRequired}
-      isValid={isValid}
-      label={label}
-    >
-      {field?.value?.credential ? (
+    <>
+      {inputField?.value?.credential ? (
         <CredentialPluginSelected
-          credential={field?.value?.credential}
+          credential={inputField?.value?.credential}
           onClearPlugin={() => helpers.setValue('')}
           onEditPlugin={() => setShowPluginWizard(true)}
+          fieldId={fieldOptions.id}
         />
       ) : (
         <InputGroup>
           {React.cloneElement(children, {
-            ...field,
+            ...inputField,
             isRequired,
+            validated: validated ? 'default' : 'error',
+            isDisabled: disableFieldAndButtons,
             onChange: (_, event) => {
-              field.onChange(event);
+              inputField.onChange(event);
             },
           })}
           <Tooltip
-            content={i18n._(
-              t`Populate field from an external secret management system`
-            )}
+            content={t`Populate field from an external secret management system`}
           >
             <Button
+              ouiaId={`credential-field-${fieldOptions.id}-external-button`}
+              id={`credential-${fieldOptions.id}-external-button`}
               variant={ButtonVariant.control}
-              aria-label={i18n._(
-                t`Populate field from an external secret management system`
-              )}
+              aria-label={t`Populate field from an external secret management system`}
               onClick={() => setShowPluginWizard(true)}
-              isDisabled={isDisabled}
+              isDisabled={isDisabled || disableFieldAndButtons}
             >
               <KeyIcon />
             </Button>
@@ -72,7 +70,9 @@ function CredentialPluginField(props) {
       )}
       {showPluginWizard && (
         <CredentialPluginPrompt
-          initialValues={typeof field.value === 'object' ? field.value : {}}
+          initialValues={
+            typeof inputField.value === 'object' ? inputField.value : {}
+          }
           onClose={() => setShowPluginWizard(false)}
           onSubmit={val => {
             val.touched = true;
@@ -81,23 +81,81 @@ function CredentialPluginField(props) {
           }}
         />
       )}
-    </FormGroup>
+    </>
+  );
+}
+
+function CredentialPluginField(props) {
+  const { fieldOptions, isRequired, validated } = props;
+
+  const [, meta, helpers] = useField(`inputs.${fieldOptions.id}`);
+  const [passwordPromptField] = useField(`passwordPrompts.${fieldOptions.id}`);
+
+  const invalidHelperTextToDisplay = meta.error && meta.touched && (
+    <div
+      className={css(styles.formHelperText, styles.modifiers.error)}
+      id={`${fieldOptions.id}-helper`}
+      aria-live="polite"
+    >
+      {meta.error}
+    </div>
+  );
+
+  useEffect(() => {
+    if (passwordPromptField.value) {
+      helpers.setValue('');
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [passwordPromptField.value]);
+
+  return (
+    <>
+      {fieldOptions.ask_at_runtime ? (
+        <FieldWithPrompt
+          fieldId={`credential-${fieldOptions.id}`}
+          helperTextInvalid={meta.error}
+          isRequired={isRequired}
+          label={fieldOptions.label}
+          promptId={`credential-prompt-${fieldOptions.id}`}
+          promptName={`passwordPrompts.${fieldOptions.id}`}
+          tooltip={fieldOptions.help_text}
+        >
+          <CredentialPluginInput {...props} />
+          {invalidHelperTextToDisplay}
+        </FieldWithPrompt>
+      ) : (
+        <FormGroup
+          fieldId={`credential-${fieldOptions.id}`}
+          helperTextInvalid={meta.error}
+          isRequired={isRequired}
+          validated={validated ? 'default' : 'error'}
+          label={fieldOptions.label}
+          labelIcon={
+            fieldOptions.help_text && (
+              <Popover content={fieldOptions.help_text} />
+            )
+          }
+        >
+          <CredentialPluginInput {...props} />
+          {invalidHelperTextToDisplay}
+        </FormGroup>
+      )}
+    </>
   );
 }
 
 CredentialPluginField.propTypes = {
-  id: PropTypes.string.isRequired,
-  name: PropTypes.string.isRequired,
-  label: PropTypes.string.isRequired,
-  validate: PropTypes.func,
-  isRequired: PropTypes.bool,
+  fieldOptions: PropTypes.shape({
+    id: PropTypes.string.isRequired,
+    label: PropTypes.string.isRequired,
+  }).isRequired,
   isDisabled: PropTypes.bool,
+  isRequired: PropTypes.bool,
 };
 
 CredentialPluginField.defaultProps = {
-  validate: () => {},
-  isRequired: false,
   isDisabled: false,
+  isRequired: false,
 };
 
-export default withI18n()(CredentialPluginField);
+export default CredentialPluginField;

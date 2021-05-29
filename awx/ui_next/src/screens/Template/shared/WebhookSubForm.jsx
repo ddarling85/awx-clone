@@ -2,32 +2,31 @@ import React, { useEffect, useCallback } from 'react';
 import { SyncAltIcon } from '@patternfly/react-icons';
 import { useParams, useLocation } from 'react-router-dom';
 import { t } from '@lingui/macro';
-import { withI18n } from '@lingui/react';
+
 import {
   FormGroup,
   TextInput,
   InputGroup,
   Button,
 } from '@patternfly/react-core';
-import { useField } from 'formik';
+import { useField, useFormikContext } from 'formik';
 import ContentError from '../../../components/ContentError';
 import ContentLoading from '../../../components/ContentLoading';
 import useRequest from '../../../util/useRequest';
 import { FormColumnLayout } from '../../../components/FormLayout';
 import { CredentialLookup } from '../../../components/Lookup';
 import AnsibleSelect from '../../../components/AnsibleSelect';
-import { FieldTooltip } from '../../../components/FormField';
+import Popover from '../../../components/Popover';
 import {
   JobTemplatesAPI,
   WorkflowJobTemplatesAPI,
   CredentialTypesAPI,
 } from '../../../api';
 
-function WebhookSubForm({ i18n, enableWebhooks, templateType }) {
+function WebhookSubForm({ templateType }) {
+  const { setFieldValue } = useFormikContext();
   const { id } = useParams();
-
   const { pathname } = useLocation();
-
   const { origin } = document.location;
 
   const [
@@ -35,10 +34,7 @@ function WebhookSubForm({ i18n, enableWebhooks, templateType }) {
     webhookServiceMeta,
     webhookServiceHelpers,
   ] = useField('webhook_service');
-
-  const [webhookUrlField, webhookUrlMeta, webhookUrlHelpers] = useField(
-    'webhook_url'
-  );
+  const [webhookUrlField, , webhookUrlHelpers] = useField('webhook_url');
   const [webhookKeyField, webhookKeyMeta, webhookKeyHelpers] = useField(
     'webhook_key'
   );
@@ -71,21 +67,6 @@ function WebhookSubForm({ i18n, enableWebhooks, templateType }) {
     loadCredentialType();
   }, [loadCredentialType]);
 
-  useEffect(() => {
-    if (enableWebhooks) {
-      webhookServiceHelpers.setValue(webhookServiceMeta.initialValue);
-      webhookUrlHelpers.setValue(webhookUrlMeta.initialValue);
-      webhookKeyHelpers.setValue(webhookKeyMeta.initialValue);
-      webhookCredentialHelpers.setValue(webhookCredentialMeta.initialValue);
-    } else {
-      webhookServiceHelpers.setValue('');
-      webhookUrlHelpers.setValue('');
-      webhookKeyHelpers.setValue('');
-      webhookCredentialHelpers.setValue(null);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [enableWebhooks]);
-
   const { request: fetchWebhookKey, error: webhookKeyError } = useRequest(
     useCallback(async () => {
       const updateWebhookKey =
@@ -102,6 +83,14 @@ function WebhookSubForm({ i18n, enableWebhooks, templateType }) {
   const changeWebhookKey = async () => {
     await fetchWebhookKey();
   };
+
+  const onCredentialChange = useCallback(
+    value => {
+      setFieldValue('webhook_credential', value || null);
+    },
+    [setFieldValue]
+  );
+
   const isUpdateKeyDisabled =
     pathname.endsWith('/add') ||
     webhookKeyMeta.initialValue ===
@@ -110,19 +99,19 @@ function WebhookSubForm({ i18n, enableWebhooks, templateType }) {
     {
       value: '',
       key: '',
-      label: i18n._(t`Choose a Webhook Service`),
+      label: t`Choose a Webhook Service`,
       isDisabled: true,
     },
     {
       value: 'github',
       key: 'github',
-      label: i18n._(t`GitHub`),
+      label: t`GitHub`,
       isDisabled: false,
     },
     {
       value: 'gitlab',
       key: 'gitlab',
-      label: i18n._(t`GitLab`),
+      label: t`GitLab`,
       isDisabled: false,
     },
   ];
@@ -134,108 +123,99 @@ function WebhookSubForm({ i18n, enableWebhooks, templateType }) {
     return <ContentLoading />;
   }
   return (
-    enableWebhooks && (
-      <FormColumnLayout>
-        <FormGroup
-          name="webhook_service"
-          fieldId="webhook_service"
-          helperTextInvalid={webhookServiceMeta.error}
-          label={i18n._(t`Webhook Service`)}
-        >
-          <FieldTooltip content={i18n._(t`Select a webhook service.`)} />
-          <AnsibleSelect
-            {...webhookServiceField}
-            id="webhook_service"
-            data={webhookServiceOptions}
-            onChange={(event, val) => {
-              webhookServiceHelpers.setValue(val);
-              webhookUrlHelpers.setValue(
-                pathname.endsWith('/add')
-                  ? i18n
-                      ._(t`a new webhook url will be generated on save.`)
-                      .toUpperCase()
-                  : `${origin}/api/v2/${templateType}s/${id}/${val}/`
+    <FormColumnLayout>
+      <FormGroup
+        name="webhook_service"
+        fieldId="webhook_service"
+        helperTextInvalid={webhookServiceMeta.error}
+        label={t`Webhook Service`}
+        labelIcon={<Popover content={t`Select a webhook service.`} />}
+      >
+        <AnsibleSelect
+          {...webhookServiceField}
+          id="webhook_service"
+          data={webhookServiceOptions}
+          onChange={(event, val) => {
+            webhookServiceHelpers.setValue(val);
+            webhookUrlHelpers.setValue(
+              pathname.endsWith('/add')
+                ? t`a new webhook url will be generated on save.`.toUpperCase()
+                : `${origin}/api/v2/${templateType}s/${id}/${val}/`
+            );
+            if (val === webhookServiceMeta.initialValue || val === '') {
+              webhookKeyHelpers.setValue(webhookKeyMeta.initialValue);
+              webhookCredentialHelpers.setValue(
+                webhookCredentialMeta.initialValue
               );
-              if (val === webhookServiceMeta.initialValue || val === '') {
-                webhookKeyHelpers.setValue(webhookKeyMeta.initialValue);
-                webhookCredentialHelpers.setValue(
-                  webhookCredentialMeta.initialValue
-                );
-              } else {
-                webhookKeyHelpers.setValue(
-                  i18n
-                    ._(t`a new webhook key will be generated on save.`)
-                    .toUpperCase()
-                );
-                webhookCredentialHelpers.setValue(null);
-              }
-            }}
+            } else {
+              webhookKeyHelpers.setValue(
+                t`a new webhook key will be generated on save.`.toUpperCase()
+              );
+              webhookCredentialHelpers.setValue(null);
+            }
+          }}
+        />
+      </FormGroup>
+      <>
+        <FormGroup
+          type="text"
+          fieldId="jt-webhookURL"
+          label={t`Webhook URL`}
+          labelIcon={
+            <Popover
+              content={t`Webhook services can launch jobs with this workflow job template by making a POST request to this URL.`}
+            />
+          }
+          name="webhook_url"
+        >
+          <TextInput
+            id="t-webhookURL"
+            aria-label={t`Webhook URL`}
+            value={webhookUrlField.value}
+            isReadOnly
           />
         </FormGroup>
-        <>
-          <FormGroup
-            type="text"
-            fieldId="jt-webhookURL"
-            label={i18n._(t`Webhook URL`)}
-            name="webhook_url"
-          >
-            <FieldTooltip
-              content={i18n._(
-                t`Webhook services can launch jobs with this workflow job template by making a POST request to this URL.`
-              )}
+        <FormGroup
+          label={t`Webhook Key`}
+          labelIcon={
+            <Popover
+              content={t`Webhook services can use this as a shared secret.`}
             />
+          }
+          fieldId="template-webhook_key"
+        >
+          <InputGroup>
             <TextInput
-              id="t-webhookURL"
-              aria-label={i18n._(t`Webhook URL`)}
-              value={webhookUrlField.value}
+              id="template-webhook_key"
               isReadOnly
+              aria-label={t`workflow job template webhook key`}
+              value={webhookKeyField.value}
             />
-          </FormGroup>
-          <FormGroup
-            label={i18n._(t`Webhook Key`)}
-            fieldId="template-webhook_key"
-          >
-            <FieldTooltip
-              content={i18n._(
-                t`Webhook services can use this as a shared secret.`
-              )}
-            />
-            <InputGroup>
-              <TextInput
-                id="template-webhook_key"
-                isReadOnly
-                aria-label="wfjt-webhook-key"
-                value={webhookKeyField.value}
-              />
-              <Button
-                isDisabled={isUpdateKeyDisabled}
-                variant="tertiary"
-                aria-label={i18n._(t`Update webhook key`)}
-                onClick={changeWebhookKey}
-              >
-                <SyncAltIcon />
-              </Button>
-            </InputGroup>
-          </FormGroup>
-        </>
+            <Button
+              ouiaId="update-webhook-key-button"
+              isDisabled={isUpdateKeyDisabled}
+              variant="tertiary"
+              aria-label={t`Update webhook key`}
+              onClick={changeWebhookKey}
+            >
+              <SyncAltIcon />
+            </Button>
+          </InputGroup>
+        </FormGroup>
+      </>
 
-        {credTypeId && (
-          <CredentialLookup
-            label={i18n._(t`Webhook Credential`)}
-            tooltip={i18n._(
-              t`Optionally select the credential to use to send status updates back to the webhook service.`
-            )}
-            credentialTypeId={credTypeId}
-            onChange={value => {
-              webhookCredentialHelpers.setValue(value || null);
-            }}
-            isValid={!webhookCredentialMeta.error}
-            helperTextInvalid={webhookCredentialMeta.error}
-            value={webhookCredentialField.value}
-          />
-        )}
-      </FormColumnLayout>
-    )
+      {credTypeId && (
+        <CredentialLookup
+          label={t`Webhook Credential`}
+          tooltip={t`Optionally select the credential to use to send status updates back to the webhook service.`}
+          credentialTypeId={credTypeId}
+          onChange={onCredentialChange}
+          isValid={!webhookCredentialMeta.error}
+          helperTextInvalid={webhookCredentialMeta.error}
+          value={webhookCredentialField.value}
+        />
+      )}
+    </FormColumnLayout>
   );
 }
-export default withI18n()(WebhookSubForm);
+export default WebhookSubForm;

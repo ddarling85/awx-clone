@@ -1,22 +1,21 @@
+from contextlib import suppress
+
 from awxkit.api.pages import UnifiedJob
 from awxkit.api.resources import resources
 import awxkit.exceptions as exc
-from awxkit.utils import suppress
 from . import page
 from . import base
 
 
 class Schedule(UnifiedJob):
 
-    pass
+    NATURAL_KEY = ('unified_job_template', 'name')
 
 
-page.register_page([resources.schedule,
-                    resources.related_schedule], Schedule)
+page.register_page([resources.schedule, resources.related_schedule], Schedule)
 
 
 class Schedules(page.PageList, Schedule):
-
     def get_zoneinfo(self):
         return SchedulesZoneInfo(self.connection).get()
 
@@ -33,8 +32,7 @@ class Schedules(page.PageList, Schedule):
             self.related.credentials.post(dict(id=cred.id, disassociate=True))
 
 
-page.register_page([resources.schedules,
-                    resources.related_schedules], Schedules)
+page.register_page([resources.schedules, resources.related_schedules], Schedules)
 
 
 class SchedulesPreview(base.Base):
@@ -46,7 +44,6 @@ page.register_page(((resources.schedules_preview, 'post'),), SchedulesPreview)
 
 
 class SchedulesZoneInfo(base.Base):
-
     def __getitem__(self, idx):
         return self.json[idx]
 

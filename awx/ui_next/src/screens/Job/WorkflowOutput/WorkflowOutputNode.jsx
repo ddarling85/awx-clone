@@ -1,6 +1,6 @@
 import React, { useContext } from 'react';
 import { useHistory } from 'react-router-dom';
-import { withI18n } from '@lingui/react';
+
 import { t } from '@lingui/macro';
 import styled from 'styled-components';
 import { func, shape } from 'prop-types';
@@ -59,29 +59,39 @@ const NodeDefaultLabel = styled.p`
   white-space: nowrap;
 `;
 
+const ConvergenceLabel = styled.p`
+  font-size: 12px;
+  color: #ffffff;
+`;
+
 Elapsed.displayName = 'Elapsed';
 
-function WorkflowOutputNode({ i18n, mouseEnter, mouseLeave, node }) {
+function WorkflowOutputNode({ mouseEnter, mouseLeave, node }) {
   const history = useHistory();
   const { nodePositions } = useContext(WorkflowStateContext);
+  const job = node?.originalNodeObject?.summary_fields?.job;
+  const jobName =
+    node?.originalNodeObject?.summary_fields?.unified_job_template?.name ||
+    node?.unifiedJobTemplate?.name;
+
   let borderColor = '#93969A';
 
-  if (node.job) {
+  if (job) {
     if (
-      node.job.status === 'failed' ||
-      node.job.status === 'error' ||
-      node.job.status === 'canceled'
+      job.status === 'failed' ||
+      job.status === 'error' ||
+      job.status === 'canceled'
     ) {
       borderColor = '#d9534f';
     }
-    if (node.job.status === 'successful' || node.job.status === 'ok') {
+    if (job.status === 'successful' || job.status === 'ok') {
       borderColor = '#5cb85c';
     }
   }
 
   const handleNodeClick = () => {
-    if (node.job && node.job.type !== 'workflow_aproval') {
-      history.push(`/jobs/${node.job.id}/details`);
+    if (job && job.type !== 'workflow_aproval') {
+      history.push(`/jobs/${job.id}/details`);
     }
   };
 
@@ -90,11 +100,35 @@ function WorkflowOutputNode({ i18n, mouseEnter, mouseLeave, node }) {
       id={`node-${node.id}`}
       transform={`translate(${nodePositions[node.id].x},${nodePositions[node.id]
         .y - nodePositions[1].y})`}
-      job={node.job}
+      job={job}
       onClick={handleNodeClick}
       onMouseEnter={mouseEnter}
       onMouseLeave={mouseLeave}
     >
+      {(node.all_parents_must_converge ||
+        node?.originalNodeObject?.all_parents_must_converge) && (
+        <>
+          <rect
+            fill={borderColor}
+            height={wfConstants.nodeH / 4}
+            rx={2}
+            ry={2}
+            x={wfConstants.nodeW / 2 - wfConstants.nodeW / 10}
+            y={-wfConstants.nodeH / 4 + 2}
+            stroke={borderColor}
+            strokeWidth="2px"
+            width={wfConstants.nodeW / 5}
+          />
+          <foreignObject
+            height={wfConstants.nodeH / 4}
+            width={wfConstants.nodeW / 5}
+            x={wfConstants.nodeW / 2 - wfConstants.nodeW / 10 + 7}
+            y={-wfConstants.nodeH / 4 - 1}
+          >
+            <ConvergenceLabel>{t`ALL`}</ConvergenceLabel>
+          </foreignObject>
+        </>
+      )}
       <rect
         fill="#FFFFFF"
         height={wfConstants.nodeH}
@@ -106,24 +140,22 @@ function WorkflowOutputNode({ i18n, mouseEnter, mouseLeave, node }) {
       />
       <foreignObject height="58" width="178" x="1" y="1">
         <NodeContents>
-          {node.job ? (
+          {job ? (
             <>
               <JobTopLine>
-                {node.job.status && <StatusIcon status={node.job.status} />}
-                <p>{node.job.name}</p>
+                {job.status !== 'pending' && <StatusIcon status={job.status} />}
+                <p>{jobName}</p>
               </JobTopLine>
-              <Elapsed>{secondsToHHMMSS(node.job.elapsed)}</Elapsed>
+              {!!job?.elapsed && (
+                <Elapsed>{secondsToHHMMSS(job.elapsed)}</Elapsed>
+              )}
             </>
           ) : (
-            <NodeDefaultLabel>
-              {node.unifiedJobTemplate
-                ? node.unifiedJobTemplate.name
-                : i18n._(t`DELETED`)}
-            </NodeDefaultLabel>
+            <NodeDefaultLabel>{jobName || t`DELETED`}</NodeDefaultLabel>
           )}
         </NodeContents>
       </foreignObject>
-      {(node.unifiedJobTemplate || node.job) && (
+      {(node.unifiedJobTemplate || job) && (
         <WorkflowNodeTypeLetter node={node} />
       )}
     </NodeG>
@@ -136,4 +168,4 @@ WorkflowOutputNode.propTypes = {
   node: shape().isRequired,
 };
 
-export default withI18n()(WorkflowOutputNode);
+export default WorkflowOutputNode;

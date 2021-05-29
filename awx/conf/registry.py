@@ -69,10 +69,7 @@ class SettingsRegistry(object):
         return self._dependent_settings.get(setting, set())
 
     def get_registered_categories(self):
-        categories = {
-            'all': _('All'),
-            'changed': _('Changed'),
-        }
+        categories = {'all': _('All'), 'changed': _('Changed')}
         for setting, kwargs in self._registry.items():
             category_slug = kwargs.get('category_slug', None)
             if category_slug is None or category_slug in categories:
@@ -95,8 +92,7 @@ class SettingsRegistry(object):
                 continue
             if kwargs.get('category_slug', None) in slugs_to_ignore:
                 continue
-            if (read_only in {True, False} and kwargs.get('read_only', False) != read_only and
-                    setting not in ('INSTALL_UUID', 'AWX_ISOLATED_PRIVATE_KEY', 'AWX_ISOLATED_PUBLIC_KEY')):
+            if read_only in {True, False} and kwargs.get('read_only', False) != read_only and setting != 'INSTALL_UUID':
                 # Note: Doesn't catch fields that set read_only via __init__;
                 # read-only field kwargs should always include read_only=True.
                 continue
@@ -117,6 +113,7 @@ class SettingsRegistry(object):
 
     def get_setting_field(self, setting, mixin_class=None, for_user=False, **kwargs):
         from rest_framework.fields import empty
+
         field_kwargs = {}
         field_kwargs.update(self._registry[setting])
         field_kwargs.update(kwargs)
@@ -129,21 +126,19 @@ class SettingsRegistry(object):
         placeholder = field_kwargs.pop('placeholder', empty)
         encrypted = bool(field_kwargs.pop('encrypted', False))
         defined_in_file = bool(field_kwargs.pop('defined_in_file', False))
+        unit = field_kwargs.pop('unit', None)
         if getattr(field_kwargs.get('child', None), 'source', None) is not None:
             field_kwargs['child'].source = None
         field_instance = field_class(**field_kwargs)
         field_instance.category_slug = category_slug
         field_instance.category = category
         field_instance.depends_on = depends_on
+        field_instance.unit = unit
         if placeholder is not empty:
             field_instance.placeholder = placeholder
         field_instance.defined_in_file = defined_in_file
         if field_instance.defined_in_file:
-            field_instance.help_text = (
-                str(_('This value has been set manually in a settings file.')) +
-                '\n\n' +
-                str(field_instance.help_text)
-            )
+            field_instance.help_text = str(_('This value has been set manually in a settings file.')) + '\n\n' + str(field_instance.help_text)
         field_instance.encrypted = encrypted
         original_field_instance = field_instance
         if field_class != original_field_class:

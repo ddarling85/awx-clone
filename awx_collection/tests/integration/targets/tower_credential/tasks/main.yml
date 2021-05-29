@@ -17,7 +17,6 @@
     aws_cred_name1: "AWX-Collection-tests-tower_credential-aws-cred1-{{ test_id }}"
     vmware_cred_name1: "AWX-Collection-tests-tower_credential-vmware-cred1-{{ test_id }}"
     sat6_cred_name1: "AWX-Collection-tests-tower_credential-sat6-cred1-{{ test_id }}"
-    cf_cred_name1: "AWX-Collection-tests-tower_credential-cf-cred1-{{ test_id }}"
     gce_cred_name1: "AWX-Collection-tests-tower_credential-gce-cred1-{{ test_id }}"
     azurerm_cred_name1: "AWX-Collection-tests-tower_credential-azurerm-cred1-{{ test_id }}"
     openstack_cred_name1: "AWX-Collection-tests-tower_credential-openstack-cred1-{{ test_id }}"
@@ -40,7 +39,6 @@
   tower_credential:
     name: "{{ ssh_cred_name1 }}"
     organization: Default
-    user: admin
     kind: ssh
     authorize: false
     authorize_password: 'test'
@@ -71,11 +69,10 @@
       # The 20 comes from the length of OLD_INPUT_NAMES + 1 for kind
       - result['deprecations'] | length() == 20
 
-- name: Create a User-specific credential (old school)
+- name: Create an Org-specific credential (old school)
   tower_credential:
     name: "{{ ssh_cred_name1 }}"
     organization: Default
-    user: admin
     state: present
     kind: ssh
   register: result
@@ -84,11 +81,10 @@
     that:
       - "result is changed"
 
-- name: Re-create the User-specific credential (new school)
+- name: Re-create the Org-specific credential (new school) with an ID
   tower_credential:
-    name: "{{ ssh_cred_name1 }}"
+    name: "{{ result.id }}"
     organization: Default
-    user: admin
     credential_type: 'Machine'
     state: present
   register: result
@@ -97,11 +93,10 @@
     that:
       - "result is not changed"
 
-- name: Delete a User-specific credential
+- name: Delete a Org-specific credential
   tower_credential:
     name: "{{ ssh_cred_name1 }}"
     organization: Default
-    user: admin
     state: absent
     kind: ssh
   register: result
@@ -110,7 +105,7 @@
     that:
       - "result is changed"
 
-- name: Create the User-specific credential tied to a user, no org
+- name: Create the User-specific credential
   tower_credential:
     name: "{{ ssh_cred_name1 }}"
     user: admin
@@ -194,6 +189,42 @@
 - assert:
     that:
       - result is changed
+
+- name: Check for inputs idempotency (when "inputs" is blank)
+  tower_credential:
+    name: "{{ ssh_cred_name2 }}"
+    organization: Default
+    state: present
+    credential_type: Machine
+    description: An example SSH credential
+  register: result
+
+- assert:
+    that:
+      - result is not changed
+
+- name: Copy ssh Credential
+  tower_credential:
+    name: "copy_{{ ssh_cred_name2 }}"
+    copy_from: "{{ ssh_cred_name2 }}"
+    credential_type: Machine
+  register: result
+
+- assert:
+    that:
+      - result.copied
+
+- name: Delete an SSH credential
+  tower_credential:
+    name: "copy_{{ ssh_cred_name2 }}"
+    organization: Default
+    state: absent
+    credential_type: Machine
+  register: result
+
+- assert:
+    that:
+      - "result is changed"
 
 - name: Create a valid SSH credential from lookup source (old school)
   tower_credential:
@@ -279,7 +310,7 @@
 - name: Create an invalid SSH credential (Organization not found)
   tower_credential:
     name: SSH Credential
-    organization: Missing Organization
+    organization: Missing_Organization
     state: present
     kind: ssh
     username: joe
@@ -289,7 +320,9 @@
 - assert:
     that:
       - "result is failed"
-      - "'The organizations Missing Organization was not found on the Tower server' in result.msg"
+      - "result is not changed"
+      - "'Missing_Organization' in result.msg"
+      - "result.total_results == 0"
 
 - name: Delete an SSH credential
   tower_credential:
@@ -341,25 +374,6 @@
 - assert:
     that:
       - "result is changed"
-
-# We should decide when to delete this test
-- name: Create a valid Vault credential w/ kind=ssh (deprecated, will now fail)
-  tower_credential:
-    name: "{{ vault_cred_name2 }}"
-    organization: Default
-    state: present
-    kind: ssh
-    description: An example Vault credential
-    vault_password: secret-vault
-  register: result
-  ignore_errors: true
-
-- assert:
-    that:
-      - result is failed
-      - "'Unable to create credential {{ vault_cred_name2 }}' in result.msg"
-      - "'Additional properties are not allowed' in result.msg"
-      - "'\\'vault_password\\' was unexpected' in result.msg"
 
 - name: Delete a Vault credential
   tower_credential:
@@ -517,33 +531,6 @@
     organization: Default
     state: absent
     kind: satellite6
-  register: result
-
-- assert:
-    that:
-      - "result is changed"
-
-- name: Create a valid CloudForms credential
-  tower_credential:
-    name: "{{ cf_cred_name1 }}"
-    organization: Default
-    state: present
-    kind: cloudforms
-    host: https://example.org
-    username: joe
-    password: secret
-  register: result
-
-- assert:
-    that:
-      - "result is changed"
-
-- name: Delete a CloudForms credential
-  tower_credential:
-    name: "{{ cf_cred_name1 }}"
-    organization: Default
-    state: absent
-    kind: cloudforms
   register: result
 
 - assert:
@@ -741,5 +728,7 @@
 
 - assert:
     that:
-      - result is failed
-      - "result.msg =='The organizations test-non-existing-org was not found on the Tower server'"
+      - "result is failed"
+      - "result is not changed"
+      - "'test-non-existing-org' in result.msg"
+      - "result.total_results == 0"

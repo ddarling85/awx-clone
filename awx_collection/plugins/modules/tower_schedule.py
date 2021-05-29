@@ -6,12 +6,11 @@
 # GNU General Public License v3.0+ (see COPYING or https://www.gnu.org/licenses/gpl-3.0.txt)
 
 from __future__ import absolute_import, division, print_function
+
 __metaclass__ = type
 
 
-ANSIBLE_METADATA = {'metadata_version': '1.1',
-                    'status': ['preview'],
-                    'supported_by': 'community'}
+ANSIBLE_METADATA = {'metadata_version': '1.1', 'status': ['preview'], 'supported_by': 'community'}
 
 DOCUMENTATION = '''
 ---
@@ -136,7 +135,7 @@ EXAMPLES = '''
   register: result
 '''
 
-from ..module_utils.tower_api import TowerModule
+from ..module_utils.tower_api import TowerAPIModule
 
 
 def main():
@@ -161,7 +160,7 @@ def main():
     )
 
     # Create a module for ourselves
-    module = TowerModule(argument_spec=argument_spec)
+    module = TowerAPIModule(argument_spec=argument_spec)
 
     # Extract our parameters
     rrule = module.params.get('rrule')
@@ -190,17 +189,13 @@ def main():
         unified_job_template_id = module.resolve_name_to_id('unified_job_templates', unified_job_template)
 
     # Attempt to look up an existing item based on the provided data
-    existing_item = module.get_one('schedules', **{
-        'data': {
-            'name': name,
-        }
-    })
+    existing_item = module.get_one('schedules', name_or_id=name)
 
     # Create the data that gets sent for create and update
     new_fields = {}
     if rrule is not None:
         new_fields['rrule'] = rrule
-    new_fields['name'] = new_name if new_name else name
+    new_fields['name'] = new_name if new_name else (module.get_item_name(existing_item) if existing_item else name)
     if description is not None:
         new_fields['description'] = description
     if extra_data is not None:
@@ -231,12 +226,7 @@ def main():
         module.delete_if_needed(existing_item)
     elif state == 'present':
         # If the state was present and we can let the module build or update the existing item, this will return on its own
-        module.create_or_update_if_needed(
-            existing_item, new_fields,
-            endpoint='schedules', item_type='schedule',
-            associations={
-            }
-        )
+        module.create_or_update_if_needed(existing_item, new_fields, endpoint='schedules', item_type='schedule', associations={})
 
 
 if __name__ == '__main__':

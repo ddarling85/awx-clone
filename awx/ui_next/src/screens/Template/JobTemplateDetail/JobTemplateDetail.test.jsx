@@ -5,7 +5,7 @@ import {
   waitForElement,
 } from '../../../../testUtils/enzymeHelpers';
 import JobTemplateDetail from './JobTemplateDetail';
-import { JobTemplatesAPI } from '../../../api';
+import { JobTemplatesAPI, WorkflowJobTemplateNodesAPI } from '../../../api';
 import mockTemplate from '../shared/data.job_template.json';
 
 jest.mock('../../../api');
@@ -25,6 +25,7 @@ describe('<JobTemplateDetail />', () => {
 
   beforeEach(async () => {
     JobTemplatesAPI.readInstanceGroups.mockResolvedValue(mockInstanceGroups);
+    WorkflowJobTemplateNodesAPI.read.mockResolvedValue({ data: { count: 0 } });
     await act(async () => {
       wrapper = mountWithContexts(
         <JobTemplateDetail template={mockTemplate} />
@@ -56,12 +57,28 @@ describe('<JobTemplateDetail />', () => {
     );
   });
 
+  test('should have proper number of delete detail requests', async () => {
+    await act(async () => {
+      wrapper = mountWithContexts(
+        <JobTemplateDetail
+          template={{
+            ...mockTemplate,
+            become_enabled: true,
+            summary_fields: { user_capabilities: { delete: true } },
+          }}
+        />
+      );
+    });
+    expect(
+      wrapper.find('DeleteButton').prop('deleteDetailsRequests')
+    ).toHaveLength(1);
+  });
+
   test('should request instance groups from api', async () => {
     expect(JobTemplatesAPI.readInstanceGroups).toHaveBeenCalledTimes(1);
   });
 
   test('should hide edit button for users without edit permission', async () => {
-    JobTemplatesAPI.readInstanceGroups.mockResolvedValue({ data: {} });
     await act(async () => {
       wrapper = mountWithContexts(
         <JobTemplateDetail
@@ -143,6 +160,7 @@ describe('<JobTemplateDetail />', () => {
       el => el.length === 0
     );
   });
+
   test('webhook fields should render properly', () => {
     expect(wrapper.find('Detail[label="Webhook Service"]').length).toBe(1);
     expect(wrapper.find('Detail[label="Webhook Service"]').prop('value')).toBe(
@@ -154,5 +172,14 @@ describe('<JobTemplateDetail />', () => {
     );
     expect(wrapper.find('Detail[label="Webhook Key"]').length).toBe(1);
     expect(wrapper.find('Detail[label="Webhook Credential"]').length).toBe(1);
+  });
+
+  test('execution environment field should render properly', () => {
+    expect(wrapper.find('Detail[label="Execution Environment"]').length).toBe(
+      1
+    );
+    expect(
+      wrapper.find(`Detail[label="Execution Environment"] dd`).text()
+    ).toBe('Default EE');
   });
 });

@@ -6,12 +6,11 @@
 # GNU General Public License v3.0+ (see COPYING or https://www.gnu.org/licenses/gpl-3.0.txt)
 
 from __future__ import absolute_import, division, print_function
+
 __metaclass__ = type
 
 
-ANSIBLE_METADATA = {'metadata_version': '1.1',
-                    'status': ['preview'],
-                    'supported_by': 'community'}
+ANSIBLE_METADATA = {'metadata_version': '1.1', 'status': ['preview'], 'supported_by': 'community'}
 
 DOCUMENTATION = '''
 ---
@@ -54,7 +53,7 @@ EXAMPLES = '''
     organization: My Organization
 '''
 
-from ..module_utils.tower_api import TowerModule
+from ..module_utils.tower_api import TowerAPIModule
 
 
 def main():
@@ -67,7 +66,7 @@ def main():
     )
 
     # Create a module for ourselves
-    module = TowerModule(argument_spec=argument_spec)
+    module = TowerAPIModule(argument_spec=argument_spec)
 
     # Extract our parameters
     name = module.params.get('name')
@@ -80,25 +79,23 @@ def main():
         organization_id = module.resolve_name_to_id('organizations', organization)
 
     # Attempt to look up an existing item based on the provided data
-    existing_item = module.get_one('labels', **{
-        'data': {
-            'name': name,
-            'organization': organization_id,
+    existing_item = module.get_one(
+        'labels',
+        name_or_id=name,
+        **{
+            'data': {
+                'organization': organization_id,
+            }
         }
-    })
+    )
 
     # Create the data that gets sent for create and update
     new_fields = {}
-    new_fields['name'] = new_name if new_name else name
+    new_fields['name'] = new_name if new_name else (module.get_item_name(existing_item) if existing_item else name)
     if organization:
         new_fields['organization'] = organization_id
 
-    module.create_or_update_if_needed(
-        existing_item, new_fields,
-        endpoint='labels', item_type='label',
-        associations={
-        }
-    )
+    module.create_or_update_if_needed(existing_item, new_fields, endpoint='labels', item_type='label', associations={})
 
 
 if __name__ == '__main__':

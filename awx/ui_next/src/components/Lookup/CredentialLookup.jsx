@@ -1,15 +1,24 @@
 import React, { useCallback, useEffect } from 'react';
-import { bool, func, node, number, string, oneOfType } from 'prop-types';
-import { withRouter } from 'react-router-dom';
-import { withI18n } from '@lingui/react';
+import { useHistory } from 'react-router-dom';
+import {
+  arrayOf,
+  bool,
+  func,
+  node,
+  number,
+  string,
+  oneOfType,
+} from 'prop-types';
+
 import { t } from '@lingui/macro';
 import { FormGroup } from '@patternfly/react-core';
 import { CredentialsAPI } from '../../api';
 import { Credential } from '../../types';
 import { getQSConfig, parseQueryString, mergeParams } from '../../util/qs';
-import { FieldTooltip } from '../FormField';
+import Popover from '../Popover';
 import Lookup from './Lookup';
 import OptionsList from '../OptionsList';
+import useAutoPopulateLookup from '../../util/useAutoPopulateLookup';
 import useRequest from '../../util/useRequest';
 import LookupErrorMessage from './shared/LookupErrorMessage';
 
@@ -28,13 +37,18 @@ function CredentialLookup({
   required,
   credentialTypeId,
   credentialTypeKind,
+  credentialTypeNamespace,
   value,
-  history,
-  i18n,
+
   tooltip,
+  isDisabled,
+  autoPopulate,
+  multiple,
 }) {
+  const history = useHistory();
+  const autoPopulateLookup = useAutoPopulateLookup(onChange);
   const {
-    result: { count, credentials },
+    result: { count, credentials, relatedSearchableKeys, searchableKeys },
     error,
     request: fetchCredentials,
   } = useRequest(
@@ -46,18 +60,54 @@ function CredentialLookup({
       const typeKindParams = credentialTypeKind
         ? { credential_type__kind: credentialTypeKind }
         : {};
+      const typeNamespaceParams = credentialTypeNamespace
+        ? { credential_type__namespace: credentialTypeNamespace }
+        : {};
 
-      const { data } = await CredentialsAPI.read(
-        mergeParams(params, { ...typeIdParams, ...typeKindParams })
-      );
+      const [{ data }, actionsResponse] = await Promise.all([
+        CredentialsAPI.read(
+          mergeParams(params, {
+            ...typeIdParams,
+            ...typeKindParams,
+            ...typeNamespaceParams,
+          })
+        ),
+        CredentialsAPI.readOptions(),
+      ]);
+
+      if (autoPopulate) {
+        autoPopulateLookup(data.results);
+      }
+
+      const searchKeys = Object.keys(
+        actionsResponse.data.actions?.GET || {}
+      ).filter(key => actionsResponse.data.actions?.GET[key].filterable);
+      const item = searchKeys.indexOf('type');
+      if (item) {
+        searchKeys[item] = 'credential_type__kind';
+      }
+
       return {
         count: data.count,
         credentials: data.results,
+        relatedSearchableKeys: (
+          actionsResponse?.data?.related_search_fields || []
+        ).map(val => val.slice(0, -8)),
+        searchableKeys: searchKeys,
       };
-    }, [credentialTypeId, credentialTypeKind, history.location.search]),
+    }, [
+      autoPopulate,
+      autoPopulateLookup,
+      credentialTypeId,
+      credentialTypeKind,
+      credentialTypeNamespace,
+      history.location.search,
+    ]),
     {
       count: 0,
       credentials: [],
+      relatedSearchableKeys: [],
+      searchableKeys: [],
     }
   );
 
@@ -71,11 +121,11 @@ function CredentialLookup({
     <FormGroup
       fieldId="credential"
       isRequired={required}
-      isValid={isValid}
+      validated={isValid ? 'default' : 'error'}
       label={label}
+      labelIcon={tooltip && <Popover content={tooltip} />}
       helperTextInvalid={helperTextInvalid}
     >
-      {tooltip && <FieldTooltip content={tooltip} />}
       <Lookup
         id="credential"
         header={label}
@@ -84,6 +134,8 @@ function CredentialLookup({
         onChange={onChange}
         required={required}
         qsConfig={QS_CONFIG}
+        isDisabled={isDisabled}
+        multiple={multiple}
         renderOptionsList={({ state, dispatch, canDelete }) => (
           <OptionsList
             value={state.selectedItems}
@@ -93,29 +145,32 @@ function CredentialLookup({
             qsConfig={QS_CONFIG}
             searchColumns={[
               {
-                name: i18n._(t`Name`),
-                key: 'name',
+                name: t`Name`,
+                key: 'name__icontains',
                 isDefault: true,
               },
               {
-                name: i18n._(t`Created By (Username)`),
-                key: 'created_by__username',
+                name: t`Created By (Username)`,
+                key: 'created_by__username__icontains',
               },
               {
-                name: i18n._(t`Modified By (Username)`),
-                key: 'modified_by__username',
+                name: t`Modified By (Username)`,
+                key: 'modified_by__username__icontains',
               },
             ]}
             sortColumns={[
               {
-                name: i18n._(t`Name`),
+                name: t`Name`,
                 key: 'name',
               },
             ]}
+            searchableKeys={searchableKeys}
+            relatedSearchableKeys={relatedSearchableKeys}
             readOnly={!canDelete}
             name="credential"
             selectItem={item => dispatch({ type: 'SELECT_ITEM', item })}
             deselectItem={item => dispatch({ type: 'DESELECT_ITEM', item })}
+            multiple={multiple}
           />
         )}
       />
@@ -150,10 +205,13 @@ CredentialLookup.propTypes = {
   helperTextInvalid: node,
   isValid: bool,
   label: string.isRequired,
+  multiple: bool,
   onBlur: func,
   onChange: func.isRequired,
   required: bool,
-  value: Credential,
+  value: oneOfType([Credential, arrayOf(Credential)]),
+  isDisabled: bool,
+  autoPopulate: bool,
 };
 
 CredentialLookup.defaultProps = {
@@ -161,10 +219,13 @@ CredentialLookup.defaultProps = {
   credentialTypeKind: '',
   helperTextInvalid: '',
   isValid: true,
+  multiple: false,
   onBlur: () => {},
   required: false,
   value: null,
+  isDisabled: false,
+  autoPopulate: false,
 };
 
 export { CredentialLookup as _CredentialLookup };
-export default withI18n()(withRouter(CredentialLookup));
+export default CredentialLookup;

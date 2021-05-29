@@ -9,12 +9,11 @@ import re
 # Django
 from django.utils.translation import ugettext_lazy as _
 
-# Tower
-from awx.conf import fields, register
+# AWX
+from awx.conf import fields
 
 
 class PendoTrackingStateField(fields.ChoiceField):
-
     def to_internal_value(self, data):
         # Any false/null values get converted to 'off'.
         if data in fields.NullBooleanField.FALSE_VALUES or data in fields.NullBooleanField.NULL_VALUES:

@@ -1,112 +1,87 @@
 import React from 'react';
 import { string, bool, func } from 'prop-types';
-import { withI18n } from '@lingui/react';
-import { t } from '@lingui/macro';
-import {
-  Badge as PFBadge,
-  Button,
-  DataListAction as _DataListAction,
-  DataListCheck,
-  DataListItem,
-  DataListItemCells,
-  DataListItemRow,
-  Tooltip,
-} from '@patternfly/react-core';
 
+import { t } from '@lingui/macro';
+import { Button, Tooltip } from '@patternfly/react-core';
+import { Tr, Td } from '@patternfly/react-table';
 import { Link } from 'react-router-dom';
 import styled from 'styled-components';
-import { PencilAltIcon } from '@patternfly/react-icons';
-import DataListCell from '../../../components/DataListCell';
+import {
+  ExclamationTriangleIcon as PFExclamationTriangleIcon,
+  PencilAltIcon,
+} from '@patternfly/react-icons';
+import { ActionsTd, ActionItem } from '../../../components/PaginatedTable';
 
 import { Organization } from '../../../types';
 
-const Badge = styled(PFBadge)`
-  margin-left: 8px;
+const ExclamationTriangleIcon = styled(PFExclamationTriangleIcon)`
+  color: var(--pf-global--warning-color--100);
+  margin-left: 18px;
 `;
-
-const ListGroup = styled.span`
-  margin-left: 24px;
-
-  &:first-of-type {
-    margin-left: 0;
-  }
-`;
-
-const DataListAction = styled(_DataListAction)`
-  align-items: center;
-  display: grid;
-  grid-gap: 16px;
-  grid-template-columns: 40px;
-`;
-
 function OrganizationListItem({
   organization,
   isSelected,
   onSelect,
+  rowIndex,
   detailUrl,
-  i18n,
 }) {
   const labelId = `check-action-${organization.id}`;
+
+  const missingExecutionEnvironment =
+    organization.custom_virtualenv && !organization.default_environment;
+
   return (
-    <DataListItem
-      key={organization.id}
-      aria-labelledby={labelId}
-      id={`${organization.id}`}
-    >
-      <DataListItemRow>
-        <DataListCheck
-          id={`select-organization-${organization.id}`}
-          checked={isSelected}
-          onChange={onSelect}
-          aria-labelledby={labelId}
-        />
-        <DataListItemCells
-          dataListCells={[
-            <DataListCell key="divider">
-              <span id={labelId}>
-                <Link to={`${detailUrl}`}>
-                  <b>{organization.name}</b>
-                </Link>
-              </span>
-            </DataListCell>,
-            <DataListCell key="related-field-counts">
-              <ListGroup>
-                {i18n._(t`Members`)}
-                <Badge isRead>
-                  {organization.summary_fields.related_field_counts.users}
-                </Badge>
-              </ListGroup>
-              <ListGroup>
-                {i18n._(t`Teams`)}
-                <Badge isRead>
-                  {organization.summary_fields.related_field_counts.teams}
-                </Badge>
-              </ListGroup>
-            </DataListCell>,
-          ]}
-        />
-        <DataListAction
-          aria-label="actions"
-          aria-labelledby={labelId}
-          id={labelId}
-        >
-          {organization.summary_fields.user_capabilities.edit ? (
-            <Tooltip content={i18n._(t`Edit Organization`)} position="top">
-              <Button
-                aria-label={i18n._(t`Edit Organization`)}
-                variant="plain"
-                component={Link}
-                to={`/organizations/${organization.id}/edit`}
-              >
-                <PencilAltIcon />
-              </Button>
+    <Tr id={`org-row-${organization.id}`}>
+      <Td
+        select={{
+          rowIndex,
+          isSelected,
+          onSelect,
+          disable: false,
+        }}
+        dataLabel={t`Selected`}
+      />
+      <Td id={labelId} dataLabel={t`Name`}>
+        <span>
+          <Link to={`${detailUrl}`}>
+            <b>{organization.name}</b>
+          </Link>
+        </span>
+        {missingExecutionEnvironment && (
+          <span>
+            <Tooltip
+              className="missing-execution-environment"
+              content={t`Custom virtual environment ${organization.custom_virtualenv} must be replaced by an execution environment.`}
+              position="right"
+            >
+              <ExclamationTriangleIcon />
             </Tooltip>
-          ) : (
-            ''
-          )}
-        </DataListAction>
-      </DataListItemRow>
-    </DataListItem>
+          </span>
+        )}
+      </Td>
+      <Td dataLabel={t`Members`}>
+        {organization.summary_fields.related_field_counts.users}
+      </Td>
+      <Td dataLabel={t`Teams`}>
+        {organization.summary_fields.related_field_counts.teams}
+      </Td>
+      <ActionsTd dataLabel={t`Actions`}>
+        <ActionItem
+          visible={organization.summary_fields.user_capabilities.edit}
+          tooltip={t`Edit Organization`}
+        >
+          <Button
+            ouiaId={`${organization.id}-edit-button`}
+            aria-label={t`Edit Organization`}
+            variant="plain"
+            component={Link}
+            to={`/organizations/${organization.id}/edit`}
+          >
+            <PencilAltIcon />
+          </Button>
+        </ActionItem>
+      </ActionsTd>
+    </Tr>
   );
 }
 
@@ -117,4 +92,4 @@ OrganizationListItem.propTypes = {
   onSelect: func.isRequired,
 };
 
-export default withI18n()(OrganizationListItem);
+export default OrganizationListItem;

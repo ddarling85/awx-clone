@@ -1,5 +1,10 @@
 import React from 'react';
-import { mount } from 'enzyme';
+
+import { en } from 'make-plural/plurals';
+import { I18nProvider } from '@lingui/react';
+import { i18n } from '@lingui/core';
+import { mountWithContexts } from '../../../testUtils/enzymeHelpers';
+import english from '../../locales/en/messages';
 import { WorkflowStateContext } from '../../contexts/Workflow';
 import WorkflowStartNode from './WorkflowStartNode';
 
@@ -10,26 +15,37 @@ const nodePositions = {
   },
 };
 
+i18n.loadLocaleData({ en: { plurals: en } });
+i18n.load({ en: english });
+i18n.activate('en');
+
 describe('WorkflowStartNode', () => {
   test('mounts successfully', () => {
-    const wrapper = mount(
+    const wrapper = mountWithContexts(
       <svg>
-        <WorkflowStateContext.Provider value={{ nodePositions }}>
-          <WorkflowStartNode
-            nodePositions={nodePositions}
-            showActionTooltip={false}
-          />
-        </WorkflowStateContext.Provider>
+        <I18nProvider i18n={i18n}>
+          <WorkflowStateContext.Provider value={{ nodePositions }}>
+            <WorkflowStartNode
+              nodePositions={nodePositions}
+              showActionTooltip={false}
+            />
+          </WorkflowStateContext.Provider>
+        </I18nProvider>
       </svg>
     );
     expect(wrapper).toHaveLength(1);
   });
   test('tooltip shown on hover', () => {
-    const wrapper = mount(
+    const wrapper = mountWithContexts(
       <svg>
-        <WorkflowStateContext.Provider value={{ nodePositions }}>
-          <WorkflowStartNode nodePositions={nodePositions} showActionTooltip />
-        </WorkflowStateContext.Provider>
+        <I18nProvider i18n={i18n}>
+          <WorkflowStateContext.Provider value={{ nodePositions }}>
+            <WorkflowStartNode
+              nodePositions={nodePositions}
+              showActionTooltip
+            />
+          </WorkflowStateContext.Provider>
+        </I18nProvider>
       </svg>
     );
     expect(wrapper.find('WorkflowActionTooltip')).toHaveLength(0);

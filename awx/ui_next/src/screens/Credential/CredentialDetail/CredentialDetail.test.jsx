@@ -12,9 +12,26 @@ jest.mock('../../../api');
 
 const mockCredential = mockCredentials.results[0];
 
-CredentialTypesAPI.readDetail.mockResolvedValue({
-  data: mockCredentialType,
-});
+const mockInputSource = {
+  id: 33,
+  type: 'credential_input_source',
+  url: '/api/v2/credential_input_sources/33/',
+  summary_fields: {
+    source_credential: {
+      id: 424,
+      name: 'External Credential',
+      description: '',
+      kind: 'conjur',
+      cloud: false,
+      credential_type_id: 20,
+    },
+  },
+  input_field_name: 'ssh_key_unlock',
+  metadata: {
+    secret_path: '/foo/bar/baz',
+    secret_version: '17',
+  },
+};
 
 function expectDetailToMatch(wrapper, label, value) {
   const detail = wrapper.find(`Detail[label="${label}"]`);
@@ -26,6 +43,15 @@ describe('<CredentialDetail />', () => {
   let wrapper;
 
   beforeEach(async () => {
+    CredentialTypesAPI.readDetail.mockResolvedValue({
+      data: mockCredentialType,
+    });
+
+    CredentialsAPI.readInputSources.mockResolvedValue({
+      data: {
+        results: [mockInputSource],
+      },
+    });
     await act(async () => {
       wrapper = mountWithContexts(
         <CredentialDetail credential={mockCredential} />
@@ -36,6 +62,12 @@ describe('<CredentialDetail />', () => {
 
   test('should render successfully', () => {
     expect(wrapper.find('CredentialDetail').length).toBe(1);
+  });
+
+  test('should have proper number of delete detail requests', () => {
+    expect(
+      wrapper.find('DeleteButton').prop('deleteDetailsRequests')
+    ).toHaveLength(6);
   });
 
   test('should render details', () => {
@@ -52,6 +84,18 @@ describe('<CredentialDetail />', () => {
       mockCredential.summary_fields.credential_type.name
     );
     expectDetailToMatch(wrapper, 'Username', mockCredential.inputs.username);
+    expectDetailToMatch(wrapper, 'Password', 'Encrypted');
+    expectDetailToMatch(wrapper, 'SSH Private Key', 'Encrypted');
+    expectDetailToMatch(wrapper, 'Signed SSH Certificate', 'Encrypted');
+    const sshKeyUnlockDetail = wrapper.find(
+      'Detail#credential-ssh_key_unlock-detail'
+    );
+    expect(sshKeyUnlockDetail.length).toBe(1);
+    expect(sshKeyUnlockDetail.find('CredentialChip').length).toBe(1);
+    expect(
+      wrapper.find('CodeEditor#credential-ssh_key_unlock-metadata').props()
+        .value
+    ).toBe(JSON.stringify(mockInputSource.metadata, null, 2));
     expectDetailToMatch(
       wrapper,
       'Privilege Escalation Method',
@@ -61,6 +105,11 @@ describe('<CredentialDetail />', () => {
       wrapper,
       'Privilege Escalation Username',
       mockCredential.inputs.become_username
+    );
+    expectDetailToMatch(
+      wrapper,
+      'Privilege Escalation Password',
+      'Prompt on launch'
     );
     expect(wrapper.find(`Detail[label="Options"] ListItem`).text()).toEqual(
       'Authorize'

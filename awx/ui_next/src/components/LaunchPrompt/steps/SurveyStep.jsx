@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
-import { withI18n } from '@lingui/react';
+
+import { t } from '@lingui/macro';
 import { useField } from 'formik';
 import {
   Form,
@@ -8,8 +9,9 @@ import {
   SelectOption,
   SelectVariant,
 } from '@patternfly/react-core';
-import FormField, { FieldTooltip } from '../../FormField';
+import FormField from '../../FormField';
 import AnsibleSelect from '../../AnsibleSelect';
+import Popover from '../../Popover';
 import {
   required,
   minMaxValue,
@@ -20,7 +22,7 @@ import {
 } from '../../../util/validators';
 import { Survey } from '../../../types';
 
-function SurveyStep({ survey, i18n }) {
+function SurveyStep({ surveyConfig }) {
   const fieldTypes = {
     text: TextField,
     textarea: TextField,
@@ -31,25 +33,27 @@ function SurveyStep({ survey, i18n }) {
     float: NumberField,
   };
   return (
-    <Form>
-      {survey.spec.map(question => {
+    <Form
+      onSubmit={e => {
+        e.preventDefault();
+      }}
+    >
+      {surveyConfig.spec.map(question => {
         const Field = fieldTypes[question.type];
-        return (
-          <Field key={question.variable} question={question} i18n={i18n} />
-        );
+        return <Field key={question.variable} question={question} />;
       })}
     </Form>
   );
 }
 SurveyStep.propTypes = {
-  survey: Survey.isRequired,
+  surveyConfig: Survey.isRequired,
 };
 
-function TextField({ question, i18n }) {
+function TextField({ question }) {
   const validators = [
-    question.required ? required(null, i18n) : null,
-    question.min ? minLength(question.min, i18n) : null,
-    question.max ? maxLength(question.max, i18n) : null,
+    question.required ? required(null) : null,
+    question.required && question.min ? minLength(question.min) : null,
+    question.required && question.max ? maxLength(question.max) : null,
   ];
   return (
     <FormField
@@ -66,11 +70,11 @@ function TextField({ question, i18n }) {
   );
 }
 
-function NumberField({ question, i18n }) {
+function NumberField({ question }) {
   const validators = [
-    question.required ? required(null, i18n) : null,
-    minMaxValue(question.min, question.max, i18n),
-    question.type === 'integer' ? integer(i18n) : null,
+    question.required ? required(null) : null,
+    minMaxValue(question.min, question.max),
+    question.type === 'integer' ? integer() : null,
   ];
   return (
     <FormField
@@ -96,10 +100,10 @@ function MultipleChoiceField({ question }) {
       fieldId={id}
       helperTextInvalid={meta.error}
       isRequired={question.required}
-      isValid={isValid}
+      validated={isValid ? 'default' : 'error'}
       label={question.question_name}
+      labelIcon={<Popover content={question.question_description} />}
     >
-      <FieldTooltip content={question.question_description} />
       <AnsibleSelect
         id={id}
         isValid={isValid}
@@ -116,31 +120,43 @@ function MultipleChoiceField({ question }) {
 
 function MultiSelectField({ question }) {
   const [isOpen, setIsOpen] = useState(false);
-  const [field, meta, helpers] = useField(`survey_${question.variable}`);
+  const [field, meta, helpers] = useField({
+    name: `survey_${question.variable}`,
+    validate: question.required ? required(null) : null,
+  });
   const id = `survey-question-${question.variable}`;
-  const isValid = !(meta.touched && meta.error);
+  const hasActualValue = !question.required || meta.value?.length > 0;
+  const isValid = !meta.touched || (!meta.error && hasActualValue);
+
   return (
     <FormGroup
       fieldId={id}
-      helperTextInvalid={meta.error}
+      helperTextInvalid={
+        meta.error || t`At least one value must be selected for this field.`
+      }
       isRequired={question.required}
-      isValid={isValid}
+      validated={isValid ? 'default' : 'error'}
       label={question.question_name}
+      labelIcon={<Popover content={question.question_description} />}
     >
-      <FieldTooltip content={question.question_description} />
       <Select
         variant={SelectVariant.typeaheadMulti}
         id={id}
         onToggle={setIsOpen}
         onSelect={(event, option) => {
-          if (field.value.includes(option)) {
+          if (field?.value?.includes(option)) {
             helpers.setValue(field.value.filter(o => o !== option));
           } else {
             helpers.setValue(field.value.concat(option));
           }
+          helpers.setTouched(true);
         }}
-        isExpanded={isOpen}
+        isOpen={isOpen}
         selections={field.value}
+        onClear={() => {
+          helpers.setTouched(true);
+          helpers.setValue([]);
+        }}
       >
         {question.choices.split('\n').map(opt => (
           <SelectOption key={opt} value={opt} />
@@ -150,4 +166,4 @@ function MultiSelectField({ question }) {
   );
 }
 
-export default withI18n()(SurveyStep);
+export default SurveyStep;

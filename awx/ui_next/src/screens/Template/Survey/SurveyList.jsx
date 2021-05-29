@@ -1,11 +1,20 @@
 import React, { useState } from 'react';
-import { withI18n } from '@lingui/react';
+
 import { t } from '@lingui/macro';
-import { DataList, Button as _Button } from '@patternfly/react-core';
+import { useRouteMatch } from 'react-router-dom';
+import {
+  DataList,
+  Button as _Button,
+  Title,
+  EmptyState,
+  EmptyStateIcon,
+  EmptyStateBody,
+} from '@patternfly/react-core';
+import { CubesIcon } from '@patternfly/react-icons';
 import styled from 'styled-components';
 import ContentLoading from '../../../components/ContentLoading';
-import ContentEmpty from '../../../components/ContentEmpty';
 import AlertModal from '../../../components/AlertModal';
+import { ToolbarAddButton } from '../../../components/PaginatedDataList';
 
 import SurveyListItem from './SurveyListItem';
 import SurveyToolbar from './SurveyToolbar';
@@ -23,8 +32,9 @@ function SurveyList({
   updateSurvey,
   deleteSurvey,
   canEdit,
-  i18n,
 }) {
+  const match = useRouteMatch();
+
   const questions = survey?.spec || [];
   const [selected, setSelected] = useState([]);
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
@@ -74,20 +84,55 @@ function SurveyList({
     const end = questions.slice(index + 2);
     updateSurvey([...beginning, swapWith, question, ...end]);
   };
+  const deleteModal = (
+    <AlertModal
+      variant="danger"
+      title={isAllSelected ? t`Delete Survey` : t`Delete Questions`}
+      isOpen={isDeleteModalOpen}
+      onClose={() => {
+        setIsDeleteModalOpen(false);
+        setSelected([]);
+      }}
+      actions={[
+        <Button
+          ouiaId="delete-confirm-button"
+          key="delete"
+          variant="danger"
+          aria-label={t`confirm delete`}
+          onClick={handleDelete}
+        >
+          {t`Delete`}
+        </Button>,
+        <Button
+          ouiaId="delete-cancel-button"
+          key="cancel"
+          variant="link"
+          aria-label={t`cancel delete`}
+          onClick={() => {
+            setIsDeleteModalOpen(false);
+            setSelected([]);
+          }}
+        >
+          {t`Cancel`}
+        </Button>,
+      ]}
+    >
+      <div>{t`This action will delete the following:`}</div>
+      {selected.map(question => (
+        <span key={question.variable}>
+          <strong>{question.question_name}</strong>
+          <br />
+        </span>
+      ))}
+    </AlertModal>
+  );
 
   let content;
   if (isLoading) {
     content = <ContentLoading />;
-  } else if (!questions || questions?.length <= 0) {
-    content = (
-      <ContentEmpty
-        title={i18n._(t`No Survey Questions Found`)}
-        message={i18n._(t`Please add survey questions.`)}
-      />
-    );
   } else {
     content = (
-      <DataList aria-label={i18n._(t`Survey List`)}>
+      <DataList aria-label={t`Survey List`}>
         {questions?.map((question, index) => (
           <SurveyListItem
             key={question.variable}
@@ -101,6 +146,7 @@ function SurveyList({
             canEdit={canEdit}
           />
         ))}
+        {isDeleteModalOpen && deleteModal}
         {isPreviewModalOpen && (
           <SurveyPreviewModal
             isPreviewModalOpen={isPreviewModalOpen}
@@ -108,59 +154,27 @@ function SurveyList({
             questions={questions}
           />
         )}
-
         <Button
           onClick={() => setIsPreviewModalOpen(true)}
           variant="primary"
-          aria-label={i18n._(t`Preview`)}
+          aria-label={t`Preview`}
         >
-          {i18n._(t`Preview`)}
+          {t`Preview`}
         </Button>
       </DataList>
     );
   }
-  if (isDeleteModalOpen) {
+
+  if ((!questions || questions?.length <= 0) && !isLoading) {
     return (
-      <AlertModal
-        variant="danger"
-        title={
-          isAllSelected ? i18n._(t`Delete Survey`) : i18n._(t`Delete Questions`)
-        }
-        isOpen={isDeleteModalOpen}
-        onClose={() => {
-          setIsDeleteModalOpen(false);
-          setSelected([]);
-        }}
-        actions={[
-          <Button
-            key="delete"
-            variant="danger"
-            aria-label={i18n._(t`confirm delete`)}
-            onClick={handleDelete}
-          >
-            {i18n._(t`Delete`)}
-          </Button>,
-          <Button
-            key="cancel"
-            variant="secondary"
-            aria-label={i18n._(t`cancel delete`)}
-            onClick={() => {
-              setIsDeleteModalOpen(false);
-              setSelected([]);
-            }}
-          >
-            {i18n._(t`Cancel`)}
-          </Button>,
-        ]}
-      >
-        <div>{i18n._(t`This action will delete the following:`)}</div>
-        {selected.map(question => (
-          <span key={question.variable}>
-            <strong>{question.question_name}</strong>
-            <br />
-          </span>
-        ))}
-      </AlertModal>
+      <EmptyState variant="full">
+        <EmptyStateIcon icon={CubesIcon} />
+        <Title size="lg" headingLevel="h3">
+          {t`No survey questions found.`}
+        </Title>
+        <EmptyStateBody>{t`Please add survey questions.`}</EmptyStateBody>
+        <ToolbarAddButton isDisabled={!canEdit} linkTo={`${match.url}/add`} />
+      </EmptyState>
     );
   }
   return (
@@ -175,51 +189,8 @@ function SurveyList({
         onToggleDeleteModal={() => setIsDeleteModalOpen(true)}
       />
       {content}
-      {isDeleteModalOpen && (
-        <AlertModal
-          variant="danger"
-          title={
-            isAllSelected
-              ? i18n._(t`Delete Survey`)
-              : i18n._(t`Delete Questions`)
-          }
-          isOpen={isDeleteModalOpen}
-          onClose={() => {
-            setIsDeleteModalOpen(false);
-          }}
-          actions={[
-            <Button
-              key="delete"
-              variant="danger"
-              aria-label={i18n._(t`confirm delete`)}
-              onClick={handleDelete}
-            >
-              {i18n._(t`Delete`)}
-            </Button>,
-            <Button
-              key="cancel"
-              variant="secondary"
-              aria-label={i18n._(t`cancel delete`)}
-              onClick={() => {
-                setIsDeleteModalOpen(false);
-              }}
-            >
-              {i18n._(t`Cancel`)}
-            </Button>,
-          ]}
-        >
-          <div>{i18n._(t`This action will delete the following:`)}</div>
-          <ul>
-            {selected.map(question => (
-              <li key={question.variable}>
-                <strong>{question.question_name}</strong>
-              </li>
-            ))}
-          </ul>
-        </AlertModal>
-      )}
     </>
   );
 }
 
-export default withI18n()(SurveyList);
+export default SurveyList;

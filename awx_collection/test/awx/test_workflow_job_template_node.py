@@ -1,10 +1,11 @@
 # -*- coding: utf-8 -*-
-from __future__ import (absolute_import, division, print_function)
+from __future__ import absolute_import, division, print_function
+
 __metaclass__ = type
 
 import pytest
 
-from awx.main.models import WorkflowJobTemplateNode, WorkflowJobTemplate, JobTemplate
+from awx.main.models import WorkflowJobTemplateNode, WorkflowJobTemplate, JobTemplate, UnifiedJobTemplate
 
 
 @pytest.fixture
@@ -16,7 +17,7 @@ def job_template(project, inventory):
         name='foo-jt',
         ask_variables_on_launch=True,
         ask_credential_on_launch=True,
-        ask_limit_on_launch=True
+        ask_limit_on_launch=True,
     )
 
 
@@ -29,23 +30,23 @@ def wfjt(organization):
 @pytest.mark.django_db
 def test_create_workflow_job_template_node(run_module, admin_user, wfjt, job_template):
     this_identifier = '42🐉'
-    result = run_module('tower_workflow_job_template_node', {
-        'identifier': this_identifier,
-        'workflow_job_template': 'foo-workflow',
-        'organization': wfjt.organization.name,
-        'unified_job_template': 'foo-jt',
-        'state': 'present'
-    }, admin_user)
+    result = run_module(
+        'tower_workflow_job_template_node',
+        {
+            'identifier': this_identifier,
+            'workflow_job_template': 'foo-workflow',
+            'organization': wfjt.organization.name,
+            'unified_job_template': 'foo-jt',
+            'state': 'present',
+        },
+        admin_user,
+    )
     assert not result.get('failed', False), result.get('msg', result)
 
     node = WorkflowJobTemplateNode.objects.get(identifier=this_identifier)
 
     result.pop('invocation', None)
-    assert result == {
-        "name": this_identifier,  # FIXME: should this be identifier instead
-        "id": node.id,
-        "changed": True
-    }
+    assert result == {"name": this_identifier, "id": node.id, "changed": True}  # FIXME: should this be identifier instead
 
     assert node.identifier == this_identifier
     assert node.workflow_job_template_id == wfjt.id
@@ -53,41 +54,48 @@ def test_create_workflow_job_template_node(run_module, admin_user, wfjt, job_tem
 
 
 @pytest.mark.django_db
-def test_create_workflow_job_template_node_no_template(run_module, admin_user, wfjt, job_template):
-    """This is a part of the API contract for creating approval nodes
-    and at some point in the future, tha feature will be supported by the collection
-    """
+def test_create_workflow_job_template_node_approval_node(run_module, admin_user, wfjt, job_template):
+    """This is a part of the API contract for creating approval nodes"""
     this_identifier = '42🐉'
-    result = run_module('tower_workflow_job_template_node', {
-        'identifier': this_identifier,
-        'workflow_job_template': wfjt.name,
-        'organization': wfjt.organization.name,
-    }, admin_user)
+    result = run_module(
+        'tower_workflow_job_template_node',
+        {
+            'identifier': this_identifier,
+            'workflow_job_template': wfjt.name,
+            'organization': wfjt.organization.name,
+            'approval_node': {'name': 'foo-jt-approval'},
+        },
+        admin_user,
+    )
     assert not result.get('failed', False), result.get('msg', result)
     assert result.get('changed', False), result
 
-    node = WorkflowJobTemplateNode.objects.get(pk=result['id'])
-    # node = WorkflowJobTemplateNode.objects.first()
+    node = WorkflowJobTemplateNode.objects.get(identifier=this_identifier)
+    approval_node = UnifiedJobTemplate.objects.get(name='foo-jt-approval')
 
-    assert result['id'] == node.id
+    assert result['id'] == approval_node.id
 
     assert node.identifier == this_identifier
     assert node.workflow_job_template_id == wfjt.id
-    assert node.unified_job_template_id is None
+    assert node.unified_job_template_id is approval_node.id
 
 
 @pytest.mark.django_db
 def test_make_use_of_prompts(run_module, admin_user, wfjt, job_template, machine_credential, vault_credential):
-    result = run_module('tower_workflow_job_template_node', {
-        'identifier': '42',
-        'workflow_job_template': 'foo-workflow',
-        'organization': wfjt.organization.name,
-        'unified_job_template': 'foo-jt',
-        'extra_data': {'foo': 'bar', 'another-foo': {'barz': 'bar2'}},
-        'limit': 'foo_hosts',
-        'credentials': [machine_credential.name, vault_credential.name],
-        'state': 'present'
-    }, admin_user)
+    result = run_module(
+        'tower_workflow_job_template_node',
+        {
+            'identifier': '42',
+            'workflow_job_template': 'foo-workflow',
+            'organization': wfjt.organization.name,
+            'unified_job_template': 'foo-jt',
+            'extra_data': {'foo': 'bar', 'another-foo': {'barz': 'bar2'}},
+            'limit': 'foo_hosts',
+            'credentials': [machine_credential.name, vault_credential.name],
+            'state': 'present',
+        },
+        admin_user,
+    )
     assert not result.get('failed', False), result.get('msg', result)
     assert result.get('changed', False)
 
@@ -101,23 +109,23 @@ def test_make_use_of_prompts(run_module, admin_user, wfjt, job_template, machine
 @pytest.mark.django_db
 def test_create_with_edges(run_module, admin_user, wfjt, job_template):
     next_nodes = [
-        WorkflowJobTemplateNode.objects.create(
-            identifier='foo{0}'.format(i),
-            workflow_job_template=wfjt,
-            unified_job_template=job_template
-        ) for i in range(3)
+        WorkflowJobTemplateNode.objects.create(identifier='foo{0}'.format(i), workflow_job_template=wfjt, unified_job_template=job_template) for i in range(3)
     ]
 
-    result = run_module('tower_workflow_job_template_node', {
-        'identifier': '42',
-        'workflow_job_template': 'foo-workflow',
-        'organization': wfjt.organization.name,
-        'unified_job_template': 'foo-jt',
-        'success_nodes': ['foo0'],
-        'always_nodes': ['foo1'],
-        'failure_nodes': ['foo2'],
-        'state': 'present'
-    }, admin_user)
+    result = run_module(
+        'tower_workflow_job_template_node',
+        {
+            'identifier': '42',
+            'workflow_job_template': 'foo-workflow',
+            'organization': wfjt.organization.name,
+            'unified_job_template': 'foo-jt',
+            'success_nodes': ['foo0'],
+            'always_nodes': ['foo1'],
+            'failure_nodes': ['foo2'],
+            'state': 'present',
+        },
+        admin_user,
+    )
     assert not result.get('failed', False), result.get('msg', result)
     assert result.get('changed', False)
 

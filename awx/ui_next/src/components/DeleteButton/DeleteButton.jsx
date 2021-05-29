@@ -1,61 +1,161 @@
 import React, { useState } from 'react';
-import { withI18n } from '@lingui/react';
-import { t } from '@lingui/macro';
-import { Button } from '@patternfly/react-core';
-import AlertModal from '../AlertModal';
+import PropTypes from 'prop-types';
 
+import { t } from '@lingui/macro';
+import styled from 'styled-components';
+import { Button, Badge, Alert, Tooltip } from '@patternfly/react-core';
+import AlertModal from '../AlertModal';
+import { getRelatedResourceDeleteCounts } from '../../util/getRelatedResourceDeleteDetails';
+import ErrorDetail from '../ErrorDetail';
+
+const WarningMessage = styled(Alert)`
+  margin-top: 10px;
+`;
+const Label = styled.span`
+  && {
+    margin-right: 10px;
+  }
+`;
 function DeleteButton({
   onConfirm,
   modalTitle,
   name,
-  i18n,
+
   variant,
   children,
   isDisabled,
+  ouiaId,
+  deleteMessage,
+  deleteDetailsRequests,
+  disabledTooltip,
 }) {
   const [isOpen, setIsOpen] = useState(false);
+  const [deleteMessageError, setDeleteMessageError] = useState();
+  const [deleteDetails, setDeleteDetails] = useState({});
+  const [isLoading, setIsLoading] = useState(false);
 
+  const toggleModal = async isModalOpen => {
+    setIsLoading(true);
+    if (deleteDetailsRequests?.length && isModalOpen) {
+      const { results, error } = await getRelatedResourceDeleteCounts(
+        deleteDetailsRequests
+      );
+      if (error) {
+        setDeleteMessageError(error);
+      } else {
+        setDeleteDetails(results);
+      }
+    }
+    setIsLoading(false);
+    setIsOpen(isModalOpen);
+  };
+
+  if (deleteMessageError) {
+    return (
+      <AlertModal
+        isOpen={deleteMessageError}
+        title={t`Error!`}
+        onClose={() => {
+          toggleModal(false);
+          setDeleteMessageError();
+        }}
+      >
+        <ErrorDetail error={deleteMessageError} />
+      </AlertModal>
+    );
+  }
   return (
     <>
-      <Button
-        variant={variant || 'danger'}
-        aria-label={i18n._(t`Delete`)}
-        isDisabled={isDisabled}
-        onClick={() => setIsOpen(true)}
-      >
-        {children || i18n._(t`Delete`)}
-      </Button>
+      {disabledTooltip ? (
+        <Tooltip content={disabledTooltip} position="top">
+          <div>
+            <Button
+              isLoading={isLoading}
+              spinnerAriaValueText={isLoading ? 'Loading' : undefined}
+              variant={variant || 'secondary'}
+              aria-label={t`Delete`}
+              isDisabled={isDisabled}
+              onClick={() => toggleModal(true)}
+              ouiaId={ouiaId}
+            >
+              {children || t`Delete`}
+            </Button>
+          </div>
+        </Tooltip>
+      ) : (
+        <Button
+          ouiaId={ouiaId}
+          isLoading={isLoading}
+          spinnerAriaValueText={isLoading ? 'Loading' : undefined}
+          variant={variant || 'secondary'}
+          aria-label={t`Delete`}
+          isDisabled={isDisabled}
+          onClick={() => toggleModal(true)}
+        >
+          {children || t`Delete`}
+        </Button>
+      )}
       <AlertModal
         isOpen={isOpen}
         title={modalTitle}
         variant="danger"
-        onClose={() => setIsOpen(false)}
+        onClose={() => toggleModal(false)}
         actions={[
           <Button
+            ouiaId="delete-modal-confirm"
             key="delete"
             variant="danger"
-            aria-label={i18n._(t`Delete`)}
+            aria-label={t`Confirm Delete`}
             isDisabled={isDisabled}
-            onClick={onConfirm}
+            onClick={() => {
+              onConfirm();
+              toggleModal(false);
+            }}
           >
-            {i18n._(t`Delete`)}
+            {t`Delete`}
           </Button>,
           <Button
+            ouiaId="delete-modal-cancel"
             key="cancel"
-            variant="secondary"
-            aria-label={i18n._(t`Cancel`)}
-            onClick={() => setIsOpen(false)}
+            variant="link"
+            aria-label={t`Cancel`}
+            onClick={() => toggleModal(false)}
           >
-            {i18n._(t`Cancel`)}
+            {t`Cancel`}
           </Button>,
         ]}
       >
-        {i18n._(t`Are you sure you want to delete:`)}
+        {t`Are you sure you want to delete:`}
         <br />
         <strong>{name}</strong>
+        {Object.values(deleteDetails).length > 0 && (
+          <WarningMessage
+            variant="warning"
+            isInline
+            title={
+              <div>
+                <div aria-label={deleteMessage}>{deleteMessage}</div>
+                <br />
+                {Object.entries(deleteDetails).map(([key, value]) => (
+                  <div aria-label={`${key}: ${value}`} key={key}>
+                    <Label>{key}</Label> <Badge>{value}</Badge>
+                  </div>
+                ))}
+              </div>
+            }
+          />
+        )}
       </AlertModal>
     </>
   );
 }
 
-export default withI18n()(DeleteButton);
+DeleteButton.propTypes = {
+  ouiaId: PropTypes.string,
+};
+
+DeleteButton.defaultProps = {
+  ouiaId: null,
+};
+
+export default DeleteButton;

@@ -32,6 +32,10 @@ describe('<InventoryHost />', () => {
   let history;
 
   beforeEach(async () => {
+    InventoriesAPI.readHostDetail.mockResolvedValue({
+      data: { ...mockHost },
+    });
+
     await act(async () => {
       wrapper = mountWithContexts(
         <InventoryHost inventory={mockInventory} setBreadcrumb={() => {}} />
@@ -49,7 +53,7 @@ describe('<InventoryHost />', () => {
       'Details',
       'Facts',
       'Groups',
-      'Completed Jobs',
+      'Jobs',
     ];
     wrapper.find('RoutedTabs li').forEach((tab, index) => {
       expect(tab.text()).toEqual(expectedTabs[index]);

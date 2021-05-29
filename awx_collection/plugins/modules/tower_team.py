@@ -5,12 +5,11 @@
 # GNU General Public License v3.0+ (see COPYING or https://www.gnu.org/licenses/gpl-3.0.txt)
 
 from __future__ import absolute_import, division, print_function
+
 __metaclass__ = type
 
 
-ANSIBLE_METADATA = {'metadata_version': '1.1',
-                    'status': ['preview'],
-                    'supported_by': 'community'}
+ANSIBLE_METADATA = {'metadata_version': '1.1', 'status': ['preview'], 'supported_by': 'community'}
 
 
 DOCUMENTATION = '''
@@ -60,7 +59,7 @@ EXAMPLES = '''
     tower_config_file: "~/tower_cli.cfg"
 '''
 
-from ..module_utils.tower_api import TowerModule
+from ..module_utils.tower_api import TowerAPIModule
 
 
 def main():
@@ -74,7 +73,7 @@ def main():
     )
 
     # Create a module for ourselves
-    module = TowerModule(argument_spec=argument_spec)
+    module = TowerAPIModule(argument_spec=argument_spec)
 
     # Extract our parameters
     name = module.params.get('name')
@@ -87,22 +86,14 @@ def main():
     org_id = module.resolve_name_to_id('organizations', organization)
 
     # Attempt to look up team based on the provided name and org ID
-    team = module.get_one('teams', **{
-        'data': {
-            'name': name,
-            'organization': org_id
-        }
-    })
+    team = module.get_one('teams', name_or_id=name, **{'data': {'organization': org_id}})
 
     if state == 'absent':
         # If the state was absent we can let the module delete it if needed, the module will handle exiting from this
         module.delete_if_needed(team)
 
     # Create the data that gets sent for create and update
-    team_fields = {
-        'name': new_name if new_name else name,
-        'organization': org_id
-    }
+    team_fields = {'name': new_name if new_name else (module.get_item_name(team) if team else name), 'organization': org_id}
     if description is not None:
         team_fields['description'] = description
 

@@ -1,16 +1,14 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useLocation } from 'react-router-dom';
 import { bool, func } from 'prop-types';
-import { withI18n } from '@lingui/react';
+
 import { t } from '@lingui/macro';
 import { SchedulesAPI } from '../../../api';
 import AlertModal from '../../AlertModal';
 import ErrorDetail from '../../ErrorDetail';
+import PaginatedTable, { HeaderRow, HeaderCell } from '../../PaginatedTable';
 import DataListToolbar from '../../DataListToolbar';
-import PaginatedDataList, {
-  ToolbarAddButton,
-  ToolbarDeleteButton,
-} from '../../PaginatedDataList';
+import { ToolbarAddButton, ToolbarDeleteButton } from '../../PaginatedDataList';
 import useRequest, { useDeleteItems } from '../../../util/useRequest';
 import { getQSConfig, parseQueryString } from '../../../util/qs';
 import ScheduleListItem from './ScheduleListItem';
@@ -18,21 +16,29 @@ import ScheduleListItem from './ScheduleListItem';
 const QS_CONFIG = getQSConfig('schedule', {
   page: 1,
   page_size: 20,
-  order_by: 'unified_job_template__polymorphic_ctype__model',
+  order_by: 'name',
 });
 
 function ScheduleList({
-  i18n,
   loadSchedules,
   loadScheduleOptions,
   hideAddButton,
+  resource,
+  launchConfig,
+  surveyConfig,
 }) {
   const [selected, setSelected] = useState([]);
 
   const location = useLocation();
 
   const {
-    result: { schedules, itemCount, actions },
+    result: {
+      schedules,
+      itemCount,
+      actions,
+      relatedSearchableKeys,
+      searchableKeys,
+    },
     error: contentError,
     isLoading,
     request: fetchSchedules,
@@ -49,12 +55,20 @@ function ScheduleList({
         schedules: results,
         itemCount: count,
         actions: scheduleActions.data.actions,
+        relatedSearchableKeys: (
+          scheduleActions?.data?.related_search_fields || []
+        ).map(val => val.slice(0, -8)),
+        searchableKeys: Object.keys(
+          scheduleActions.data.actions?.GET || {}
+        ).filter(key => scheduleActions.data.actions?.GET[key].filterable),
       };
-    }, [location, loadSchedules, loadScheduleOptions]),
+    }, [location.search, loadSchedules, loadScheduleOptions]),
     {
       schedules: [],
       itemCount: 0,
       actions: {},
+      relatedSearchableKeys: [],
+      searchableKeys: [],
     }
   );
 
@@ -102,45 +116,94 @@ function ScheduleList({
     actions &&
     Object.prototype.hasOwnProperty.call(actions, 'POST') &&
     !hideAddButton;
+  const isTemplate =
+    resource?.type === 'workflow_job_template' ||
+    resource?.type === 'job_template';
+
+  const missingRequiredInventory = schedule => {
+    if (
+      !launchConfig.inventory_needed_to_start ||
+      schedule?.summary_fields?.inventory?.id
+    ) {
+      return null;
+    }
+    return t`This schedule is missing an Inventory`;
+  };
+
+  const hasMissingSurveyValue = schedule => {
+    let missingValues;
+    if (launchConfig.survey_enabled) {
+      surveyConfig.spec.forEach(question => {
+        const hasDefaultValue = Boolean(question.default);
+        if (question.required && !hasDefaultValue) {
+          const extraDataKeys = Object.keys(schedule?.extra_data);
+
+          const hasMatchingKey = extraDataKeys.includes(question.variable);
+          Object.values(schedule?.extra_data).forEach(value => {
+            if (!value || !hasMatchingKey) {
+              missingValues = true;
+            } else {
+              missingValues = false;
+            }
+          });
+          if (!Object.values(schedule.extra_data).length) {
+            missingValues = true;
+          }
+        }
+      });
+    }
+    return missingValues && t`This schedule is missing required survey values`;
+  };
 
   return (
     <>
-      <PaginatedDataList
+      <PaginatedTable
         contentError={contentError}
         hasContentLoading={isLoading || isDeleteLoading}
         items={schedules}
         itemCount={itemCount}
         qsConfig={QS_CONFIG}
         onRowClick={handleSelect}
-        renderItem={item => (
+        headerRow={
+          <HeaderRow qsConfig={QS_CONFIG}>
+            <HeaderCell sortKey="name">{t`Name`}</HeaderCell>
+            <HeaderCell>{t`Type`}</HeaderCell>
+            <HeaderCell sortKey="next_run">{t`Next Run`}</HeaderCell>
+            <HeaderCell>{t`Actions`}</HeaderCell>
+          </HeaderRow>
+        }
+        renderRow={(item, index) => (
           <ScheduleListItem
             isSelected={selected.some(row => row.id === item.id)}
             key={item.id}
             onSelect={() => handleSelect(item)}
             schedule={item}
+            rowIndex={index}
+            isMissingInventory={isTemplate && missingRequiredInventory(item)}
+            isMissingSurvey={isTemplate && hasMissingSurveyValue(item)}
           />
         )}
         toolbarSearchColumns={[
           {
-            name: i18n._(t`Name`),
-            key: 'name',
+            name: t`Name`,
+            key: 'name__icontains',
             isDefault: true,
           },
-        ]}
-        toolbarSortColumns={[
           {
-            name: i18n._(t`Name`),
-            key: 'name',
+            name: t`Description`,
+            key: 'description__icontains',
           },
           {
-            name: i18n._(t`Next Run`),
-            key: 'next_run',
+            name: t`Created By (Username)`,
+            key: 'created_by__username__icontains',
           },
           {
-            name: i18n._(t`Type`),
-            key: 'unified_job_template__polymorphic_ctype__model',
+            name: t`Modified By (Username)`,
+            key: 'modified_by__username__icontains',
           },
         ]}
+        toolbarSearchableKeys={searchableKeys}
+        toolbarRelatedSearchableKeys={relatedSearchableKeys}
         renderToolbar={props => (
           <DataListToolbar
             {...props}
@@ -152,16 +215,18 @@ function ScheduleList({
               ...(canAdd
                 ? [
                     <ToolbarAddButton
+                      ouiaId="add-schedule-button"
                       key="add"
                       linkTo={`${location.pathname}/add`}
                     />,
                   ]
                 : []),
               <ToolbarDeleteButton
+                ouiaId="delete-schedule-button"
                 key="delete"
                 onDelete={handleDelete}
                 itemsToDelete={selected}
-                pluralizedItemName={i18n._(t`Schedules`)}
+                pluralizedItemName={t`Schedules`}
               />,
             ]}
           />
@@ -171,10 +236,10 @@ function ScheduleList({
         <AlertModal
           isOpen={deletionError}
           variant="danger"
-          title={i18n._(t`Error!`)}
+          title={t`Error!`}
           onClose={clearDeletionError}
         >
-          {i18n._(t`Failed to delete one or more schedules.`)}
+          {t`Failed to delete one or more schedules.`}
           <ErrorDetail error={deletionError} />
         </AlertModal>
       )}
@@ -191,4 +256,4 @@ ScheduleList.defaultProps = {
   hideAddButton: false,
 };
 
-export default withI18n()(ScheduleList);
+export default ScheduleList;

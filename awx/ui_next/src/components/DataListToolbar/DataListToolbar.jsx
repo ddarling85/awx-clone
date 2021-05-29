@@ -1,115 +1,166 @@
-import React, { Fragment } from 'react';
+import React, { useEffect, useState } from 'react';
 import PropTypes from 'prop-types';
-import { withI18n } from '@lingui/react';
+
 import { t } from '@lingui/macro';
-import { Checkbox } from '@patternfly/react-core';
-import styled from 'styled-components';
-import { SearchIcon } from '@patternfly/react-icons';
 import {
-  DataToolbar,
-  DataToolbarContent as _DataToolbarContent,
-  DataToolbarGroup as _DataToolbarGroup,
-  DataToolbarItem,
-  DataToolbarToggleGroup,
-} from '@patternfly/react-core/dist/umd/experimental';
+  Checkbox,
+  Toolbar,
+  ToolbarContent,
+  ToolbarGroup,
+  ToolbarItem,
+  ToolbarToggleGroup,
+  Dropdown,
+  KebabToggle,
+} from '@patternfly/react-core';
+import { SearchIcon } from '@patternfly/react-icons';
 import ExpandCollapse from '../ExpandCollapse';
 import Search from '../Search';
 import Sort from '../Sort';
-
 import { SearchColumns, SortColumns, QSConfig } from '../../types';
+import { KebabifiedProvider } from '../../contexts/Kebabified';
 
-const DataToolbarContent = styled(_DataToolbarContent)`
-  --pf-c-data-toolbar__content--PaddingLeft: 24px;
-  --pf-c-data-toolbar__content--PaddingRight: 8px;
-`;
-const DataToolbarGroup = styled(_DataToolbarGroup)`
-  --pf-c-data-toolbar__group--spacer: 24px;
-`;
+function DataListToolbar({
+  itemCount,
+  clearAllFilters,
+  searchColumns,
+  searchableKeys,
+  relatedSearchableKeys,
+  sortColumns,
+  showSelectAll,
+  isAllSelected,
+  isCompact,
+  onSort,
+  onSearch,
+  onReplaceSearch,
+  onRemove,
+  onCompact,
+  onExpand,
+  onSelectAll,
+  additionalControls,
 
-class DataListToolbar extends React.Component {
-  render() {
-    const {
-      clearAllFilters,
-      searchColumns,
-      sortColumns,
-      showSelectAll,
-      isAllSelected,
-      isCompact,
-      onSort,
-      onSearch,
-      onReplaceSearch,
-      onRemove,
-      onCompact,
-      onExpand,
-      onSelectAll,
-      additionalControls,
-      i18n,
-      qsConfig,
-    } = this.props;
+  qsConfig,
+  pagination,
+}) {
+  const showExpandCollapse = onCompact && onExpand;
+  const [isKebabOpen, setIsKebabOpen] = useState(false);
+  const [isKebabModalOpen, setIsKebabModalOpen] = useState(false);
+  const [isAdvancedSearchShown, setIsAdvancedSearchShown] = useState(false);
 
-    const showExpandCollapse = onCompact && onExpand;
-    return (
-      <DataToolbar
-        id={`${qsConfig.namespace}-list-toolbar`}
-        clearAllFilters={clearAllFilters}
-        collapseListedFiltersBreakpoint="lg"
-      >
-        <DataToolbarContent>
-          {showSelectAll && (
-            <DataToolbarGroup>
-              <DataToolbarItem>
-                <Checkbox
-                  isChecked={isAllSelected}
-                  onChange={onSelectAll}
-                  aria-label={i18n._(t`Select all`)}
-                  id="select-all"
-                />
-              </DataToolbarItem>
-            </DataToolbarGroup>
-          )}
-          <DataToolbarToggleGroup toggleIcon={<SearchIcon />} breakpoint="lg">
-            <DataToolbarItem>
-              <Search
-                qsConfig={qsConfig}
-                columns={searchColumns}
-                onSearch={onSearch}
-                onReplaceSearch={onReplaceSearch}
-                onRemove={onRemove}
+  const onShowAdvancedSearch = shown => {
+    setIsAdvancedSearchShown(shown);
+    setIsKebabOpen(false);
+  };
+
+  useEffect(() => {
+    if (!isKebabModalOpen) {
+      setIsKebabOpen(false);
+    }
+  }, [isKebabModalOpen]);
+
+  return (
+    <Toolbar
+      id={`${qsConfig.namespace}-list-toolbar`}
+      clearAllFilters={clearAllFilters}
+      collapseListedFiltersBreakpoint="lg"
+      clearFiltersButtonText={t`Clear all filters`}
+    >
+      <ToolbarContent>
+        {showSelectAll && (
+          <ToolbarGroup>
+            <ToolbarItem>
+              <Checkbox
+                isChecked={isAllSelected}
+                onChange={onSelectAll}
+                aria-label={t`Select all`}
+                id="select-all"
               />
-            </DataToolbarItem>
-            <DataToolbarItem>
+            </ToolbarItem>
+          </ToolbarGroup>
+        )}
+        <ToolbarToggleGroup toggleIcon={<SearchIcon />} breakpoint="lg">
+          <ToolbarItem>
+            <Search
+              qsConfig={qsConfig}
+              columns={[
+                ...searchColumns,
+                { name: t`Advanced`, key: 'advanced' },
+              ]}
+              searchableKeys={searchableKeys}
+              relatedSearchableKeys={relatedSearchableKeys}
+              onSearch={onSearch}
+              onReplaceSearch={onReplaceSearch}
+              onShowAdvancedSearch={onShowAdvancedSearch}
+              onRemove={onRemove}
+            />
+          </ToolbarItem>
+          {sortColumns && (
+            <ToolbarItem>
               <Sort qsConfig={qsConfig} columns={sortColumns} onSort={onSort} />
-            </DataToolbarItem>
-          </DataToolbarToggleGroup>
-          {showExpandCollapse && (
-            <DataToolbarGroup>
-              <Fragment>
-                <DataToolbarItem>
-                  <ExpandCollapse
-                    isCompact={isCompact}
-                    onCompact={onCompact}
-                    onExpand={onExpand}
-                  />
-                </DataToolbarItem>
-              </Fragment>
-            </DataToolbarGroup>
+            </ToolbarItem>
           )}
-          <DataToolbarGroup>
+        </ToolbarToggleGroup>
+        {showExpandCollapse && (
+          <ToolbarGroup>
+            <>
+              <ToolbarItem>
+                <ExpandCollapse
+                  isCompact={isCompact}
+                  onCompact={onCompact}
+                  onExpand={onExpand}
+                />
+              </ToolbarItem>
+            </>
+          </ToolbarGroup>
+        )}
+        {isAdvancedSearchShown && additionalControls.length > 0 && (
+          <ToolbarItem>
+            <KebabifiedProvider
+              value={{
+                isKebabified: true,
+                onKebabModalChange: setIsKebabModalOpen,
+              }}
+            >
+              <Dropdown
+                toggle={
+                  <KebabToggle
+                    data-cy="actions-kebab-toogle"
+                    onToggle={isOpen => {
+                      if (!isKebabModalOpen) {
+                        setIsKebabOpen(isOpen);
+                      }
+                    }}
+                  />
+                }
+                isOpen={isKebabOpen}
+                isPlain
+                dropdownItems={additionalControls}
+              />
+            </KebabifiedProvider>
+          </ToolbarItem>
+        )}
+        {!isAdvancedSearchShown && (
+          <ToolbarGroup>
             {additionalControls.map(control => (
-              <DataToolbarItem key={control.key}>{control}</DataToolbarItem>
+              <ToolbarItem key={control.key}>{control}</ToolbarItem>
             ))}
-          </DataToolbarGroup>
-        </DataToolbarContent>
-      </DataToolbar>
-    );
-  }
+          </ToolbarGroup>
+        )}
+        {!isAdvancedSearchShown && pagination && itemCount > 0 && (
+          <ToolbarItem variant="pagination">{pagination}</ToolbarItem>
+        )}
+      </ToolbarContent>
+    </Toolbar>
+  );
 }
 
 DataListToolbar.propTypes = {
+  itemCount: PropTypes.number,
   clearAllFilters: PropTypes.func,
   qsConfig: QSConfig.isRequired,
   searchColumns: SearchColumns.isRequired,
-  sortColumns: SortColumns.isRequired,
+  searchableKeys: PropTypes.arrayOf(PropTypes.string),
+  relatedSearchableKeys: PropTypes.arrayOf(PropTypes.string),
+  sortColumns: SortColumns,
   showSelectAll: PropTypes.bool,
   isAllSelected: PropTypes.bool,
   isCompact: PropTypes.bool,
@@ -123,6 +174,10 @@ DataListToolbar.propTypes = {
 };
 
 DataListToolbar.defaultProps = {
+  itemCount: 0,
+  searchableKeys: [],
+  relatedSearchableKeys: [],
+  sortColumns: null,
   clearAllFilters: null,
   showSelectAll: false,
   isAllSelected: false,
@@ -136,4 +191,4 @@ DataListToolbar.defaultProps = {
   additionalControls: [],
 };
 
-export default withI18n()(DataListToolbar);
+export default DataListToolbar;

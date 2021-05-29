@@ -19,13 +19,14 @@ describe('<ProjectEdit />', () => {
     scm_type: 'git',
     scm_url: 'https://foo.bar',
     scm_clean: true,
+    scm_track_submodules: false,
     credential: 100,
     local_path: 'bar',
     organization: 2,
     scm_update_on_launch: true,
     scm_update_cache_timeout: 3,
     allow_override: false,
-    custom_virtualenv: '/venv/custom-env',
+    custom_virtualenv: '/var/lib/awx/venv/custom-env',
     summary_fields: {
       credential: {
         id: 100,
@@ -47,8 +48,8 @@ describe('<ProjectEdit />', () => {
             choices: [
               ['', 'Manual'],
               ['git', 'Git'],
-              ['hg', 'Mercurial'],
               ['svn', 'Subversion'],
+              ['archive', 'Remote Archive'],
               ['insights', 'Red Hat Insights'],
             ],
           },

@@ -2,7 +2,7 @@
 
 ## UX Considerations
 
-Historically, the code that powers search in the AngularJS version of the AWX/Tower UI is very complex and prone to bugs.  In order to reduce that complexity, we've made some UX decisions to help make the code easier to maintain.
+Historically, the code that powers search in the AngularJS version of the AWX UI is very complex and prone to bugs.  In order to reduce that complexity, we've made some UX decisions to help make the code easier to maintain.
 
 **ALL query params namespaced and in url bar**
 
@@ -86,7 +86,7 @@ Instances of orgs list include:
 
 **Instance Groups list**
   - Name - search is ?name=ig
-  - ? is_containerized boolean choice (doesn't work right now in API but will soon) - search is ?is_containerized=true
+  - ? is_container_group boolean choice (doesn't work right now in API but will soon) - search is ?is_container_group=true
   - ? credential name - search is ?credentials__name=kubey
 
 Instance of instance groups list include:
@@ -136,7 +136,7 @@ Instance of team lists include:
 
 **Credentials list**
   - Name
-  - ? Type (dropdown on right with different types) 
+  - ? Type (dropdown on right with different types)
   - ? Created by (username)
   - ? Modified by (username)
 
@@ -273,7 +273,7 @@ For the UI url params, we want to only encode those params that aren't defaults,
 
 #### mergeParams vs. replaceParams
 
-**mergeParams** is used to suppport putting values with the same key 
+**mergeParams** is used to suppport putting values with the same key
 
 From a UX perspective, we wanted to be able to support searching on the same key multiple times (i.e. searching for things like `?foo=bar&foo=baz`). We do this by creating an array of all values. i.e.:
 
@@ -311,7 +311,7 @@ It is okay to only make this typing representation available initially (i.e. the
 
 when you click through or type in the search bar for the various phases of crafting the query ("not", "related resource project", "related resource key name", "value foo") which might be represented in the top bar as a series of tags that can be added and removed before submitting the tag.
 
-We will try to form options data from a static file.  Because options data is static, we may be able to generate and store as a static file of some sort (that we can use for managing smart search).  Alan had ideas around this.  If we do this it will mean we don't have to make a ton of requests as we craft smart search filters.  It sounds like tower cli may start using something similar.
+We will try to form options data from a static file.  Because options data is static, we may be able to generate and store as a static file of some sort (that we can use for managing smart search).  Alan had ideas around this.  If we do this it will mean we don't have to make a ton of requests as we craft smart search filters.  It sounds like the cli may start using something similar.
 
 ## Smart search flow
 
@@ -361,7 +361,7 @@ Smart search will be able to craft the tag through various states.  Note that th
         "instance_groups__search"
     ],
   ```
-  
+
   PHASE 3: keys, give by object key names for data.actions.GET
     - type is given for each key which we could use to help craft the value
 

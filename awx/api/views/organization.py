@@ -7,12 +7,15 @@ import logging
 # Django
 from django.db.models import Count
 from django.contrib.contenttypes.models import ContentType
+from django.utils.translation import ugettext_lazy as _
 
 # AWX
 from awx.main.models import (
     ActivityStream,
     Inventory,
+    Host,
     Project,
+    ExecutionEnvironment,
     JobTemplate,
     WorkflowJobTemplate,
     Organization,
@@ -20,7 +23,8 @@ from awx.main.models import (
     Role,
     User,
     Team,
-    InstanceGroup
+    InstanceGroup,
+    Credential,
 )
 from awx.api.generics import (
     ListCreateAPIView,
@@ -42,12 +46,13 @@ from awx.api.serializers import (
     RoleSerializer,
     NotificationTemplateSerializer,
     InstanceGroupSerializer,
-    ProjectSerializer, JobTemplateSerializer, WorkflowJobTemplateSerializer
+    ExecutionEnvironmentSerializer,
+    ProjectSerializer,
+    JobTemplateSerializer,
+    WorkflowJobTemplateSerializer,
+    CredentialSerializer,
 )
-from awx.api.views.mixin import (
-    RelatedJobsPreventDeleteMixin,
-    OrganizationCountsMixin,
-)
+from awx.api.views.mixin import RelatedJobsPreventDeleteMixin, OrganizationCountsMixin
 
 logger = logging.getLogger('awx.api.views.organization')
 
@@ -78,23 +83,21 @@ class OrganizationDetail(RelatedJobsPreventDeleteMixin, RetrieveUpdateDestroyAPI
 
         org_counts = {}
         access_kwargs = {'accessor': self.request.user, 'role_field': 'read_role'}
-        direct_counts = Organization.objects.filter(id=org_id).annotate(
-            users=Count('member_role__members', distinct=True),
-            admins=Count('admin_role__members', distinct=True)
-        ).values('users', 'admins')
+        direct_counts = (
+            Organization.objects.filter(id=org_id)
+            .annotate(users=Count('member_role__members', distinct=True), admins=Count('admin_role__members', distinct=True))
+            .values('users', 'admins')
+        )
 
         if not direct_counts:
             return full_context
 
         org_counts = direct_counts[0]
-        org_counts['inventories'] = Inventory.accessible_objects(**access_kwargs).filter(
-            organization__id=org_id).count()
-        org_counts['teams'] = Team.accessible_objects(**access_kwargs).filter(
-            organization__id=org_id).count()
-        org_counts['projects'] = Project.accessible_objects(**access_kwargs).filter(
-            organization__id=org_id).count()
-        org_counts['job_templates'] = JobTemplate.accessible_objects(**access_kwargs).filter(
-            organization__id=org_id).count()
+        org_counts['inventories'] = Inventory.accessible_objects(**access_kwargs).filter(organization__id=org_id).count()
+        org_counts['teams'] = Team.accessible_objects(**access_kwargs).filter(organization__id=org_id).count()
+        org_counts['projects'] = Project.accessible_objects(**access_kwargs).filter(organization__id=org_id).count()
+        org_counts['job_templates'] = JobTemplate.accessible_objects(**access_kwargs).filter(organization__id=org_id).count()
+        org_counts['hosts'] = Host.objects.org_active_count(org_id)
 
         full_context['related_field_counts'] = {}
         full_context['related_field_counts'][org_id] = org_counts
@@ -134,6 +137,16 @@ class OrganizationProjectsList(SubListCreateAPIView):
     serializer_class = ProjectSerializer
     parent_model = Organization
     parent_key = 'organization'
+
+
+class OrganizationExecutionEnvironmentsList(SubListCreateAttachDetachAPIView):
+
+    model = ExecutionEnvironment
+    serializer_class = ExecutionEnvironmentSerializer
+    parent_model = Organization
+    relationship = 'executionenvironments'
+    parent_key = 'organization'
+    swagger_topic = "Execution Environments"
 
 
 class OrganizationJobTemplatesList(SubListCreateAPIView):
@@ -214,9 +227,21 @@ class OrganizationInstanceGroupsList(SubListAttachDetachAPIView):
     relationship = 'instance_groups'
 
 
+class OrganizationGalaxyCredentialsList(SubListAttachDetachAPIView):
+
+    model = Credential
+    serializer_class = CredentialSerializer
+    parent_model = Organization
+    relationship = 'galaxy_credentials'
+
+    def is_valid_relation(self, parent, sub, created=False):
+        if sub.kind != 'galaxy_api_token':
+            return {'msg': _(f"Credential must be a Galaxy credential, not {sub.credential_type.name}.")}
+
+
 class OrganizationAccessList(ResourceAccessList):
 
-    model = User # needs to be User for AccessLists's
+    model = User  # needs to be User for AccessLists's
     parent_model = Organization
 
 
@@ -225,7 +250,7 @@ class OrganizationObjectRolesList(SubListAPIView):
     model = Role
     serializer_class = RoleSerializer
     parent_model = Organization
-    search_fields = ('role_field', 'content_type__model',)
+    search_fields = ('role_field', 'content_type__model')
 
     def get_queryset(self):
         po = self.get_parent_object()

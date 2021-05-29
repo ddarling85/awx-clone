@@ -15,16 +15,6 @@ import {
 } from '../../../api';
 
 jest.mock('../../../api');
-CredentialsAPI.read.mockResolvedValue({
-  data: {
-    results: [],
-    count: 0,
-  },
-});
-CredentialTypesAPI.loadAllTypes.mockResolvedValue([]);
-ProjectsAPI.readPlaybooks.mockResolvedValue({
-  data: [],
-});
 
 const jobTemplateData = {
   allow_callbacks: false,
@@ -58,6 +48,7 @@ const jobTemplateData = {
   timeout: 0,
   use_fact_cache: false,
   verbosity: '0',
+  execution_environment: { id: 1, name: 'Foo', image: 'localhost.com' },
 };
 
 describe('<JobTemplateAdd />', () => {
@@ -76,11 +67,28 @@ describe('<JobTemplateAdd />', () => {
   };
 
   beforeEach(() => {
+    CredentialsAPI.read.mockResolvedValue({
+      data: {
+        results: [],
+        count: 0,
+      },
+    });
+    CredentialTypesAPI.loadAllTypes = jest.fn();
+    CredentialTypesAPI.loadAllTypes.mockResolvedValue([]);
+    ProjectsAPI.readPlaybooks.mockResolvedValue({
+      data: [],
+    });
     LabelsAPI.read.mockResolvedValue({ data: { results: [] } });
+    ProjectsAPI.readDetail.mockReturnValue({
+      name: 'foo',
+      id: 1,
+      allow_override: true,
+      organization: 1,
+    });
   });
 
   afterEach(() => {
-    jest.clearAllMocks();
+    jest.resetAllMocks();
   });
 
   test('should render Job Template Form', async () => {
@@ -95,8 +103,8 @@ describe('<JobTemplateAdd />', () => {
     let wrapper;
     await act(async () => {
       wrapper = mountWithContexts(<JobTemplateAdd />);
+      await waitForElement(wrapper, 'EmptyStateBody', el => el.length === 0);
     });
-    await waitForElement(wrapper, 'EmptyStateBody', el => el.length === 0);
     expect(wrapper.find('input#template-description').text()).toBe(
       defaultProps.description
     );
@@ -126,12 +134,13 @@ describe('<JobTemplateAdd />', () => {
         ...jobTemplateData,
       },
     });
+
     let wrapper;
     await act(async () => {
       wrapper = mountWithContexts(<JobTemplateAdd />);
     });
     await waitForElement(wrapper, 'EmptyStateBody', el => el.length === 0);
-    act(() => {
+    await act(async () => {
       wrapper.find('input#template-name').simulate('change', {
         target: { value: 'Bar', name: 'name' },
       });
@@ -144,13 +153,14 @@ describe('<JobTemplateAdd />', () => {
         name: 'project',
         summary_fields: { organization: { id: 1, name: 'Org Foo' } },
       });
+      wrapper.find('ExecutionEnvironmentLookup').invoke('onChange')({
+        id: 1,
+        name: 'Foo',
+      });
       wrapper.update();
-      wrapper
-        .find('PlaybookSelect')
-        .prop('field')
-        .onChange({
-          target: { value: 'Baz', name: 'playbook' },
-        });
+      wrapper.find('Select#template-playbook').prop('onToggle')();
+      wrapper.update();
+      wrapper.find('Select#template-playbook').prop('onSelect')(null, 'Baz');
     });
     wrapper.update();
     act(() => {
@@ -172,9 +182,8 @@ describe('<JobTemplateAdd />', () => {
       playbook: 'Baz',
       inventory: 2,
       webhook_credential: undefined,
-      webhook_key: '',
       webhook_service: '',
-      webhook_url: '',
+      execution_environment: 1,
     });
   });
 
@@ -195,7 +204,7 @@ describe('<JobTemplateAdd />', () => {
       });
     });
     await waitForElement(wrapper, 'EmptyStateBody', el => el.length === 0);
-    act(() => {
+    await act(async () => {
       wrapper.find('input#template-name').simulate('change', {
         target: { value: 'Foo', name: 'name' },
       });
@@ -209,12 +218,9 @@ describe('<JobTemplateAdd />', () => {
         summary_fields: { organization: { id: 1, name: 'Org Foo' } },
       });
       wrapper.update();
-      wrapper
-        .find('PlaybookSelect')
-        .prop('field')
-        .onChange({
-          target: { value: 'Bar', name: 'playbook' },
-        });
+      wrapper.find('Select#template-playbook').prop('onToggle')();
+      wrapper.update();
+      wrapper.find('Select#template-playbook').prop('onSelect')(null, 'Bar');
     });
     wrapper.update();
     act(() => {
@@ -243,7 +249,9 @@ describe('<JobTemplateAdd />', () => {
       });
     });
     await waitForElement(wrapper, 'EmptyStateBody', el => el.length === 0);
-    wrapper.find('button[aria-label="Cancel"]').invoke('onClick')();
+    await act(async () => {
+      wrapper.find('button[aria-label="Cancel"]').invoke('onClick')();
+    });
     expect(history.location.pathname).toEqual('/templates');
   });
 });

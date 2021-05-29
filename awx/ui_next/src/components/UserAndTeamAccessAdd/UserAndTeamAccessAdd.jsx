@@ -1,8 +1,10 @@
-import React, { useState, useCallback } from 'react';
-import { withI18n } from '@lingui/react';
+import React, { useState, useCallback, useEffect, useContext } from 'react';
+
 import { t } from '@lingui/macro';
 import { useParams } from 'react-router-dom';
 import styled from 'styled-components';
+import { Button, DropdownItem } from '@patternfly/react-core';
+import { KebabifiedContext } from '../../contexts/Kebabified';
 import useRequest, { useDismissableError } from '../../util/useRequest';
 import SelectableCard from '../SelectableCard';
 import AlertModal from '../AlertModal';
@@ -20,21 +22,21 @@ const Grid = styled.div`
   grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
 `;
 
-function UserAndTeamAccessAdd({
-  i18n,
-  isOpen,
-  title,
-  onSave,
-  apiModel,
-  onClose,
-}) {
+function UserAndTeamAccessAdd({ title, onFetchData, apiModel }) {
   const [selectedResourceType, setSelectedResourceType] = useState(null);
+  const [isWizardOpen, setIsWizardOpen] = useState(false);
   const [stepIdReached, setStepIdReached] = useState(1);
   const { id: userId } = useParams();
+  const { isKebabified, onKebabModalChange } = useContext(KebabifiedContext);
   const {
     selected: resourcesSelected,
     handleSelect: handleResourceSelect,
   } = useSelected([]);
+  useEffect(() => {
+    if (isKebabified) {
+      onKebabModalChange(isWizardOpen);
+    }
+  }, [isKebabified, isWizardOpen, onKebabModalChange]);
 
   const {
     selected: rolesSelected,
@@ -57,8 +59,9 @@ function UserAndTeamAccessAdd({
       );
 
       await Promise.all(roleRequests);
-      onSave();
-    }, [onSave, rolesSelected, apiModel, userId, resourcesSelected]),
+      onFetchData();
+      setIsWizardOpen(false);
+    }, [onFetchData, rolesSelected, apiModel, userId, resourcesSelected]),
     {}
   );
 
@@ -67,10 +70,10 @@ function UserAndTeamAccessAdd({
   const steps = [
     {
       id: 1,
-      name: i18n._(t`Add resource type`),
+      name: t`Add resource type`,
       component: (
         <Grid>
-          {getResourceAccessConfig(i18n).map(resource => (
+          {getResourceAccessConfig().map(resource => (
             <SelectableCard
               key={resource.selectedResource}
               isSelected={
@@ -88,7 +91,7 @@ function UserAndTeamAccessAdd({
     },
     {
       id: 2,
-      name: i18n._(t`Select items from list`),
+      name: t`Select items from list`,
       component: selectedResourceType && (
         <SelectResourceStep
           searchColumns={selectedResourceType.searchColumns}
@@ -96,7 +99,8 @@ function UserAndTeamAccessAdd({
           displayKey="name"
           onRowClick={handleResourceSelect}
           fetchItems={selectedResourceType.fetchItems}
-          selectedLabel={i18n._(t`Selected`)}
+          fetchOptions={selectedResourceType.fetchOptions}
+          selectedLabel={t`Selected`}
           selectedResourceRows={resourcesSelected}
           sortedColumnKey="username"
         />
@@ -106,7 +110,7 @@ function UserAndTeamAccessAdd({
     },
     {
       id: 3,
-      name: i18n._(t`Select roles to apply`),
+      name: t`Select roles to apply`,
       component: resourcesSelected?.length > 0 && (
         <SelectRoleStep
           onRolesClick={handleRoleSelect}
@@ -114,12 +118,12 @@ function UserAndTeamAccessAdd({
           selectedListKey={
             selectedResourceType === 'users' ? 'username' : 'name'
           }
-          selectedListLabel={i18n._(t`Selected`)}
+          selectedListLabel={t`Selected`}
           selectedResourceRows={resourcesSelected}
           selectedRoleRows={rolesSelected}
         />
       ),
-      nextButtonText: i18n._(t`Save`),
+      nextButtonText: t`Save`,
       canJumpTo: stepIdReached >= 3,
     },
   ];
@@ -127,30 +131,54 @@ function UserAndTeamAccessAdd({
   if (error) {
     return (
       <AlertModal
-        aria-label={i18n._(t`Associate role error`)}
+        aria-label={t`Associate role error`}
         isOpen={error}
         variant="error"
-        title={i18n._(t`Error!`)}
+        title={t`Error!`}
         onClose={dismissError}
       >
-        {i18n._(t`Failed to associate role`)}
+        {t`Failed to associate role`}
         <ErrorDetail error={error} />
       </AlertModal>
     );
   }
 
   return (
-    <Wizard
-      isOpen={isOpen}
-      title={title}
-      steps={steps}
-      onClose={onClose}
-      onNext={({ id }) =>
-        setStepIdReached(stepIdReached < id ? id : stepIdReached)
-      }
-      onSave={handleWizardSave}
-    />
+    <>
+      {isKebabified ? (
+        <DropdownItem
+          key="add"
+          component="button"
+          aria-label={t`Add`}
+          onClick={() => setIsWizardOpen(true)}
+        >
+          {t`Add`}
+        </DropdownItem>
+      ) : (
+        <Button
+          ouiaId="access-add-button"
+          variant="primary"
+          aria-label={t`Add`}
+          onClick={() => setIsWizardOpen(true)}
+          key="add"
+        >
+          {t`Add`}
+        </Button>
+      )}
+      {isWizardOpen && (
+        <Wizard
+          isOpen={isWizardOpen}
+          title={title}
+          steps={steps}
+          onClose={() => setIsWizardOpen(false)}
+          onNext={({ id }) =>
+            setStepIdReached(stepIdReached < id ? id : stepIdReached)
+          }
+          onSave={handleWizardSave}
+        />
+      )}
+    </>
   );
 }
 
-export default withI18n()(UserAndTeamAccessAdd);
+export default UserAndTeamAccessAdd;

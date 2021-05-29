@@ -1,6 +1,6 @@
 import React from 'react';
 import { func } from 'prop-types';
-import { withI18n } from '@lingui/react';
+
 import { t, Trans } from '@lingui/macro';
 import styled from 'styled-components';
 import { Button, ButtonVariant, Tooltip } from '@patternfly/react-core';
@@ -24,21 +24,22 @@ const PluginHelpText = styled.p`
 `;
 
 function CredentialPluginSelected({
-  i18n,
   credential,
   onEditPlugin,
   onClearPlugin,
+  fieldId,
 }) {
   return (
     <>
       <SelectedCredential>
         <SpacedCredentialChip onClick={onClearPlugin} credential={credential} />
         <Tooltip
-          content={i18n._(t`Edit Credential Plugin Configuration`)}
+          content={t`Edit Credential Plugin Configuration`}
           position="top"
         >
           <Button
-            aria-label={i18n._(t`Edit Credential Plugin Configuration`)}
+            ouiaId={`credential-field-${fieldId}-edit-plugin-button`}
+            aria-label={t`Edit Credential Plugin Configuration`}
             onClick={onEditPlugin}
             variant={ButtonVariant.control}
           >
@@ -67,4 +68,4 @@ CredentialPluginSelected.defaultProps = {
   onClearPlugin: () => {},
 };
 
-export default withI18n()(CredentialPluginSelected);
+export default CredentialPluginSelected;

@@ -7,6 +7,7 @@ class Inventories extends InstanceGroupsMixin(Base) {
     this.baseUrl = '/api/v2/inventories/';
 
     this.readAccessList = this.readAccessList.bind(this);
+    this.readAccessOptions = this.readAccessOptions.bind(this);
     this.readHosts = this.readHosts.bind(this);
     this.readHostDetail = this.readHostDetail.bind(this);
     this.readGroups = this.readGroups.bind(this);
@@ -18,6 +19,10 @@ class Inventories extends InstanceGroupsMixin(Base) {
     return this.http.get(`${this.baseUrl}${id}/access_list/`, {
       params,
     });
+  }
+
+  readAccessOptions(id) {
+    return this.http.options(`${this.baseUrl}${id}/access_list/`);
   }
 
   createHost(id, data) {
@@ -73,6 +78,12 @@ class Inventories extends InstanceGroupsMixin(Base) {
     });
   }
 
+  updateSources(inventoryId) {
+    return this.http.get(
+      `${this.baseUrl}${inventoryId}/update_inventory_sources/`
+    );
+  }
+
   async readSourceDetail(inventoryId, sourceId) {
     const {
       data: { results },
@@ -92,6 +103,17 @@ class Inventories extends InstanceGroupsMixin(Base) {
   syncAllSources(inventoryId) {
     return this.http.post(
       `${this.baseUrl}${inventoryId}/update_inventory_sources/`
+    );
+  }
+
+  readAdHocOptions(inventoryId) {
+    return this.http.options(`${this.baseUrl}${inventoryId}/ad_hoc_commands/`);
+  }
+
+  launchAdHocCommands(inventoryId, values) {
+    return this.http.post(
+      `${this.baseUrl}${inventoryId}/ad_hoc_commands/`,
+      values
     );
   }
 }

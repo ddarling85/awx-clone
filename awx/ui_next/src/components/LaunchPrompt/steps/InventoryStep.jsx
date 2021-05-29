@@ -1,15 +1,20 @@
 import React, { useCallback, useEffect } from 'react';
 import { useHistory } from 'react-router-dom';
-import { withI18n } from '@lingui/react';
+
 import { t } from '@lingui/macro';
 import { useField } from 'formik';
+import styled from 'styled-components';
+import { Alert } from '@patternfly/react-core';
 import { InventoriesAPI } from '../../../api';
 import { getQSConfig, parseQueryString } from '../../../util/qs';
 import useRequest from '../../../util/useRequest';
 import OptionsList from '../../OptionsList';
 import ContentLoading from '../../ContentLoading';
 import ContentError from '../../ContentError';
-import { required } from '../../../util/validators';
+
+const InventoryErrorAlert = styled(Alert)`
+  margin-bottom: 20px;
+`;
 
 const QS_CONFIG = getQSConfig('inventory', {
   page: 1,
@@ -17,30 +22,41 @@ const QS_CONFIG = getQSConfig('inventory', {
   order_by: 'name',
 });
 
-function InventoryStep({ i18n }) {
-  const [field, , helpers] = useField({
+function InventoryStep({ warningMessage = null }) {
+  const [field, meta, helpers] = useField({
     name: 'inventory',
-    validate: required(null, i18n),
   });
+
   const history = useHistory();
 
   const {
     isLoading,
     error,
-    result: { inventories, count },
+    result: { inventories, count, relatedSearchableKeys, searchableKeys },
     request: fetchInventories,
   } = useRequest(
     useCallback(async () => {
       const params = parseQueryString(QS_CONFIG, history.location.search);
-      const { data } = await InventoriesAPI.read(params);
+      const [{ data }, actionsResponse] = await Promise.all([
+        InventoriesAPI.read(params),
+        InventoriesAPI.readOptions(),
+      ]);
       return {
         inventories: data.results,
         count: data.count,
+        relatedSearchableKeys: (
+          actionsResponse?.data?.related_search_fields || []
+        ).map(val => val.slice(0, -8)),
+        searchableKeys: Object.keys(
+          actionsResponse.data.actions?.GET || {}
+        ).filter(key => actionsResponse.data.actions?.GET[key].filterable),
       };
     }, [history.location]),
     {
       count: 0,
       inventories: [],
+      relatedSearchableKeys: [],
+      searchableKeys: [],
     }
   );
 
@@ -56,39 +72,47 @@ function InventoryStep({ i18n }) {
   }
 
   return (
-    <OptionsList
-      value={field.value ? [field.value] : []}
-      options={inventories}
-      optionCount={count}
-      searchColumns={[
-        {
-          name: i18n._(t`Name`),
-          key: 'name',
-          isDefault: true,
-        },
-        {
-          name: i18n._(t`Created By (Username)`),
-          key: 'created_by__username',
-        },
-        {
-          name: i18n._(t`Modified By (Username)`),
-          key: 'modified_by__username',
-        },
-      ]}
-      sortColumns={[
-        {
-          name: i18n._(t`Name`),
-          key: 'name',
-        },
-      ]}
-      header={i18n._(t`Inventory`)}
-      name="inventory"
-      qsConfig={QS_CONFIG}
-      readOnly
-      selectItem={helpers.setValue}
-      deselectItem={() => field.onChange(null)}
-    />
+    <>
+      {meta.touched && meta.error && (
+        <InventoryErrorAlert variant="danger" isInline title={meta.error} />
+      )}
+      {warningMessage}
+      <OptionsList
+        value={field.value ? [field.value] : []}
+        options={inventories}
+        optionCount={count}
+        searchColumns={[
+          {
+            name: t`Name`,
+            key: 'name__icontains',
+            isDefault: true,
+          },
+          {
+            name: t`Created By (Username)`,
+            key: 'created_by__username__icontains',
+          },
+          {
+            name: t`Modified By (Username)`,
+            key: 'modified_by__username__icontains',
+          },
+        ]}
+        sortColumns={[
+          {
+            name: t`Name`,
+            key: 'name',
+          },
+        ]}
+        searchableKeys={searchableKeys}
+        relatedSearchableKeys={relatedSearchableKeys}
+        header={t`Inventory`}
+        name="inventory"
+        qsConfig={QS_CONFIG}
+        readOnly
+        selectItem={helpers.setValue}
+        deselectItem={() => field.onChange(null)}
+      />
+    </>
   );
 }
 
-export default withI18n()(InventoryStep);
+export default InventoryStep;

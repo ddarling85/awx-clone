@@ -18,13 +18,15 @@ describe('<ProjectAdd />', () => {
     scm_type: 'git',
     scm_url: 'https://foo.bar',
     scm_clean: true,
+    scm_track_submodules: false,
     credential: 100,
     local_path: '',
-    organization: 2,
+    organization: { id: 2, name: 'Bar' },
     scm_update_on_launch: true,
     scm_update_cache_timeout: 3,
     allow_override: false,
-    custom_virtualenv: '/venv/custom-env',
+    custom_virtualenv: '/var/lib/awx/venv/custom-env',
+    default_environment: { id: 1, name: 'Foo' },
   };
 
   const projectOptionsResolve = {
@@ -35,8 +37,8 @@ describe('<ProjectAdd />', () => {
             choices: [
               ['', 'Manual'],
               ['git', 'Git'],
-              ['hg', 'Mercurial'],
               ['svn', 'Subversion'],
+              ['archive', 'Remote Archive'],
               ['insights', 'Red Hat Insights'],
             ],
           },
@@ -102,6 +104,11 @@ describe('<ProjectAdd />', () => {
     await waitForElement(wrapper, 'ContentLoading', el => el.length === 0);
     wrapper.find('ProjectForm').invoke('handleSubmit')(projectData);
     expect(ProjectsAPI.create).toHaveBeenCalledTimes(1);
+    expect(ProjectsAPI.create).toHaveBeenCalledWith({
+      ...projectData,
+      organization: 2,
+      default_environment: 1,
+    });
   });
 
   test('handleSubmit should throw an error', async () => {
@@ -109,8 +116,16 @@ describe('<ProjectAdd />', () => {
       project_local_paths: ['foobar', 'qux'],
       project_base_dir: 'dir/foo/bar',
     };
-    const error = new Error('oops');
-    ProjectsAPI.create.mockImplementation(() => Promise.reject(error));
+    const error = {
+      response: {
+        config: {
+          method: 'create',
+          url: '/api/v2/projects/',
+        },
+        data: { detail: 'An error occurred' },
+      },
+    };
+    ProjectsAPI.create.mockRejectedValue(error);
     await act(async () => {
       wrapper = mountWithContexts(<ProjectAdd />, {
         context: { config },

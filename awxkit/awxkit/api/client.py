@@ -15,12 +15,11 @@ class ConnectionException(exc.Common):
 
 
 class Token_Auth(requests.auth.AuthBase):
-    def __init__(self, token, auth_type='Token'):
+    def __init__(self, token):
         self.token = token
-        self.auth_type = auth_type
 
     def __call__(self, request):
-        request.headers['Authorization'] = '{0.auth_type} {0.token}'.format(self)
+        request.headers['Authorization'] = 'Bearer {0.token}'.format(self)
         return request
 
 
@@ -50,14 +49,13 @@ class Connection(object):
             _next = kwargs.get('next')
             if _next:
                 headers = self.session.headers.copy()
-                self.post('/api/login/', headers=headers,
-                          data=dict(username=username, password=password, next=_next))
+                self.post('/api/login/', headers=headers, data=dict(username=username, password=password, next=_next))
                 self.session_id = self.session.cookies.get('sessionid')
                 self.uses_session_cookie = True
             else:
                 self.session.auth = (username, password)
         elif token:
-            self.session.auth = Token_Auth(token, auth_type=kwargs.get('auth_type', 'Token'))
+            self.session.auth = Token_Auth(token)
         else:
             self.session.auth = None
 
@@ -80,8 +78,7 @@ class Connection(object):
             use_endpoint = use_endpoint[1:]
         url = '/'.join([self.server, use_endpoint])
 
-        kwargs = dict(verify=self.verify, params=query_parameters, json=json, data=data,
-                      hooks=dict(response=log_elapsed))
+        kwargs = dict(verify=self.verify, params=query_parameters, json=json, data=data, hooks=dict(response=log_elapsed))
 
         if headers is not None:
             kwargs['headers'] = headers

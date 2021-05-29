@@ -1,36 +1,54 @@
-import React, { useContext, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import PropTypes from 'prop-types';
-import { Formik, useField } from 'formik';
-import { withI18n } from '@lingui/react';
+import { Formik, useField, useFormikContext } from 'formik';
+
 import { t } from '@lingui/macro';
-import { Form, FormGroup } from '@patternfly/react-core';
+import { Form } from '@patternfly/react-core';
 
 import { OrganizationsAPI } from '../../../api';
-import { ConfigContext } from '../../../contexts/Config';
-import AnsibleSelect from '../../../components/AnsibleSelect';
+import { useConfig } from '../../../contexts/Config';
 import ContentError from '../../../components/ContentError';
 import ContentLoading from '../../../components/ContentLoading';
 import FormField, { FormSubmitError } from '../../../components/FormField';
 import FormActionGroup from '../../../components/FormActionGroup/FormActionGroup';
-import { InstanceGroupsLookup } from '../../../components/Lookup';
+import {
+  InstanceGroupsLookup,
+  ExecutionEnvironmentLookup,
+} from '../../../components/Lookup';
 import { getAddedAndRemoved } from '../../../util/lists';
 import { required, minMaxValue } from '../../../util/validators';
 import { FormColumnLayout } from '../../../components/FormLayout';
+import CredentialLookup from '../../../components/Lookup/CredentialLookup';
 
 function OrganizationFormFields({
-  i18n,
-  me,
   instanceGroups,
   setInstanceGroups,
+  organizationId,
 }) {
-  const [venvField] = useField('custom_virtualenv');
+  const { license_info = {}, me = {} } = useConfig();
 
-  const defaultVenv = {
-    label: i18n._(t`Use Default Ansible Environment`),
-    value: '/venv/ansible/',
-    key: 'default',
-  };
-  const { custom_virtualenvs } = useContext(ConfigContext);
+  const { setFieldValue } = useFormikContext();
+
+  const [
+    galaxyCredentialsField,
+    galaxyCredentialsMeta,
+    galaxyCredentialsHelpers,
+  ] = useField('galaxy_credentials');
+
+  const [
+    executionEnvironmentField,
+    executionEnvironmentMeta,
+    executionEnvironmentHelpers,
+  ] = useField({
+    name: 'default_environment',
+  });
+
+  const handleCredentialUpdate = useCallback(
+    value => {
+      setFieldValue('galaxy_credentials', value);
+    },
+    [setFieldValue]
+  );
 
   return (
     <>
@@ -38,53 +56,57 @@ function OrganizationFormFields({
         id="org-name"
         name="name"
         type="text"
-        label={i18n._(t`Name`)}
-        validate={required(null, i18n)}
+        label={t`Name`}
+        validate={required(null)}
         isRequired
       />
       <FormField
         id="org-description"
         name="description"
         type="text"
-        label={i18n._(t`Description`)}
+        label={t`Description`}
       />
-      <FormField
-        id="org-max_hosts"
-        name="max_hosts"
-        type="number"
-        label={i18n._(t`Max Hosts`)}
-        tooltip={i18n._(
-          t`The maximum number of hosts allowed to be managed by this organization.
-                    Value defaults to 0 which means no limit. Refer to the Ansible
-                    documentation for more details.`
-        )}
-        validate={minMaxValue(0, Number.MAX_SAFE_INTEGER, i18n)}
-        me={me || {}}
-        isDisabled={!me.is_superuser}
-      />
-      {custom_virtualenvs && custom_virtualenvs.length > 1 && (
-        <FormGroup
-          fieldId="org-custom-virtualenv"
-          label={i18n._(t`Ansible Environment`)}
-        >
-          <AnsibleSelect
-            id="org-custom-virtualenv"
-            data={[
-              defaultVenv,
-              ...custom_virtualenvs
-                .filter(value => value !== defaultVenv.value)
-                .map(value => ({ value, label: value, key: value })),
-            ]}
-            {...venvField}
-          />
-        </FormGroup>
+      {license_info?.license_type !== 'open' && (
+        <FormField
+          id="org-max_hosts"
+          name="max_hosts"
+          type="number"
+          label={t`Max Hosts`}
+          tooltip={t`The maximum number of hosts allowed to be managed by this organization.
+            Value defaults to 0 which means no limit. Refer to the Ansible
+            documentation for more details.`}
+          validate={minMaxValue(0, Number.MAX_SAFE_INTEGER)}
+          me={me}
+          isDisabled={!me.is_superuser}
+        />
       )}
       <InstanceGroupsLookup
         value={instanceGroups}
         onChange={setInstanceGroups}
-        tooltip={i18n._(
-          t`Select the Instance Groups for this Organization to run on.`
-        )}
+        tooltip={t`Select the Instance Groups for this Organization to run on.`}
+      />
+      <ExecutionEnvironmentLookup
+        helperTextInvalid={executionEnvironmentMeta.error}
+        isValid={
+          !executionEnvironmentMeta.touched || !executionEnvironmentMeta.error
+        }
+        onBlur={() => executionEnvironmentHelpers.setTouched()}
+        value={executionEnvironmentField.value}
+        onChange={value => executionEnvironmentHelpers.setValue(value)}
+        popoverContent={t`The execution environment that will be used for jobs inside of this organization. This will be used a fallback when an execution environment has not been explicitly assigned at the project, job template or workflow level.`}
+        globallyAvailable
+        organizationId={organizationId}
+        isDefaultEnvironment
+      />
+      <CredentialLookup
+        credentialTypeNamespace="galaxy_api_token"
+        label={t`Galaxy Credentials`}
+        helperTextInvalid={galaxyCredentialsMeta.error}
+        isValid={!galaxyCredentialsMeta.touched || !galaxyCredentialsMeta.error}
+        onBlur={() => galaxyCredentialsHelpers.setTouched()}
+        onChange={handleCredentialUpdate}
+        value={galaxyCredentialsField.value}
+        multiple
       />
     </>
   );
@@ -158,8 +180,10 @@ function OrganizationForm({
       initialValues={{
         name: organization.name,
         description: organization.description,
-        custom_virtualenv: organization.custom_virtualenv || '',
         max_hosts: organization.max_hosts || '0',
+        galaxy_credentials: organization.galaxy_credentials || [],
+        default_environment:
+          organization.summary_fields?.default_environment || null,
       }}
       onSubmit={handleSubmit}
     >
@@ -169,6 +193,7 @@ function OrganizationForm({
             <OrganizationFormFields
               instanceGroups={instanceGroups}
               setInstanceGroups={setInstanceGroups}
+              organizationId={organization?.id || null}
               {...rest}
             />
             <FormSubmitError error={submitError} />
@@ -192,17 +217,14 @@ OrganizationForm.propTypes = {
 
 OrganizationForm.defaultProps = {
   organization: {
+    id: '',
     name: '',
     description: '',
     max_hosts: '0',
-    custom_virtualenv: '',
+    default_environment: '',
   },
   submitError: null,
 };
 
-OrganizationForm.contextTypes = {
-  custom_virtualenvs: PropTypes.arrayOf(PropTypes.string),
-};
-
 export { OrganizationForm as _OrganizationForm };
-export default withI18n()(OrganizationForm);
+export default OrganizationForm;

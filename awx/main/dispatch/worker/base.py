@@ -25,14 +25,10 @@ else:
 
 
 def signame(sig):
-    return dict(
-        (k, v) for v, k in signal.__dict__.items()
-        if v.startswith('SIG') and not v.startswith('SIG_')
-    )[sig]
+    return dict((k, v) for v, k in signal.__dict__.items() if v.startswith('SIG') and not v.startswith('SIG_'))[sig]
 
 
 class WorkerSignalHandler:
-
     def __init__(self):
         self.kill_now = False
         signal.signal(signal.SIGTERM, signal.SIG_DFL)
@@ -43,6 +39,9 @@ class WorkerSignalHandler:
 
 
 class AWXConsumerBase(object):
+
+    last_stats = time.time()
+
     def __init__(self, name, worker, queues=[], pool=None):
         self.should_stop = False
 
@@ -54,6 +53,7 @@ class AWXConsumerBase(object):
         if pool is None:
             self.pool = WorkerPool()
         self.pool.init_workers(self.worker.work_loop)
+        self.redis = redis.Redis.from_url(settings.BROKER_URL)
 
     @property
     def listening_on(self):
@@ -99,6 +99,16 @@ class AWXConsumerBase(object):
             queue = 0
         self.pool.write(queue, body)
         self.total_messages += 1
+        self.record_statistics()
+
+    def record_statistics(self):
+        if time.time() - self.last_stats > 1:  # buffer stat recording to once per second
+            try:
+                self.redis.set(f'awx_{self.name}_statistics', self.pool.debug())
+                self.last_stats = time.time()
+            except Exception:
+                logger.exception(f"encountered an error communicating with redis to store {self.name} statistics")
+                self.last_stats = time.time()
 
     def run(self, *args, **kwargs):
         signal.signal(signal.SIGINT, self.stop)
@@ -118,23 +128,9 @@ class AWXConsumerRedis(AWXConsumerBase):
         super(AWXConsumerRedis, self).run(*args, **kwargs)
         self.worker.on_start()
 
-        time_to_sleep = 1
         while True:
-            queue = redis.Redis.from_url(settings.BROKER_URL)
-            while True:
-                try:
-                    res = queue.blpop(self.queues)
-                    time_to_sleep = 1
-                    res = json.loads(res[1])
-                    self.process_task(res)
-                except redis.exceptions.RedisError:
-                    time_to_sleep = min(time_to_sleep * 2, 30)
-                    logger.exception(f"encountered an error communicating with redis. Reconnect attempt in {time_to_sleep} seconds")
-                    time.sleep(time_to_sleep)
-                except (json.JSONDecodeError, KeyError):
-                    logger.exception("failed to decode JSON message from redis")
-                if self.should_stop:
-                    return
+            logger.debug(f'{os.getpid()} is alive')
+            time.sleep(60)
 
 
 class AWXConsumerPG(AWXConsumerBase):
@@ -162,7 +158,6 @@ class AWXConsumerPG(AWXConsumerBase):
 
 
 class BaseWorker(object):
-
     def read(self, queue):
         return queue.get(block=True, timeout=1)
 

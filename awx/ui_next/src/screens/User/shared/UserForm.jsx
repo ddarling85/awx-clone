@@ -1,8 +1,8 @@
-import React, { useState } from 'react';
+import React, { useCallback, useState } from 'react';
 import PropTypes from 'prop-types';
-import { withI18n } from '@lingui/react';
+
 import { t } from '@lingui/macro';
-import { Formik, useField } from 'formik';
+import { Formik, useField, useFormikContext } from 'formik';
 import { Form, FormGroup } from '@patternfly/react-core';
 import AnsibleSelect from '../../../components/AnsibleSelect';
 import FormActionGroup from '../../../components/FormActionGroup/FormActionGroup';
@@ -11,92 +11,103 @@ import FormField, {
   FormSubmitError,
 } from '../../../components/FormField';
 import OrganizationLookup from '../../../components/Lookup/OrganizationLookup';
-import { required, requiredEmail } from '../../../util/validators';
+import { required } from '../../../util/validators';
 import { FormColumnLayout } from '../../../components/FormLayout';
 
-function UserFormFields({ user, i18n }) {
+function UserFormFields({ user }) {
   const [organization, setOrganization] = useState(null);
+  const { setFieldValue } = useFormikContext();
+
+  const ldapUser = user.ldap_dn;
+  const socialAuthUser = user.auth?.length > 0;
+  const externalAccount = user.external_account;
 
   const userTypeOptions = [
     {
       value: 'normal',
       key: 'normal',
-      label: i18n._(t`Normal User`),
+      label: t`Normal User`,
       isDisabled: false,
     },
     {
       value: 'auditor',
       key: 'auditor',
-      label: i18n._(t`System Auditor`),
+      label: t`System Auditor`,
       isDisabled: false,
     },
     {
       value: 'administrator',
       key: 'administrator',
-      label: i18n._(t`System Administrator`),
+      label: t`System Administrator`,
       isDisabled: false,
     },
   ];
 
-  const organizationFieldArr = useField({
+  const [, organizationMeta, organizationHelpers] = useField({
     name: 'organization',
     validate: !user.id
-      ? required(i18n._(t`Select a value for this field`), i18n)
+      ? required(t`Select a value for this field`)
       : () => undefined,
   });
-  const organizationMeta = organizationFieldArr[1];
-  const organizationHelpers = organizationFieldArr[2];
 
   const [userTypeField, userTypeMeta] = useField('user_type');
+
+  const onOrganizationChange = useCallback(
+    value => {
+      setFieldValue('organization', value.id);
+      setOrganization(value);
+    },
+    [setFieldValue]
+  );
 
   return (
     <>
       <FormField
         id="user-username"
-        label={i18n._(t`Username`)}
+        label={t`Username`}
         name="username"
         type="text"
-        validate={required(null, i18n)}
-        isRequired
-      />
-      <FormField
-        id="user-email"
-        label={i18n._(t`Email`)}
-        name="email"
-        validate={requiredEmail(i18n)}
-        isRequired
-      />
-      <PasswordField
-        id="user-password"
-        label={i18n._(t`Password`)}
-        name="password"
         validate={
-          !user.id
-            ? required(i18n._(t`This field must not be blank`), i18n)
-            : () => undefined
+          !ldapUser && !externalAccount ? required(null) : () => undefined
         }
-        isRequired={!user.id}
+        isRequired={!ldapUser && !externalAccount}
       />
-      <PasswordField
-        id="user-confirm-password"
-        label={i18n._(t`Confirm Password`)}
-        name="confirm_password"
-        validate={
-          !user.id
-            ? required(i18n._(t`This field must not be blank`), i18n)
-            : () => undefined
-        }
-        isRequired={!user.id}
-      />
+      <FormField id="user-email" label={t`Email`} name="email" type="text" />
+      {!ldapUser && !(socialAuthUser && externalAccount) && (
+        <>
+          <PasswordField
+            id="user-password"
+            label={t`Password`}
+            name="password"
+            validate={
+              !user.id
+                ? required(t`This field must not be blank`)
+                : () => undefined
+            }
+            isRequired={!user.id}
+          />
+          <PasswordField
+            id="user-confirm-password"
+            label={t`Confirm Password`}
+            name="confirm_password"
+            validate={
+              !user.id
+                ? required(t`This field must not be blank`)
+                : () => undefined
+            }
+            isRequired={!user.id}
+          />
+        </>
+      )}
       <FormField
         id="user-first-name"
-        label={i18n._(t`First Name`)}
+        label={t`First Name`}
         name="first_name"
         type="text"
       />
       <FormField
         id="user-last-name"
-        label={i18n._(t`Last Name`)}
+        label={t`Last Name`}
         name="last_name"
         type="text"
       />
@@ -105,20 +116,20 @@ function UserFormFields({ user, i18n }) {
           helperTextInvalid={organizationMeta.error}
           isValid={!organizationMeta.touched || !organizationMeta.error}
           onBlur={() => organizationHelpers.setTouched()}
-          onChange={value => {
-            organizationHelpers.setValue(value.id);
-            setOrganization(value);
-          }}
+          onChange={onOrganizationChange}
           value={organization}
           required
+          autoPopulate={!user?.id}
         />
       )}
       <FormGroup
         fieldId="user-type"
         helperTextInvalid={userTypeMeta.error}
         isRequired
-        isValid={!userTypeMeta.touched || !userTypeMeta.error}
-        label={i18n._(t`User Type`)}
+        validated={
+          !userTypeMeta.touched || !userTypeMeta.error ? 'default' : 'error'
+        }
+        label={t`User Type`}
       >
         <AnsibleSelect
           isValid={!userTypeMeta.touched || !userTypeMeta.error}
@@ -131,13 +142,11 @@ function UserFormFields({ user, i18n }) {
   );
 }
 
-function UserForm({ user, handleCancel, handleSubmit, submitError, i18n }) {
+function UserForm({ user, handleCancel, handleSubmit, submitError }) {
   const handleValidateAndSubmit = (values, { setErrors }) => {
     if (values.password !== values.confirm_password) {
       setErrors({
-        confirm_password: i18n._(
-          t`This value does not match the password you entered previously. Please confirm that password.`
-        ),
+        confirm_password: t`This value does not match the password you entered previously. Please confirm that password.`,
       });
     } else {
       values.is_superuser = values.user_type === 'administrator';
@@ -176,7 +185,7 @@ function UserForm({ user, handleCancel, handleSubmit, submitError, i18n }) {
       {formik => (
         <Form autoComplete="off" onSubmit={formik.handleSubmit}>
           <FormColumnLayout>
-            <UserFormFields user={user} i18n={i18n} />
+            <UserFormFields user={user} />
             <FormSubmitError error={submitError} />
             <FormActionGroup
               onCancel={handleCancel}
@@ -199,4 +208,4 @@ UserForm.defaultProps = {
   user: {},
 };
 
-export default withI18n()(UserForm);
+export default UserForm;

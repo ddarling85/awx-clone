@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import { Link, useHistory, useRouteMatch } from 'react-router-dom';
-import { withI18n } from '@lingui/react';
+
 import { t } from '@lingui/macro';
 import { Button, Chip } from '@patternfly/react-core';
 import { OrganizationsAPI } from '../../../api';
@@ -12,13 +12,17 @@ import {
 import { CardBody, CardActionsRow } from '../../../components/Card';
 import AlertModal from '../../../components/AlertModal';
 import ChipGroup from '../../../components/ChipGroup';
+import CredentialChip from '../../../components/CredentialChip';
 import ContentError from '../../../components/ContentError';
 import ContentLoading from '../../../components/ContentLoading';
 import DeleteButton from '../../../components/DeleteButton';
 import ErrorDetail from '../../../components/ErrorDetail';
 import useRequest, { useDismissableError } from '../../../util/useRequest';
+import { useConfig } from '../../../contexts/Config';
+import ExecutionEnvironmentDetail from '../../../components/ExecutionEnvironmentDetail';
+import { relatedResourceDeleteRequests } from '../../../util/getRelatedResourceDeleteDetails';
 
-function OrganizationDetail({ i18n, organization }) {
+function OrganizationDetail({ organization }) {
   const {
     params: { id },
   } = useRouteMatch();
@@ -30,11 +34,13 @@ function OrganizationDetail({ i18n, organization }) {
     created,
     modified,
     summary_fields,
+    galaxy_credentials,
   } = organization;
   const [contentError, setContentError] = useState(null);
   const [hasContentLoading, setHasContentLoading] = useState(true);
   const [instanceGroups, setInstanceGroups] = useState([]);
   const history = useHistory();
+  const { license_info = {} } = useConfig();
 
   useEffect(() => {
     (async () => {
@@ -66,6 +72,10 @@ function OrganizationDetail({ i18n, organization }) {
 
   const { error, dismissError } = useDismissableError(deleteError);
 
+  const deleteDetailsRequests = relatedResourceDeleteRequests.organization(
+    organization
+  );
+
   if (hasContentLoading) {
     return <ContentLoading />;
   }
@@ -78,30 +88,33 @@ function OrganizationDetail({ i18n, organization }) {
     <CardBody>
       <DetailList>
         <Detail
-          label={i18n._(t`Name`)}
+          label={t`Name`}
           value={name}
           dataCy="organization-detail-name"
         />
-        <Detail label={i18n._(t`Description`)} value={description} />
-        <Detail label={i18n._(t`Max Hosts`)} value={`${max_hosts}`} />
-        <Detail
-          label={i18n._(t`Ansible Environment`)}
-          value={custom_virtualenv}
+        <Detail label={t`Description`} value={description} />
+        {license_info?.license_type !== 'open' && (
+          <Detail label={t`Max Hosts`} value={`${max_hosts}`} />
+        )}
+        <ExecutionEnvironmentDetail
+          virtualEnvironment={custom_virtualenv}
+          executionEnvironment={summary_fields?.default_environment}
+          isDefaultEnvironment
         />
         <UserDateDetail
-          label={i18n._(t`Created`)}
+          label={t`Created`}
           date={created}
           user={summary_fields.created_by}
         />
         <UserDateDetail
-          label={i18n._(t`Last Modified`)}
+          label={t`Last Modified`}
           date={modified}
           user={summary_fields.modified_by}
         />
         {instanceGroups && instanceGroups.length > 0 && (
           <Detail
             fullWidth
-            label={i18n._(t`Instance Groups`)}
+            label={t`Instance Groups`}
             value={
               <ChipGroup numChips={5} totalChips={instanceGroups.length}>
                 {instanceGroups.map(ig => (
@@ -113,26 +126,46 @@ function OrganizationDetail({ i18n, organization }) {
             }
           />
         )}
+        {galaxy_credentials && galaxy_credentials.length > 0 && (
+          <Detail
+            fullWidth
+            label={t`Galaxy Credentials`}
+            value={
+              <ChipGroup numChips={5} totalChips={galaxy_credentials.length}>
+                {galaxy_credentials.map(credential => (
+                  <CredentialChip
+                    credential={credential}
+                    key={credential.id}
+                    isReadOnly
+                  />
+                ))}
+              </ChipGroup>
+            }
+          />
+        )}
       </DetailList>
       <CardActionsRow>
         {summary_fields.user_capabilities.edit && (
           <Button
-            aria-label={i18n._(t`Edit`)}
+            ouiaId="organization-detail-edit-button"
+            aria-label={t`Edit`}
             component={Link}
             to={`/organizations/${id}/edit`}
           >
-            {i18n._(t`Edit`)}
+            {t`Edit`}
           </Button>
         )}
         {summary_fields.user_capabilities &&
           summary_fields.user_capabilities.delete && (
             <DeleteButton
               name={name}
-              modalTitle={i18n._(t`Delete Organization`)}
+              modalTitle={t`Delete Organization`}
               onConfirm={deleteOrganization}
               isDisabled={isLoading}
+              deleteDetailsRequests={deleteDetailsRequests}
+              deleteMessage={t`This organization is currently being by other resources. Are you sure you want to delete it?`}
             >
-              {i18n._(t`Delete`)}
+              {t`Delete`}
             </DeleteButton>
           )}
       </CardActionsRow>
@@ -141,10 +174,10 @@ function OrganizationDetail({ i18n, organization }) {
         <AlertModal
           isOpen={error}
           variant="error"
-          title={i18n._(t`Error!`)}
+          title={t`Error!`}
           onClose={dismissError}
         >
-          {i18n._(t`Failed to delete organization.`)}
+          {t`Failed to delete organization.`}
           <ErrorDetail error={error} />
         </AlertModal>
       )}
@@ -152,4 +185,4 @@ function OrganizationDetail({ i18n, organization }) {
   );
 }
 
-export default withI18n()(OrganizationDetail);
+export default OrganizationDetail;

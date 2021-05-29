@@ -1,57 +1,76 @@
-import React, { useState } from 'react';
+import React from 'react';
 import { t } from '@lingui/macro';
+import { useField } from 'formik';
+import styled from 'styled-components';
+import { Alert } from '@patternfly/react-core';
 import InventoryStep from './InventoryStep';
 import StepName from './StepName';
 
+const InventoryAlert = styled(Alert)`
+  margin-bottom: 16px;
+`;
+
 const STEP_ID = 'inventory';
 
-export default function useInventoryStep(config, resource, visitedSteps, i18n) {
-  const [stepErrors, setStepErrors] = useState({});
-
-  const validate = values => {
-    if (!config.ask_inventory_on_launch) {
-      return {};
-    }
-    const errors = {};
-    if (!values.inventory) {
-      errors.inventory = i18n._(t`An inventory must be selected`);
-    }
-    setStepErrors(errors);
-    return errors;
-  };
-
-  const hasErrors = visitedSteps[STEP_ID] && Object.keys(stepErrors).length > 0;
+export default function useInventoryStep(launchConfig, resource, visitedSteps) {
+  const [, meta, helpers] = useField('inventory');
+  const formError =
+    !resource || resource?.type === 'workflow_job_template'
+      ? false
+      : Object.keys(visitedSteps).includes(STEP_ID) &&
+        meta.touched &&
+        !meta.value;
 
   return {
-    step: getStep(config, hasErrors, i18n),
-    initialValues: getInitialValues(config, resource),
-    validate,
+    step: getStep(launchConfig, formError, resource),
+    initialValues: getInitialValues(launchConfig, resource),
     isReady: true,
     contentError: null,
-    formError: stepErrors,
-    setTouched: setFieldsTouched => {
-      setFieldsTouched({
-        inventory: true,
-      });
+    hasError: launchConfig.ask_inventory_on_launch && formError,
+    setTouched: setFieldTouched => {
+      setFieldTouched('inventory', true, false);
+    },
+    validate: () => {
+      if (meta.touched && !meta.value && resource.type === 'job_template') {
+        helpers.setError(t`An inventory must be selected`);
+      }
     },
   };
 }
-
-function getStep(config, hasErrors, i18n) {
-  if (!config.ask_inventory_on_launch) {
+function getStep(launchConfig, formError, resource) {
+  if (!launchConfig.ask_inventory_on_launch) {
     return null;
   }
   return {
     id: STEP_ID,
-    name: <StepName hasErrors={hasErrors}>{i18n._(t`Inventory`)}</StepName>,
-    component: <InventoryStep i18n={i18n} />,
+    name: (
+      <StepName hasErrors={formError} id="inventory-step">
+        {t`Inventory`}
+      </StepName>
+    ),
+    component: (
+      <InventoryStep
+        warningMessage={
+          resource.type === 'workflow_job_template' ? (
+            <InventoryAlert
+              ouiaId="InventoryStep-alert"
+              variant="warning"
+              isInline
+              title={t`This inventory is applied to all job template nodes within this workflow (${resource.name}) that prompt for an inventory.`}
+            />
+          ) : null
+        }
+      />
+    ),
+    enableNext: true,
   };
 }
 
-function getInitialValues(config, resource) {
-  if (!config.ask_inventory_on_launch) {
+function getInitialValues(launchConfig, resource) {
+  if (!launchConfig.ask_inventory_on_launch) {
     return {};
   }
+
   return {
     inventory: resource?.summary_fields?.inventory || null,
   };

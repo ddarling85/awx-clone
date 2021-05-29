@@ -21,6 +21,16 @@ describe('InventoryStep', () => {
         count: 3,
       },
     });
+
+    InventoriesAPI.readOptions.mockResolvedValue({
+      data: {
+        actions: {
+          GET: {},
+          POST: {},
+        },
+        related_search_fields: [],
+      },
+    });
   });
 
   test('should load inventories', async () => {
@@ -36,5 +46,21 @@ describe('InventoryStep', () => {
 
     expect(InventoriesAPI.read).toHaveBeenCalled();
     expect(wrapper.find('OptionsList').prop('options')).toEqual(inventories);
+  });
+
+  test('should show warning message when one is passed in', async () => {
+    let wrapper;
+    await act(async () => {
+      wrapper = mountWithContexts(
+        <Formik>
+          <InventoryStep
+            warningMessage={<div id="test-warning-message">TEST</div>}
+          />
+        </Formik>
+      );
+    });
+    wrapper.update();
+
+    expect(wrapper.find('div#test-warning-message').length).toBe(1);
   });
 });

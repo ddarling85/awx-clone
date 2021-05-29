@@ -1,151 +1,345 @@
-import React, { Component } from 'react';
+import React, { useCallback, useEffect } from 'react';
 import { Redirect, withRouter } from 'react-router-dom';
-import { withI18n } from '@lingui/react';
+
 import { t } from '@lingui/macro';
+import { Formik } from 'formik';
 import styled from 'styled-components';
-import { LoginForm, LoginPage as PFLoginPage } from '@patternfly/react-core';
-import { RootAPI } from '../../api';
-import { BrandName } from '../../variables';
+import sanitizeHtml from 'sanitize-html';
+import {
+  Brand,
+  LoginMainFooterLinksItem,
+  LoginForm,
+  Login as PFLogin,
+  LoginHeader,
+  LoginFooter,
+  LoginMainHeader,
+  LoginMainBody,
+  LoginMainFooter,
+  Tooltip,
+} from '@patternfly/react-core';
 
-import brandLogo from './brand-logo.svg';
+import {
+  AzureIcon,
+  GoogleIcon,
+  GithubIcon,
+  UserCircleIcon,
+} from '@patternfly/react-icons';
+import useRequest, { useDismissableError } from '../../util/useRequest';
+import { AuthAPI, RootAPI } from '../../api';
+import AlertModal from '../../components/AlertModal';
+import ErrorDetail from '../../components/ErrorDetail';
 
-const LoginPage = styled(PFLoginPage)`
+const loginLogoSrc = '/static/media/logo-login.svg';
+
+const Login = styled(PFLogin)`
   & .pf-c-brand {
     max-height: 285px;
   }
 `;
 
-class AWXLogin extends Component {
-  constructor(props) {
-    super(props);
-
-    this.state = {
-      username: '',
-      password: '',
-      hasAuthError: false,
-      hasValidationError: false,
-      isAuthenticating: false,
-      isLoading: true,
-      logo: null,
-      loginInfo: null,
-    };
-
-    this.handleChangeUsername = this.handleChangeUsername.bind(this);
-    this.handleChangePassword = this.handleChangePassword.bind(this);
-    this.handleLoginButtonClick = this.handleLoginButtonClick.bind(this);
-    this.loadCustomLoginInfo = this.loadCustomLoginInfo.bind(this);
-  }
-
-  async componentDidMount() {
-    await this.loadCustomLoginInfo();
-  }
-
-  async loadCustomLoginInfo() {
-    this.setState({ isLoading: true });
-    try {
-      const {
-        data: { custom_logo, custom_login_info },
-      } = await RootAPI.read();
-      const logo = custom_logo ? `data:image/jpeg;${custom_logo}` : brandLogo;
-
-      this.setState({ logo, loginInfo: custom_login_info });
-    } catch (err) {
-      this.setState({ logo: brandLogo });
-    } finally {
-      this.setState({ isLoading: false });
-    }
-  }
-
-  async handleLoginButtonClick(event) {
-    const { username, password, isAuthenticating } = this.state;
-
-    event.preventDefault();
-
-    if (isAuthenticating) {
-      return;
-    }
-
-    this.setState({ hasAuthError: false, isAuthenticating: true });
-    try {
-      // note: if authentication is successful, the appropriate cookie will be set automatically
-      // and isAuthenticated() (the source of truth) will start returning true.
-      await RootAPI.login(username, password);
-    } catch (err) {
-      if (err && err.response && err.response.status === 401) {
-        this.setState({ hasValidationError: true });
-      } else {
-        this.setState({ hasAuthError: true });
-      }
-    } finally {
-      this.setState({ isAuthenticating: false });
-    }
-  }
-
-  handleChangeUsername(value) {
-    this.setState({ username: value, hasValidationError: false });
-  }
-
-  handleChangePassword(value) {
-    this.setState({ password: value, hasValidationError: false });
-  }
-
-  render() {
-    const {
-      hasAuthError,
-      hasValidationError,
-      username,
-      password,
-      isLoading,
+function AWXLogin({ alt, isAuthenticated }) {
+  const {
+    isLoading: isCustomLoginInfoLoading,
+    error: customLoginInfoError,
+    request: fetchCustomLoginInfo,
+    result: {
+      brandName,
       logo,
       loginInfo,
-    } = this.state;
-    const { alt, i18n, isAuthenticated } = this.props;
-    // Setting BrandName to a variable here is necessary to get the jest tests
-    // passing.  Attempting to use BrandName in the template literal results
-    // in failing tests.
-    const brandName = BrandName;
+      socialAuthOptions,
+      loginRedirectOverride,
+    },
+  } = useRequest(
+    useCallback(async () => {
+      const [
+        {
+          data: { custom_logo, custom_login_info, login_redirect_override },
+        },
+        {
+          data: { BRAND_NAME },
+        },
+        { data: authData },
+      ] = await Promise.all([
+        RootAPI.read(),
+        RootAPI.readAssetVariables(),
+        AuthAPI.read(),
+      ]);
+      const logoSrc = custom_logo
+        ? `data:image/jpeg;${custom_logo}`
+        : loginLogoSrc;
 
-    if (isLoading) {
-      return null;
+      return {
+        brandName: BRAND_NAME,
+        logo: logoSrc,
+        loginInfo: custom_login_info,
+        socialAuthOptions: authData,
+        loginRedirectOverride: login_redirect_override,
+      };
+    }, []),
+    {
+      brandName: null,
+      logo: loginLogoSrc,
+      loginInfo: null,
+      socialAuthOptions: {},
     }
+  );
 
-    if (isAuthenticated(document.cookie)) {
-      return <Redirect to="/" />;
-    }
+  const {
+    error: loginInfoError,
+    dismissError: dismissLoginInfoError,
+  } = useDismissableError(customLoginInfoError);
 
-    let helperText;
-    if (hasValidationError) {
-      helperText = i18n._(t`Invalid username or password. Please try again.`);
-    } else {
-      helperText = i18n._(t`There was a problem signing in. Please try again.`);
-    }
+  useEffect(() => {
+    fetchCustomLoginInfo();
+  }, [fetchCustomLoginInfo]);
+  const {
+    isLoading: isAuthenticating,
+    error: authenticationError,
+    request: authenticate,
+  } = useRequest(
+    useCallback(async ({ username, password }) => {
+      await RootAPI.login(username, password);
+    }, [])
+  );
 
-    return (
-      <LoginPage
-        brandImgSrc={logo}
-        brandImgAlt={alt || brandName}
-        loginTitle={i18n._(t`Welcome to Ansible ${brandName}! Please Sign In.`)}
-        textContent={loginInfo}
-      >
-        <LoginForm
-          className={hasAuthError || hasValidationError ? 'pf-m-error' : ''}
-          helperText={helperText}
-          isValidPassword={!hasValidationError}
-          isValidUsername={!hasValidationError}
-          loginButtonLabel={i18n._(t`Log In`)}
-          onChangePassword={this.handleChangePassword}
-          onChangeUsername={this.handleChangeUsername}
-          onLoginButtonClick={this.handleLoginButtonClick}
-          passwordLabel={i18n._(t`Password`)}
-          passwordValue={password}
-          showHelperText={hasAuthError || hasValidationError}
-          usernameLabel={i18n._(t`Username`)}
-          usernameValue={username}
-        />
-      </LoginPage>
-    );
+  const {
+    error: authError,
+    dismissError: dismissAuthError,
+  } = useDismissableError(authenticationError);
+
+  const handleSubmit = async values => {
+    dismissAuthError();
+    await authenticate(values);
+  };
+
+  if (isCustomLoginInfoLoading) {
+    return null;
   }
+  if (!isAuthenticated(document.cookie) && loginRedirectOverride) {
+    window.location.replace(loginRedirectOverride);
+    return null;
+  }
+  if (isAuthenticated(document.cookie)) {
+    return <Redirect to="/" />;
+  }
+
+  let helperText;
+  if (authError?.response?.status === 401) {
+    helperText = t`Invalid username or password. Please try again.`;
+  } else {
+    helperText = t`There was a problem logging in. Please try again.`;
+  }
+
+  const HeaderBrand = (
+    <Brand data-cy="brand-logo" src={logo} alt={alt || brandName} />
+  );
+  const Header = <LoginHeader headerBrand={HeaderBrand} />;
+  const Footer = (
+    <LoginFooter
+      data-cy="login-footer"
+      dangerouslySetInnerHTML={{
+        __html: sanitizeHtml(loginInfo),
+      }}
+    />
+  );
+
+  return (
+    <Login header={Header} footer={Footer}>
+      <LoginMainHeader
+        data-cy="login-header"
+        title={brandName ? t`Welcome to ${brandName}!` : ''}
+        subtitle={t`Please log in`}
+      />
+      <LoginMainBody>
+        <Formik
+          initialValues={{
+            password: '',
+            username: '',
+          }}
+          onSubmit={handleSubmit}
+        >
+          {formik => (
+            <LoginForm
+              data-cy="login-form"
+              className={authError ? 'pf-m-error' : ''}
+              helperText={helperText}
+              isLoginButtonDisabled={isAuthenticating}
+              isValidPassword={!authError}
+              isValidUsername={!authError}
+              loginButtonLabel={t`Log In`}
+              onChangePassword={val => {
+                formik.setFieldValue('password', val);
+                dismissAuthError();
+              }}
+              onChangeUsername={val => {
+                formik.setFieldValue('username', val);
+                dismissAuthError();
+              }}
+              onLoginButtonClick={formik.handleSubmit}
+              passwordLabel={t`Password`}
+              passwordValue={formik.values.password}
+              showHelperText={authError}
+              usernameLabel={t`Username`}
+              usernameValue={formik.values.username}
+            />
+          )}
+        </Formik>
+        {loginInfoError && (
+          <AlertModal
+            isOpen={loginInfoError}
+            variant="error"
+            title={t`Error!`}
+            onClose={dismissLoginInfoError}
+            data-cy="login-info-error"
+          >
+            {t`Failed to fetch custom login configuration settings.  System defaults will be shown instead.`}
+            <ErrorDetail error={loginInfoError} />
+          </AlertModal>
+        )}
+      </LoginMainBody>
+      <LoginMainFooter
+        socialMediaLoginContent={
+          <>
+            {socialAuthOptions &&
+              Object.keys(socialAuthOptions).map(authKey => {
+                const loginUrl = socialAuthOptions[authKey].login_url;
+                if (authKey === 'azuread-oauth2') {
+                  return (
+                    <LoginMainFooterLinksItem
+                      data-cy="social-auth-azure"
+                      href={loginUrl}
+                      key={authKey}
+                    >
+                      <Tooltip content={t`Sign in with Azure AD`}>
+                        <AzureIcon />
+                      </Tooltip>
+                    </LoginMainFooterLinksItem>
+                  );
+                }
+                if (authKey === 'github') {
+                  return (
+                    <LoginMainFooterLinksItem
+                      data-cy="social-auth-github"
+                      href={loginUrl}
+                      key={authKey}
+                    >
+                      <Tooltip content={t`Sign in with GitHub`}>
+                        <GithubIcon />
+                      </Tooltip>
+                    </LoginMainFooterLinksItem>
+                  );
+                }
+                if (authKey === 'github-org') {
+                  return (
+                    <LoginMainFooterLinksItem
+                      data-cy="social-auth-github-org"
+                      href={loginUrl}
+                      key={authKey}
+                    >
+                      <Tooltip content={t`Sign in with GitHub Organizations`}>
+                        <GithubIcon />
+                      </Tooltip>
+                    </LoginMainFooterLinksItem>
+                  );
+                }
+                if (authKey === 'github-team') {
+                  return (
+                    <LoginMainFooterLinksItem
+                      data-cy="social-auth-github-team"
+                      href={loginUrl}
+                      key={authKey}
+                    >
+                      <Tooltip content={t`Sign in with GitHub Teams`}>
+                        <GithubIcon />
+                      </Tooltip>
+                    </LoginMainFooterLinksItem>
+                  );
+                }
+                if (authKey === 'github-enterprise') {
+                  return (
+                    <LoginMainFooterLinksItem
+                      data-cy="social-auth-github-enterprise"
+                      href={loginUrl}
+                      key={authKey}
+                    >
+                      <Tooltip content={t`Sign in with GitHub Enterprise`}>
+                        <GithubIcon />
+                      </Tooltip>
+                    </LoginMainFooterLinksItem>
+                  );
+                }
+                if (authKey === 'github-enterprise-org') {
+                  return (
+                    <LoginMainFooterLinksItem
+                      data-cy="social-auth-github-enterprise-org"
+                      href={loginUrl}
+                      key={authKey}
+                    >
+                      <Tooltip
+                        content={t`Sign in with GitHub Enterprise Organizations`}
+                      >
+                        <GithubIcon />
+                      </Tooltip>
+                    </LoginMainFooterLinksItem>
+                  );
+                }
+                if (authKey === 'github-enterprise-team') {
+                  return (
+                    <LoginMainFooterLinksItem
+                      data-cy="social-auth-github-enterprise-team"
+                      href={loginUrl}
+                      key={authKey}
+                    >
+                      <Tooltip
+                        content={t`Sign in with GitHub Enterprise Teams`}
+                      >
+                        <GithubIcon />
+                      </Tooltip>
+                    </LoginMainFooterLinksItem>
+                  );
+                }
+                if (authKey === 'google-oauth2') {
+                  return (
+                    <LoginMainFooterLinksItem
+                      data-cy="social-auth-google"
+                      href={loginUrl}
+                      key={authKey}
+                    >
+                      <Tooltip content={t`Sign in with Google`}>
+                        <GoogleIcon />
+                      </Tooltip>
+                    </LoginMainFooterLinksItem>
+                  );
+                }
+                if (authKey.startsWith('saml')) {
+                  const samlIDP = authKey.split(':')[1] || null;
+                  return (
+                    <LoginMainFooterLinksItem
+                      data-cy="social-auth-saml"
+                      href={loginUrl}
+                      key={authKey}
+                    >
+                      <Tooltip
+                        content={
+                          samlIDP
+                            ? t`Sign in with SAML ${samlIDP}`
+                            : t`Sign in with SAML`
+                        }
+                      >
+                        <UserCircleIcon />
+                      </Tooltip>
+                    </LoginMainFooterLinksItem>
+                  );
+                }
+
+                return null;
+              })}
+          </>
+        }
+      />
+    </Login>
+  );
 }
 
+export default withRouter(AWXLogin);
 export { AWXLogin as _AWXLogin };
-export default withI18n()(withRouter(AWXLogin));

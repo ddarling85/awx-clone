@@ -1,5 +1,5 @@
 import React from 'react';
-import { withI18n } from '@lingui/react';
+
 import { t } from '@lingui/macro';
 import { List, ListItem } from '@patternfly/react-core';
 import { Link } from 'react-router-dom';
@@ -8,8 +8,9 @@ import { Config } from '../../contexts/Config';
 import { Detail, DeletedDetail } from '../DetailList';
 import CredentialChip from '../CredentialChip';
 import { toTitleCase } from '../../util/strings';
+import ExecutionEnvironmentDetail from '../ExecutionEnvironmentDetail';
 
-function PromptProjectDetail({ i18n, resource }) {
+function PromptProjectDetail({ resource }) {
   const {
     allow_override,
     custom_virtualenv,
@@ -17,6 +18,7 @@ function PromptProjectDetail({ i18n, resource }) {
     scm_branch,
     scm_clean,
     scm_delete_on_update,
+    scm_track_submodules,
     scm_refspec,
     scm_type,
     scm_update_on_launch,
@@ -29,21 +31,21 @@ function PromptProjectDetail({ i18n, resource }) {
   if (
     scm_clean ||
     scm_delete_on_update ||
+    scm_track_submodules ||
     scm_update_on_launch ||
     allow_override
   ) {
     optionsList = (
       <List>
-        {scm_clean && <ListItem>{i18n._(t`Clean`)}</ListItem>}
-        {scm_delete_on_update && (
-          <ListItem>{i18n._(t`Delete on Update`)}</ListItem>
+        {scm_clean && <ListItem>{t`Clean`}</ListItem>}
+        {scm_delete_on_update && <ListItem>{t`Delete on Update`}</ListItem>}
+        {scm_track_submodules && (
+          <ListItem>{t`Track submodules latest commit on branch`}</ListItem>
         )}
         {scm_update_on_launch && (
-          <ListItem>{i18n._(t`Update Revision on Launch`)}</ListItem>
+          <ListItem>{t`Update Revision on Launch`}</ListItem>
         )}
-        {allow_override && (
-          <ListItem>{i18n._(t`Allow Branch Override`)}</ListItem>
-        )}
+        {allow_override && <ListItem>{t`Allow Branch Override`}</ListItem>}
       </List>
     );
   }
@@ -52,7 +54,7 @@ function PromptProjectDetail({ i18n, resource }) {
     <>
       {summary_fields?.organization ? (
         <Detail
-          label={i18n._(t`Organization`)}
+          label={t`Organization`}
           value={
             <Link
               to={`/organizations/${summary_fields.organization.id}/details`}
@@ -62,18 +64,23 @@ function PromptProjectDetail({ i18n, resource }) {
           }
         />
       ) : (
-        <DeletedDetail label={i18n._(t`Organization`)} />
+        <DeletedDetail label={t`Organization`} />
       )}
-      <Detail
-        label={i18n._(t`Source Control Type`)}
-        value={scm_type === '' ? i18n._(t`Manual`) : toTitleCase(scm_type)}
+      <ExecutionEnvironmentDetail
+        virtualEnvironment={custom_virtualenv}
+        executionEnvironment={summary_fields?.default_environment}
+        isDefaultEnvironment
       />
-      <Detail label={i18n._(t`Source Control URL`)} value={scm_url} />
-      <Detail label={i18n._(t`Source Control Branch`)} value={scm_branch} />
-      <Detail label={i18n._(t`Source Control Refspec`)} value={scm_refspec} />
+      <Detail
+        label={t`Source Control Type`}
+        value={scm_type === '' ? t`Manual` : toTitleCase(scm_type)}
+      />
+      <Detail label={t`Source Control URL`} value={scm_url} />
+      <Detail label={t`Source Control Branch`} value={scm_branch} />
+      <Detail label={t`Source Control Refspec`} value={scm_refspec} />
       {summary_fields?.credential?.id && (
         <Detail
-          label={i18n._(t`Source Control Credential`)}
+          label={t`Source Control Credential`}
           value={
             <CredentialChip
               key={resource.summary_fields.credential.id}
@@ -83,26 +90,19 @@ function PromptProjectDetail({ i18n, resource }) {
           }
         />
       )}
-      {optionsList && <Detail label={i18n._(t`Options`)} value={optionsList} />}
+      {optionsList && <Detail label={t`Options`} value={optionsList} />}
       <Detail
-        label={i18n._(t`Cache Timeout`)}
-        value={`${scm_update_cache_timeout} ${i18n._(t`Seconds`)}`}
-      />
-      <Detail
-        label={i18n._(t`Ansible Environment`)}
-        value={custom_virtualenv}
+        label={t`Cache Timeout`}
+        value={`${scm_update_cache_timeout} ${t`Seconds`}`}
       />
       <Config>
         {({ project_base_dir }) => (
-          <Detail
-            label={i18n._(t`Project Base Path`)}
-            value={project_base_dir}
-          />
+          <Detail label={t`Project Base Path`} value={project_base_dir} />
         )}
       </Config>
-      <Detail label={i18n._(t`Playbook Directory`)} value={local_path} />
+      <Detail label={t`Playbook Directory`} value={local_path} />
     </>
   );
 }
 
-export default withI18n()(PromptProjectDetail);
+export default PromptProjectDetail;

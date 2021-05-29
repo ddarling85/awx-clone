@@ -21,23 +21,9 @@ from split_settings.tools import optional, include
 # Load default settings.
 from .defaults import *  # NOQA
 
-# don't use memcache when running tests
-if "pytest" in sys.modules:
-    CACHES = {
-        'default': {
-            'BACKEND': 'django.core.cache.backends.locmem.LocMemCache',
-            'LOCATION': 'unique-{}'.format(str(uuid.uuid4())),
-        },
-    }
 
 # awx-manage shell_plus --notebook
-NOTEBOOK_ARGUMENTS = [
-    '--NotebookApp.token=',
-    '--ip', '0.0.0.0',
-    '--port', '8888',
-    '--allow-root',
-    '--no-browser',
-]
+NOTEBOOK_ARGUMENTS = ['--NotebookApp.token=', '--ip', '0.0.0.0', '--port', '8888', '--allow-root', '--no-browser']
 
 # print SQL queries in shell_plus
 SHELL_PLUS_PRINT_SQL = False
@@ -49,11 +35,12 @@ LOGGING['handlers']['console']['()'] = 'awx.main.utils.handlers.ColorHandler'  #
 LOGGING['handlers']['task_system'] = LOGGING['handlers']['console'].copy()  # noqa
 COLOR_LOGS = True
 
-# Pipe management playbook output to console
-LOGGING['loggers']['awx.isolated.manager.playbooks']['propagate'] = True  # noqa
-
 # celery is annoyingly loud when docker containers start
 LOGGING['loggers'].pop('celery', None)  # noqa
+# avoid awx.main.dispatch WARNING-level scaling worker up/down messages
+LOGGING['loggers']['awx.main.dispatch']['level'] = 'ERROR'  # noqa
+# suppress the spamminess of the awx.main.scheduler and .tasks loggers
+LOGGING['loggers']['awx']['level'] = 'INFO'  # noqa
 
 ALLOWED_HOSTS = ['*']
 
@@ -67,11 +54,8 @@ SESSION_COOKIE_SECURE = False
 CSRF_COOKIE_SECURE = False
 
 # Override django.template.loaders.cached.Loader in defaults.py
-template = next((tpl_backend for tpl_backend in TEMPLATES if tpl_backend['NAME'] == 'default'), None) # noqa
-template['OPTIONS']['loaders'] = (
-    'django.template.loaders.filesystem.Loader',
-    'django.template.loaders.app_directories.Loader',
-)
+template = next((tpl_backend for tpl_backend in TEMPLATES if tpl_backend['NAME'] == 'default'), None)  # noqa
+template['OPTIONS']['loaders'] = ('django.template.loaders.filesystem.Loader', 'django.template.loaders.app_directories.Loader')
 
 CALLBACK_QUEUE = "callback_tasks"
 
@@ -80,56 +64,18 @@ CALLBACK_QUEUE = "callback_tasks"
 # Note: This setting may be overridden by database settings.
 AWX_ROLES_ENABLED = True
 
-# Enable PROOT for tower-qa integration tests.
-# Note: This setting may be overridden by database settings.
-AWX_PROOT_ENABLED = True
-
-AWX_ISOLATED_USERNAME = 'root'
-AWX_ISOLATED_CHECK_INTERVAL = 1
-AWX_ISOLATED_PERIODIC_CHECK = 30
-
 # Disable Pendo on the UI for development/test.
 # Note: This setting may be overridden by database settings.
 PENDO_TRACKING_STATE = "off"
 INSIGHTS_TRACKING_STATE = False
 
-# Use Django-Jenkins if installed. Only run tests for awx.main app.
-try:
-    import django_jenkins
-    INSTALLED_APPS += [django_jenkins.__name__,] # noqa
-    PROJECT_APPS = ('awx.main.tests', 'awx.api.tests',)
-except ImportError:
-    pass
-
-if 'django_jenkins' in INSTALLED_APPS:
-    JENKINS_TASKS = (
-        # 'django_jenkins.tasks.run_pylint',
-        # 'django_jenkins.tasks.run_flake8',
-        # The following are not needed when including run_flake8
-        # 'django_jenkins.tasks.run_pep8',
-        # 'django_jenkins.tasks.run_pyflakes',
-        # The following are handled by various grunt tasks and no longer required
-        # 'django_jenkins.tasks.run_jshint',
-        # 'django_jenkins.tasks.run_csslint',
-    )
-    PEP8_RCFILE = "setup.cfg"
-    PYLINT_RCFILE = ".pylintrc"
-
-
 # debug toolbar and swagger assume that requirements/requirements_dev.txt are installed
 
-INSTALLED_APPS += [   # NOQA
-    'rest_framework_swagger',
-    'debug_toolbar',
-]
+INSTALLED_APPS += ['rest_framework_swagger', 'debug_toolbar']  # NOQA
 
-MIDDLEWARE = [
-    'debug_toolbar.middleware.DebugToolbarMiddleware',
-] + MIDDLEWARE  # NOQA
+MIDDLEWARE = ['debug_toolbar.middleware.DebugToolbarMiddleware'] + MIDDLEWARE  # NOQA
 
-DEBUG_TOOLBAR_CONFIG = {
-    'ENABLE_STACKTRACES' : True,
-}
+DEBUG_TOOLBAR_CONFIG = {'ENABLE_STACKTRACES': True}
 
 # Configure a default UUID for development only.
 SYSTEM_UUID = '00000000-0000-0000-0000-000000000000'
@@ -149,9 +95,9 @@ include(optional('/etc/tower/settings.py'), scope=locals())
 include(optional('/etc/tower/conf.d/*.py'), scope=locals())
 
 # Installed differently in Dockerfile compared to production versions
-AWX_ANSIBLE_COLLECTIONS_PATHS = '/vendor/awx_ansible_collections'
+AWX_ANSIBLE_COLLECTIONS_PATHS = '/var/lib/awx/vendor/awx_ansible_collections'
 
-BASE_VENV_PATH = "/venv/"
+BASE_VENV_PATH = "/var/lib/awx/venv/"
 ANSIBLE_VENV_PATH = os.path.join(BASE_VENV_PATH, "ansible")
 AWX_VENV_PATH = os.path.join(BASE_VENV_PATH, "awx")
 
@@ -159,30 +105,33 @@ AWX_VENV_PATH = os.path.join(BASE_VENV_PATH, "awx")
 # default settings for development.  If not present, we can still run using
 # only the defaults.
 try:
-    include(optional('local_*.py'), scope=locals())
+    if os.getenv('AWX_KUBE_DEVEL', False):
+        include(optional('minikube.py'), scope=locals())
+    else:
+        include(optional('local_*.py'), scope=locals())
 except ImportError:
     traceback.print_exc()
     sys.exit(1)
 
-
-CELERYBEAT_SCHEDULE.update({  # noqa
-    'isolated_heartbeat': {
-        'task': 'awx.main.tasks.awx_isolated_heartbeat',
-        'schedule': timedelta(seconds=AWX_ISOLATED_PERIODIC_CHECK),  # noqa
-        'options': {'expires': AWX_ISOLATED_PERIODIC_CHECK * 2},  # noqa
+# Use SQLite for unit tests instead of PostgreSQL.  If the lines below are
+# commented out, Django will create the test_awx-dev database in PostgreSQL to
+# run unit tests.
+if "pytest" in sys.modules:
+    CACHES = {'default': {'BACKEND': 'django.core.cache.backends.locmem.LocMemCache', 'LOCATION': 'unique-{}'.format(str(uuid.uuid4()))}}
+    DATABASES = {
+        'default': {
+            'ENGINE': 'django.db.backends.sqlite3',
+            'NAME': os.path.join(BASE_DIR, 'awx.sqlite3'),  # noqa
+            'TEST': {
+                # Test database cannot be :memory: for inventory tests.
+                'NAME': os.path.join(BASE_DIR, 'awx_test.sqlite3')  # noqa
+            },
+        }
     }
-})
 
 CLUSTER_HOST_ID = socket.gethostname()
 
-
-if 'Docker Desktop' in os.getenv('OS', ''):
-    os.environ['SDB_NOTIFY_HOST'] = 'docker.for.mac.host.internal'
-else:
-    try:
-        os.environ['SDB_NOTIFY_HOST'] = os.popen('ip route').read().split(' ')[2]
-    except Exception:
-        pass
-
-WEBSOCKET_ORIGIN_WHITELIST = ['https://localhost:8043', 'https://localhost:3000']
 AWX_CALLBACK_PROFILE = True
+
+if 'sqlite3' not in DATABASES['default']['ENGINE']:  # noqa
+    DATABASES['default'].setdefault('OPTIONS', dict()).setdefault('application_name', f'{CLUSTER_HOST_ID}-{os.getpid()}-{" ".join(sys.argv)}'[:63])  # noqa

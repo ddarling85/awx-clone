@@ -11,7 +11,7 @@ import {
   Tooltip,
 } from '@patternfly/react-core';
 import { t } from '@lingui/macro';
-import { withI18n } from '@lingui/react';
+
 import {
   ExclamationTriangleIcon,
   PencilAltIcon,
@@ -20,7 +20,7 @@ import {
 import styled from 'styled-components';
 import DataListCell from '../../../components/DataListCell';
 
-import LaunchButton from '../../../components/LaunchButton';
+import { LaunchButton } from '../../../components/LaunchButton';
 import Sparkline from '../../../components/Sparkline';
 import { toTitleCase } from '../../../util/strings';
 
@@ -31,8 +31,12 @@ const DataListAction = styled(_DataListAction)`
   grid-template-columns: repeat(2, 40px);
 `;
 
+const ExclamationTriangleIconWarning = styled(ExclamationTriangleIcon)`
+  color: var(--pf-global--warning-color--100);
+  margin-left: 18px;
+`;
+
 function ProjectJobTemplateListItem({
-  i18n,
   template,
   isSelected,
   onSelect,
@@ -46,6 +50,11 @@ function ProjectJobTemplateListItem({
     (!template.summary_fields.project ||
       (!template.summary_fields.inventory &&
         !template.ask_inventory_on_launch));
+
+  const missingExecutionEnvironment =
+    template.type === 'job_template' &&
+    template.custom_virtualenv &&
+    !template.execution_environment;
 
   return (
     <DataListItem aria-labelledby={labelId} id={`${template.id}`}>
@@ -67,12 +76,21 @@ function ProjectJobTemplateListItem({
               {missingResourceIcon && (
                 <span>
                   <Tooltip
-                    content={i18n._(
-                      t`Resources are missing from this template.`
-                    )}
+                    content={t`Resources are missing from this template.`}
                     position="right"
                   >
                     <ExclamationTriangleIcon css="color: #c9190b; margin-left: 20px;" />
+                  </Tooltip>
+                </span>
+              )}
+              {missingExecutionEnvironment && (
+                <span>
+                  <Tooltip
+                    content={t`Custom virtual environment ${template.custom_virtualenv} must be replaced by an execution environment.`}
+                    position="right"
+                    className="missing-execution-environment"
+                  >
+                    <ExclamationTriangleIconWarning />
                   </Tooltip>
                 </span>
               )}
@@ -86,18 +104,20 @@ function ProjectJobTemplateListItem({
           ]}
         />
         <DataListAction
-          aria-label="actions"
+          aria-label={t`actions`}
           aria-labelledby={labelId}
           id={labelId}
         >
           {canLaunch && template.type === 'job_template' && (
-            <Tooltip content={i18n._(t`Launch Template`)} position="top">
+            <Tooltip content={t`Launch Template`} position="top">
               <LaunchButton resource={template}>
-                {({ handleLaunch }) => (
+                {({ handleLaunch, isLaunching }) => (
                   <Button
+                    ouiaId={`${template.id}-launch-button`}
                     css="grid-column: 1"
                     variant="plain"
                     onClick={handleLaunch}
+                    isDisabled={isLaunching}
                   >
                     <RocketIcon />
                   </Button>
@@ -106,8 +126,9 @@ function ProjectJobTemplateListItem({
             </Tooltip>
           )}
           {template.summary_fields.user_capabilities.edit && (
-            <Tooltip content={i18n._(t`Edit Template`)} position="top">
+            <Tooltip content={t`Edit Template`} position="top">
               <Button
+                ouiaId={`${template.id}-edit-button`}
                 css="grid-column: 2"
                 variant="plain"
                 component={Link}
@@ -124,4 +145,4 @@ function ProjectJobTemplateListItem({
 }
 
 export { ProjectJobTemplateListItem as _ProjectJobTemplateListItem };
-export default withI18n()(ProjectJobTemplateListItem);
+export default ProjectJobTemplateListItem;

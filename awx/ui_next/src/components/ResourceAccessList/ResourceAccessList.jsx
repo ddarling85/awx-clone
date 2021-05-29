@@ -1,21 +1,17 @@
-import React, { Fragment } from 'react';
-import { withRouter } from 'react-router-dom';
-import { withI18n } from '@lingui/react';
+import React, { useCallback, useEffect, useState } from 'react';
+import { useLocation } from 'react-router-dom';
 import { t } from '@lingui/macro';
-
-import { TeamsAPI, UsersAPI } from '../../api';
+import { RolesAPI, TeamsAPI, UsersAPI } from '../../api';
 import AddResourceRole from '../AddRole/AddResourceRole';
 import AlertModal from '../AlertModal';
 import DataListToolbar from '../DataListToolbar';
-import PaginatedDataList, { ToolbarAddButton } from '../PaginatedDataList';
-import {
-  getQSConfig,
-  encodeQueryString,
-  parseQueryString,
-} from '../../util/qs';
-
+import PaginatedTable, { HeaderRow, HeaderCell } from '../PaginatedTable';
+import { ToolbarAddButton } from '../PaginatedDataList';
+import { getQSConfig, parseQueryString } from '../../util/qs';
+import useRequest, { useDeleteItems } from '../../util/useRequest';
 import DeleteRoleConfirmationModal from './DeleteRoleConfirmationModal';
 import ResourceAccessListItem from './ResourceAccessListItem';
+import ErrorDetail from '../ErrorDetail';
 
 const QS_CONFIG = getQSConfig('access', {
   page: 1,
@@ -23,227 +19,234 @@ const QS_CONFIG = getQSConfig('access', {
   order_by: 'first_name',
 });
 
-class ResourceAccessList extends React.Component {
-  constructor(props) {
-    super(props);
-    this.state = {
+function ResourceAccessList({ apiModel, resource }) {
+  const [submitError, setSubmitError] = useState(null);
+  const [deletionRecord, setDeletionRecord] = useState(null);
+  const [deletionRole, setDeletionRole] = useState(null);
+  const [showAddModal, setShowAddModal] = useState(false);
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const location = useLocation();
+
+  const {
+    result: {
+      accessRecords,
+      itemCount,
+      relatedSearchableKeys,
+      searchableKeys,
+      organizationRoles,
+    },
+    error: contentError,
+    isLoading,
+    request: fetchAccessRecords,
+  } = useRequest(
+    useCallback(async () => {
+      const params = parseQueryString(QS_CONFIG, location.search);
+      const [response, actionsResponse] = await Promise.all([
+        apiModel.readAccessList(resource.id, params),
+        apiModel.readAccessOptions(resource.id),
+      ]);
+
+      // Eventually this could be expanded to other access lists.
+      // We will need to combine the role ids of all the different level
+      // of resource level roles.
+
+      let orgRoles;
+      if (location.pathname.includes('/organizations')) {
+        const {
+          data: { results: roles },
+        } = await RolesAPI.read({ content_type__isnull: true });
+        const sysAdmin = roles.filter(
+          role => role.name === 'System Administrator'
+        );
+        const sysAud = roles.filter(role => {
+          let auditor;
+          if (role.name === 'System Auditor') {
+            auditor = role.id;
+          }
+          return auditor;
+        });
+
+        orgRoles = Object.values(resource.summary_fields.object_roles).map(
+          opt => {
+            let item;
+            if (opt.name === 'Admin') {
+              item = [`${opt.id}, ${sysAdmin[0].id}`, opt.name];
+            } else if (sysAud[0].id && opt.name === 'Auditor') {
+              item = [`${sysAud[0].id}, ${opt.id}`, opt.name];
+            } else {
+              item = [`${opt.id}`, opt.name];
+            }
+            return item;
+          }
+        );
+      }
+      return {
+        accessRecords: response.data.results,
+        itemCount: response.data.count,
+        relatedSearchableKeys: (
+          actionsResponse?.data?.related_search_fields || []
+        ).map(val => val.slice(0, -8)),
+        searchableKeys: Object.keys(
+          actionsResponse.data.actions?.GET || {}
+        ).filter(key => actionsResponse.data.actions?.GET[key].filterable),
+        organizationRoles: orgRoles,
+      };
+    }, [apiModel, location, resource]),
+    {
       accessRecords: [],
-      contentError: null,
-      hasContentLoading: true,
-      hasDeletionError: false,
-      deletionRecord: null,
-      deletionRole: null,
-      isAddModalOpen: false,
       itemCount: 0,
-    };
-    this.loadAccessList = this.loadAccessList.bind(this);
-    this.handleAddClose = this.handleAddClose.bind(this);
-    this.handleAddOpen = this.handleAddOpen.bind(this);
-    this.handleAddSuccess = this.handleAddSuccess.bind(this);
-    this.handleDeleteCancel = this.handleDeleteCancel.bind(this);
-    this.handleDeleteConfirm = this.handleDeleteConfirm.bind(this);
-    this.handleDeleteErrorClose = this.handleDeleteErrorClose.bind(this);
-    this.handleDeleteOpen = this.handleDeleteOpen.bind(this);
-  }
-
-  componentDidMount() {
-    this.loadAccessList();
-  }
-
-  componentDidUpdate(prevProps) {
-    const { location } = this.props;
-
-    const prevParams = parseQueryString(QS_CONFIG, prevProps.location.search);
-    const currentParams = parseQueryString(QS_CONFIG, location.search);
-
-    if (encodeQueryString(currentParams) !== encodeQueryString(prevParams)) {
-      this.loadAccessList();
+      relatedSearchableKeys: [],
+      searchableKeys: [],
     }
-  }
+  );
 
-  async loadAccessList() {
-    const { apiModel, resource, location } = this.props;
-    const params = parseQueryString(QS_CONFIG, location.search);
+  useEffect(() => {
+    fetchAccessRecords();
+  }, [fetchAccessRecords]);
 
-    this.setState({ contentError: null, hasContentLoading: true });
-    try {
-      const {
-        data: { results: accessRecords = [], count: itemCount = 0 },
-      } = await apiModel.readAccessList(resource.id, params);
-      this.setState({ itemCount, accessRecords });
-    } catch (err) {
-      this.setState({ contentError: err });
-    } finally {
-      this.setState({ hasContentLoading: false });
+  const {
+    isLoading: isDeleteLoading,
+    deleteItems: deleteRole,
+    deletionError,
+    clearDeletionError,
+  } = useDeleteItems(
+    useCallback(() => {
+      if (typeof deletionRole.team_id !== 'undefined') {
+        return TeamsAPI.disassociateRole(deletionRole.team_id, deletionRole.id);
+      }
+      return UsersAPI.disassociateRole(deletionRecord.id, deletionRole.id);
+      /* eslint-disable-next-line react-hooks/exhaustive-deps */
+    }, [deletionRole]),
+    {
+      qsConfig: QS_CONFIG,
+      fetchItems: fetchAccessRecords,
     }
-  }
+  );
+  const toolbarSearchColumns = [
+    {
+      name: t`Username`,
+      key: 'username__icontains',
+      isDefault: true,
+    },
+    {
+      name: t`First Name`,
+      key: 'first_name__icontains',
+    },
+    {
+      name: t`Last Name`,
+      key: 'last_name__icontains',
+    },
+  ];
 
-  handleDeleteOpen(deletionRole, deletionRecord) {
-    this.setState({ deletionRole, deletionRecord });
-  }
-
-  handleDeleteCancel() {
-    this.setState({ deletionRole: null, deletionRecord: null });
-  }
-
-  handleDeleteErrorClose() {
-    this.setState({
-      hasDeletionError: false,
-      deletionRecord: null,
-      deletionRole: null,
+  if (organizationRoles?.length > 0) {
+    toolbarSearchColumns.push({
+      name: t`Roles`,
+      key: `or__roles__in`,
+      options: organizationRoles,
     });
   }
 
-  async handleDeleteConfirm() {
-    const { deletionRole, deletionRecord } = this.state;
-
-    if (!deletionRole || !deletionRecord) {
-      return;
-    }
-
-    let promise;
-    if (typeof deletionRole.team_id !== 'undefined') {
-      promise = TeamsAPI.disassociateRole(
-        deletionRole.team_id,
-        deletionRole.id
-      );
-    } else {
-      promise = UsersAPI.disassociateRole(deletionRecord.id, deletionRole.id);
-    }
-
-    this.setState({ hasContentLoading: true });
-    try {
-      await promise.then(this.loadAccessList);
-      this.setState({
-        deletionRole: null,
-        deletionRecord: null,
-      });
-    } catch (error) {
-      this.setState({
-        hasContentLoading: false,
-        hasDeletionError: true,
-      });
-    }
-  }
-
-  handleAddClose() {
-    this.setState({ isAddModalOpen: false });
-  }
-
-  handleAddOpen() {
-    this.setState({ isAddModalOpen: true });
-  }
-
-  handleAddSuccess() {
-    this.setState({ isAddModalOpen: false });
-    this.loadAccessList();
-  }
-
-  render() {
-    const { resource, i18n } = this.props;
-    const {
-      accessRecords,
-      contentError,
-      hasContentLoading,
-      deletionRole,
-      deletionRecord,
-      hasDeletionError,
-      itemCount,
-      isAddModalOpen,
-    } = this.state;
-    const canEdit = resource.summary_fields.user_capabilities.edit;
-    const isDeleteModalOpen =
-      !hasContentLoading && !hasDeletionError && deletionRole;
-
-    return (
-      <Fragment>
-        <PaginatedDataList
-          error={contentError}
-          hasContentLoading={hasContentLoading}
-          items={accessRecords}
-          itemCount={itemCount}
-          pluralizedItemName={i18n._(t`Roles`)}
-          qsConfig={QS_CONFIG}
-          toolbarSearchColumns={[
-            {
-              name: i18n._(t`Username`),
-              key: 'username',
-              isDefault: true,
-            },
-            {
-              name: i18n._(t`First Name`),
-              key: 'first_name',
-            },
-            {
-              name: i18n._(t`Last Name`),
-              key: 'last_name',
-            },
-          ]}
-          toolbarSortColumns={[
-            {
-              name: i18n._(t`Username`),
-              key: 'username',
-            },
-            {
-              name: i18n._(t`First Name`),
-              key: 'first_name',
-            },
-            {
-              name: i18n._(t`Last Name`),
-              key: 'last_name',
-            },
-          ]}
-          renderToolbar={props => (
-            <DataListToolbar
-              {...props}
-              qsConfig={QS_CONFIG}
-              additionalControls={
-                canEdit
-                  ? [
-                      <ToolbarAddButton
-                        key="add"
-                        onClick={this.handleAddOpen}
-                      />,
-                    ]
-                  : []
-              }
-            />
-          )}
-          renderItem={accessRecord => (
-            <ResourceAccessListItem
-              key={accessRecord.id}
-              accessRecord={accessRecord}
-              onRoleDelete={this.handleDeleteOpen}
-            />
-          )}
+  return (
+    <>
+      <PaginatedTable
+        error={contentError}
+        hasContentLoading={isLoading || isDeleteLoading}
+        items={accessRecords}
+        itemCount={itemCount}
+        pluralizedItemName={t`Roles`}
+        qsConfig={QS_CONFIG}
+        toolbarSearchColumns={toolbarSearchColumns}
+        toolbarSearchableKeys={searchableKeys}
+        toolbarRelatedSearchableKeys={relatedSearchableKeys}
+        renderToolbar={props => (
+          <DataListToolbar
+            {...props}
+            qsConfig={QS_CONFIG}
+            additionalControls={
+              resource?.summary_fields?.user_capabilities?.edit
+                ? [
+                    <ToolbarAddButton
+                      ouiaId="access-add-button"
+                      key="add"
+                      onClick={() => setShowAddModal(true)}
+                    />,
+                  ]
+                : []
+            }
+          />
+        )}
+        headerRow={
+          <HeaderRow qsConfig={QS_CONFIG} isSelectable={false}>
+            <HeaderCell sortKey="username">{t`Username`}</HeaderCell>
+            <HeaderCell sortKey="first_name">{t`First name`}</HeaderCell>
+            <HeaderCell sortKey="last_name">{t`Last name`}</HeaderCell>
+            <HeaderCell>{t`Roles`}</HeaderCell>
+          </HeaderRow>
+        }
+        renderRow={(accessRecord, index) => (
+          <ResourceAccessListItem
+            key={accessRecord.id}
+            accessRecord={accessRecord}
+            onRoleDelete={(role, record) => {
+              setDeletionRecord(record);
+              setDeletionRole(role);
+              setShowDeleteModal(true);
+            }}
+            rowIndex={index}
+          />
+        )}
+      />
+      {showAddModal && (
+        <AddResourceRole
+          onClose={() => setShowAddModal(false)}
+          onSave={() => {
+            setShowAddModal(false);
+            fetchAccessRecords();
+          }}
+          onError={err => setSubmitError(err)}
+          roles={resource.summary_fields.object_roles}
+          resource={resource}
         />
-        {isAddModalOpen && (
-          <AddResourceRole
-            onClose={this.handleAddClose}
-            onSave={this.handleAddSuccess}
-            roles={resource.summary_fields.object_roles}
-          />
-        )}
-        {isDeleteModalOpen && (
-          <DeleteRoleConfirmationModal
-            role={deletionRole}
-            username={deletionRecord.username}
-            onCancel={this.handleDeleteCancel}
-            onConfirm={this.handleDeleteConfirm}
-          />
-        )}
+      )}
+      {showDeleteModal && (
+        <DeleteRoleConfirmationModal
+          role={deletionRole}
+          username={deletionRecord.username}
+          onCancel={() => {
+            setDeletionRecord(null);
+            setDeletionRole(null);
+            setShowDeleteModal(false);
+          }}
+          onConfirm={async () => {
+            await deleteRole();
+            setShowDeleteModal(false);
+            setDeletionRecord(null);
+            setDeletionRole(null);
+          }}
+        />
+      )}
+      {submitError && (
         <AlertModal
-          isOpen={hasDeletionError}
           variant="error"
-          title={i18n._(t`Error!`)}
-          onClose={this.handleDeleteErrorClose}
+          title={t`Error!`}
+          isOpen={submitError}
+          onClose={() => setSubmitError(null)}
         >
-          {i18n._(t`Failed to delete role`)}
+          {t`Failed to assign roles properly`}
+          <ErrorDetail error={submitError} />
         </AlertModal>
-      </Fragment>
-    );
-  }
+      )}
+      {deletionError && (
+        <AlertModal
+          isOpen={deletionError}
+          variant="error"
+          title={t`Error!`}
+          onClose={clearDeletionError}
+        >
+          {t`Failed to delete role`}
+        </AlertModal>
+      )}
+    </>
+  );
 }
-
-export { ResourceAccessList as _ResourceAccessList };
-export default withI18n()(withRouter(ResourceAccessList));
+export default ResourceAccessList;

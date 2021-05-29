@@ -4,9 +4,15 @@ import logging
 from unittest.mock import PropertyMock
 
 from awx.api.urls import urlpatterns as api_patterns
+from awx.main.models import ExecutionEnvironment
 
 # Django
 from django.urls import URLResolver, URLPattern
+
+
+@pytest.fixture()
+def execution_environment():
+    return ExecutionEnvironment(name="test-ee", description="test-ee", managed_by_tower=True)
 
 
 @pytest.fixture(autouse=True)
@@ -17,9 +23,9 @@ def _disable_database_settings(mocker):
 
 @pytest.fixture()
 def all_views():
-    '''
+    """
     returns a set of all views in the app
-    '''
+    """
     patterns = set()
     url_views = set()
     # Add recursive URL patterns
@@ -45,11 +51,11 @@ def all_views():
 @pytest.fixture()
 def dummy_log_record():
     return logging.LogRecord(
-        'awx', # logger name
-        20, # loglevel INFO
-        './awx/some/module.py', # pathname
-        100, # lineno
-        'User joe logged in', # msg
-        tuple(), # args,
-        None # exc_info
+        'awx',  # logger name
+        20,  # loglevel INFO
+        './awx/some/module.py',  # pathname
+        100,  # lineno
+        'User joe logged in',  # msg
+        tuple(),  # args,
+        None,  # exc_info
     )

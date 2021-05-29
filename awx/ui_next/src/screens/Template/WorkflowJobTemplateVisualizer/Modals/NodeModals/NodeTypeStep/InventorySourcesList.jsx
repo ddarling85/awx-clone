@@ -1,56 +1,78 @@
-import React, { useState, useEffect } from 'react';
+import React, { useEffect, useCallback } from 'react';
 import { useLocation } from 'react-router-dom';
-import { withI18n } from '@lingui/react';
+
 import { t } from '@lingui/macro';
 import { func, shape } from 'prop-types';
 import { InventorySourcesAPI } from '../../../../../../api';
 import { getQSConfig, parseQueryString } from '../../../../../../util/qs';
-import PaginatedDataList from '../../../../../../components/PaginatedDataList';
+import useRequest from '../../../../../../util/useRequest';
 import DataListToolbar from '../../../../../../components/DataListToolbar';
 import CheckboxListItem from '../../../../../../components/CheckboxListItem';
+import PaginatedTable, {
+  HeaderCell,
+  HeaderRow,
+} from '../../../../../../components/PaginatedTable';
 
-const QS_CONFIG = getQSConfig('inventory_sources', {
+const QS_CONFIG = getQSConfig('inventory-sources', {
   page: 1,
   page_size: 5,
   order_by: 'name',
 });
 
-function InventorySourcesList({ i18n, nodeResource, onUpdateNodeResource }) {
-  const [count, setCount] = useState(0);
-  const [error, setError] = useState(null);
-  const [inventorySources, setInventorySources] = useState([]);
-  const [isLoading, setIsLoading] = useState(true);
+function InventorySourcesList({ nodeResource, onUpdateNodeResource }) {
   const location = useLocation();
 
-  useEffect(() => {
-    (async () => {
-      setIsLoading(true);
-      setInventorySources([]);
-      setCount(0);
+  const {
+    result: { inventorySources, count, relatedSearchableKeys, searchableKeys },
+    error,
+    isLoading,
+    request: fetchInventorySources,
+  } = useRequest(
+    useCallback(async () => {
       const params = parseQueryString(QS_CONFIG, location.search);
-      try {
-        const { data } = await InventorySourcesAPI.read(params);
-        setInventorySources(data.results);
-        setCount(data.count);
-      } catch (err) {
-        setError(err);
-      } finally {
-        setIsLoading(false);
-      }
-    })();
-  }, [location]);
+      const [response, actionsResponse] = await Promise.all([
+        InventorySourcesAPI.read(params),
+        InventorySourcesAPI.readOptions(),
+      ]);
+      return {
+        inventorySources: response.data.results,
+        count: response.data.count,
+        relatedSearchableKeys: (
+          actionsResponse?.data?.related_search_fields || []
+        ).map(val => val.slice(0, -8)),
+        searchableKeys: Object.keys(
+          actionsResponse.data.actions?.GET || {}
+        ).filter(key => actionsResponse.data.actions?.GET[key].filterable),
+      };
+    }, [location]),
+    {
+      inventorySources: [],
+      count: 0,
+      relatedSearchableKeys: [],
+      searchableKeys: [],
+    }
+  );
+
+  useEffect(() => {
+    fetchInventorySources();
+  }, [fetchInventorySources]);
 
   return (
-    <PaginatedDataList
+    <PaginatedTable
       contentError={error}
       hasContentLoading={isLoading}
       itemCount={count}
       items={inventorySources}
-      onRowClick={row => onUpdateNodeResource(row)}
       qsConfig={QS_CONFIG}
       showPageSizeOptions={false}
-      renderItem={item => (
+      headerRow={
+        <HeaderRow isExpandable={false} qsConfig={QS_CONFIG}>
+          <HeaderCell sortKey="name">{t`Name`}</HeaderCell>
+        </HeaderRow>
+      }
+      renderRow={(item, index) => (
         <CheckboxListItem
+          rowIndex={index}
           isSelected={!!(nodeResource && nodeResource.id === item.id)}
           itemId={item.id}
           key={item.id}
@@ -64,35 +86,29 @@ function InventorySourcesList({ i18n, nodeResource, onUpdateNodeResource }) {
       renderToolbar={props => <DataListToolbar {...props} fillWidth />}
       toolbarSearchColumns={[
         {
-          name: i18n._(t`Name`),
-          key: 'name',
+          name: t`Name`,
+          key: 'name__icontains',
           isDefault: true,
         },
         {
-          name: i18n._(t`Source`),
-          key: 'source',
+          name: t`Source`,
+          key: 'or__source',
           options: [
-            [`file`, i18n._(t`File, Directory or Script`)],
-            [`scm`, i18n._(t`Sourced from a Project`)],
-            [`ec2`, i18n._(t`Amazon EC2`)],
-            [`gce`, i18n._(t`Google Compute Engine`)],
-            [`azure_rm`, i18n._(t`Microsoft Azure Resource Manager`)],
-            [`vmware`, i18n._(t`VMware vCenter`)],
-            [`satellite6`, i18n._(t`Red Hat Satellite 6`)],
-            [`cloudforms`, i18n._(t`Red Hat CloudForms`)],
-            [`openstack`, i18n._(t`OpenStack`)],
-            [`rhv`, i18n._(t`Red Hat Virtualization`)],
-            [`tower`, i18n._(t`Ansible Tower`)],
-            [`custom`, i18n._(t`Custom Script`)],
+            [`file`, t`File, directory or script`],
+            [`scm`, t`Sourced from a project`],
+            [`ec2`, t`Amazon EC2`],
+            [`gce`, t`Google Compute Engine`],
+            [`azure_rm`, t`Microsoft Azure Resource Manager`],
+            [`vmware`, t`VMware vCenter`],
+            [`satellite6`, t`Red Hat Satellite 6`],
+            [`openstack`, t`OpenStack`],
+            [`rhv`, t`Red Hat Virtualization`],
+            [`tower`, t`Ansible Tower`],
           ],
         },
       ]}
-      toolbarSortColumns={[
-        {
-          name: i18n._(t`Name`),
-          key: 'name',
-        },
-      ]}
+      toolbarSearchableKeys={searchableKeys}
+      toolbarRelatedSearchableKeys={relatedSearchableKeys}
     />
   );
 }
@@ -106,4 +122,4 @@ InventorySourcesList.defaultProps = {
   nodeResource: null,
 };
 
-export default withI18n()(InventorySourcesList);
+export default InventorySourcesList;

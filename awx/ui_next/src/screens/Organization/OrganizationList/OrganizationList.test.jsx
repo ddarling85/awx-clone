@@ -1,7 +1,7 @@
 import React from 'react';
 import { act } from 'react-dom/test-utils';
 
-import { OrganizationsAPI } from '../../../api';
+import { OrganizationsAPI, CredentialsAPI } from '../../../api';
 import {
   mountWithContexts,
   waitForElement,
@@ -70,6 +70,7 @@ const mockOrganizations = {
 describe('<OrganizationsList />', () => {
   let wrapper;
   beforeEach(() => {
+    CredentialsAPI.read.mockResolvedValue({ data: { count: 0 } });
     OrganizationsAPI.read.mockResolvedValue(mockOrganizations);
     OrganizationsAPI.readOptions.mockResolvedValue({
       data: {
@@ -84,10 +85,24 @@ describe('<OrganizationsList />', () => {
     jest.clearAllMocks();
   });
 
-  test('Initially renders succesfully', async () => {
+  test('Initially renders successfully', async () => {
     await act(async () => {
       mountWithContexts(<OrganizationsList />);
     });
+  });
+
+  test('should have proper number of delete detail requests', async () => {
+    await act(async () => {
+      wrapper = mountWithContexts(<OrganizationsList />);
+    });
+    await waitForElement(
+      wrapper,
+      'OrganizationsList',
+      el => el.find('ContentLoading').length === 0
+    );
+    expect(
+      wrapper.find('ToolbarDeleteButton').prop('deleteDetailsRequests')
+    ).toHaveLength(7);
   });
 
   test('Items are rendered after loading', async () => {
@@ -103,7 +118,7 @@ describe('<OrganizationsList />', () => {
   });
 
   test('Item appears selected after selecting it', async () => {
-    const itemCheckboxInput = 'input#select-organization-1';
+    const itemCheckboxInput = 'tr#org-row-1 input[type="checkbox"]';
     await act(async () => {
       wrapper = mountWithContexts(<OrganizationsList />);
     });
@@ -115,7 +130,6 @@ describe('<OrganizationsList />', () => {
     await act(async () => {
       wrapper
         .find(itemCheckboxInput)
-        .closest('DataListCheck')
         .props()
         .onChange();
     });
@@ -128,9 +142,9 @@ describe('<OrganizationsList />', () => {
 
   test('All items appear selected after select-all and unselected after unselect-all', async () => {
     const itemCheckboxInputs = [
-      'input#select-organization-1',
-      'input#select-organization-2',
-      'input#select-organization-3',
+      'tr#org-row-1 input[type="checkbox"]',
+      'tr#org-row-2 input[type="checkbox"]',
+      'tr#org-row-3 input[type="checkbox"]',
     ];
     await act(async () => {
       wrapper = mountWithContexts(<OrganizationsList />);
@@ -227,7 +241,7 @@ describe('<OrganizationsList />', () => {
   });
 
   test('Error dialog shown for failed deletion', async () => {
-    const itemCheckboxInput = 'input#select-organization-1';
+    const itemCheckboxInput = 'tr#org-row-1 input[type="checkbox"]';
     OrganizationsAPI.destroy.mockRejectedValue(
       new Error({
         response: {
@@ -250,7 +264,6 @@ describe('<OrganizationsList />', () => {
     await act(async () => {
       wrapper
         .find(itemCheckboxInput)
-        .closest('DataListCheck')
         .props()
         .onChange();
     });

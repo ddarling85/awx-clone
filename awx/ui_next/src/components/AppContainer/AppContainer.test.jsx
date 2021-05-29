@@ -1,40 +1,43 @@
 import React from 'react';
 import { act } from 'react-dom/test-utils';
-
 import {
   mountWithContexts,
   waitForElement,
 } from '../../../testUtils/enzymeHelpers';
-import { ConfigAPI, MeAPI, RootAPI } from '../../api';
-
+import { MeAPI, RootAPI } from '../../api';
+import { useAuthorizedPath } from '../../contexts/Config';
 import AppContainer from './AppContainer';
 
 jest.mock('../../api');
+jest.mock('../../util/bootstrapPendo');
+
+global.pendo = {
+  initialize: jest.fn(),
+};
 
 describe('<AppContainer />', () => {
-  const ansible_version = '111';
-  const custom_virtualenvs = [];
   const version = '222';
 
   beforeEach(() => {
-    ConfigAPI.read.mockResolvedValue({
+    RootAPI.readAssetVariables.mockResolvedValue({
       data: {
-        ansible_version,
-        custom_virtualenvs,
-        version,
+        BRAND_NAME: 'AWX',
+        PENDO_API_KEY: 'some-pendo-key',
       },
     });
     MeAPI.read.mockResolvedValue({ data: { results: [{}] } });
+    useAuthorizedPath.mockImplementation(() => true);
   });
 
   afterEach(() => {
     jest.clearAllMocks();
+    jest.restoreAllMocks();
   });
 
   test('expected content is rendered', async () => {
     const routeConfig = [
       {
-        groupTitle: 'Group One',
+        groupTitle: <span>Group One</span>,
         groupId: 'group_one',
         routes: [
           { title: 'Foo', path: '/foo' },
@@ -42,7 +45,7 @@ describe('<AppContainer />', () => {
         ],
       },
       {
-        groupTitle: 'Group Two',
+        groupTitle: <span>Group Two</span>,
         groupId: 'group_two',
         routes: [{ title: 'Fiz', path: '/fiz' }],
       },
@@ -55,9 +58,25 @@ describe('<AppContainer />', () => {
           {routeConfig.map(({ groupId }) => (
             <div key={groupId} id={groupId} />
           ))}
-        </AppContainer>
+        </AppContainer>,
+        {
+          context: {
+            config: {
+              analytics_status: 'detailed',
+              ansible_version: null,
+              custom_virtualenvs: [],
+              version: '9000',
+              me: { is_superuser: true },
+              toJSON: () => '/config/',
+              license_info: {
+                valid_key: true,
+              },
+            },
+          },
+        }
       );
     });
+    wrapper.update();
 
     // page components
     expect(wrapper.length).toBe(1);
@@ -66,12 +85,66 @@ describe('<AppContainer />', () => {
 
     // sidebar groups and route links
     expect(wrapper.find('NavExpandableGroup').length).toBe(2);
-    expect(wrapper.find('a[href="/#/foo"]').length).toBe(1);
-    expect(wrapper.find('a[href="/#/bar"]').length).toBe(1);
-    expect(wrapper.find('a[href="/#/fiz"]').length).toBe(1);
+    expect(wrapper.find('a[href="/foo"]').length).toBe(1);
+    expect(wrapper.find('a[href="/bar"]').length).toBe(1);
+    expect(wrapper.find('a[href="/fiz"]').length).toBe(1);
 
     expect(wrapper.find('#group_one').length).toBe(1);
     expect(wrapper.find('#group_two').length).toBe(1);
+
+    expect(global.pendo.initialize).toHaveBeenCalledTimes(1);
+  });
+
+  test('Pendo not initialized when key is missing', async () => {
+    RootAPI.readAssetVariables.mockResolvedValue({
+      data: {
+        BRAND_NAME: 'AWX',
+        PENDO_API_KEY: '',
+      },
+    });
+    let wrapper;
+    await act(async () => {
+      wrapper = mountWithContexts(<AppContainer />, {
+        context: {
+          config: {
+            analytics_status: 'detailed',
+            ansible_version: null,
+            custom_virtualenvs: [],
+            version: '9000',
+            me: { is_superuser: true },
+            toJSON: () => '/config/',
+            license_info: {
+              valid_key: true,
+            },
+          },
+        },
+      });
+    });
+    wrapper.update();
+    expect(global.pendo.initialize).toHaveBeenCalledTimes(0);
+  });
+
+  test('Pendo not initialized when status is analytics off', async () => {
+    let wrapper;
+    await act(async () => {
+      wrapper = mountWithContexts(<AppContainer />, {
+        context: {
+          config: {
+            analytics_status: 'off',
+            ansible_version: null,
+            custom_virtualenvs: [],
+            version: '9000',
+            me: { is_superuser: true },
+            toJSON: () => '/config/',
+            license_info: {
+              valid_key: true,
+            },
+          },
+        },
+      });
+    });
+    wrapper.update();
+    expect(global.pendo.initialize).toHaveBeenCalledTimes(0);
   });
 
   test('opening the about modal renders prefetched config data', async () => {
@@ -82,7 +155,9 @@ describe('<AppContainer />', () => {
 
     let wrapper;
     await act(async () => {
-      wrapper = mountWithContexts(<AppContainer />);
+      wrapper = mountWithContexts(<AppContainer />, {
+        context: { config: { version } },
+      });
     });
 
     // open about dropdown menu
@@ -96,7 +171,6 @@ describe('<AppContainer />', () => {
 
     // check about modal content
     const content = await waitForElement(wrapper, aboutModalContent);
-    expect(content.find('dd').text()).toContain(ansible_version);
     expect(content.find('pre').text()).toContain(`<  AWX ${version}  >`);
 
     // close about modal

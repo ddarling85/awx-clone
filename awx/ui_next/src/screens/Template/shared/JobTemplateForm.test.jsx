@@ -14,6 +14,7 @@ import {
   ProjectsAPI,
   CredentialsAPI,
   CredentialTypesAPI,
+  InventoriesAPI,
 } from '../../../api';
 
 jest.mock('../../../api');
@@ -39,6 +40,7 @@ describe('<JobTemplateForm />', () => {
       project: {
         id: 3,
         name: 'qux',
+        allow_override: false,
       },
       labels: {
         results: [
@@ -55,6 +57,7 @@ describe('<JobTemplateForm />', () => {
     webhook_key: 'webhook key',
     webhook_service: 'github',
     webhook_credential: 7,
+    host_config_key: '',
   };
   const mockInstanceGroups = [
     {
@@ -74,8 +77,6 @@ describe('<JobTemplateForm />', () => {
       jobs_total: 3,
       instances: 1,
       controller: null,
-      is_controller: false,
-      is_isolated: false,
       policy_instance_percentage: 100,
       policy_instance_minimum: 0,
       policy_instance_list: [],
@@ -89,15 +90,11 @@ describe('<JobTemplateForm />', () => {
     { id: 5, kind: 'Machine', name: 'Cred 5', url: 'www.google.com' },
   ];
 
-  beforeAll(() => {
-    jest.setTimeout(5000 * 4);
-  });
-
-  afterAll(() => {
-    jest.setTimeout(5000);
-  });
+  let consoleError;
 
   beforeEach(() => {
+    consoleError = global.console.error;
+    global.console.error = jest.fn();
     LabelsAPI.read.mockReturnValue({
       data: mockData.summary_fields.labels,
     });
@@ -111,18 +108,28 @@ describe('<JobTemplateForm />', () => {
     JobTemplatesAPI.updateWebhookKey.mockReturnValue({
       data: { webhook_key: 'webhook key' },
     });
-    ProjectsAPI.readPlaybooks.mockReturnValue({
-      data: ['debug.yml'],
+    JobTemplatesAPI.updateWebhookKey.mockReturnValue({
+      data: { webhook_key: 'webhook key' },
     });
     ProjectsAPI.readDetail.mockReturnValue({
       name: 'foo',
       id: 1,
-      allow_override: true,
+      allow_override: false,
+    });
+    ProjectsAPI.readPlaybooks.mockReturnValue({
+      data: ['debug.yml'],
+    });
+    InventoriesAPI.readOptions.mockResolvedValue({
+      data: { actions: { GET: {}, POST: {} } },
+    });
+    ProjectsAPI.readOptions.mockResolvedValue({
+      data: { actions: { GET: {}, POST: {} } },
     });
   });
 
   afterEach(() => {
-    jest.clearAllMocks();
+    global.console.error = consoleError;
+    jest.resetAllMocks();
   });
 
   test('should render LabelsSelect', async () => {
@@ -146,7 +153,7 @@ describe('<JobTemplateForm />', () => {
     );
   });
 
-  test('should update form values on input changes', async () => {
+  test('should not render source control branch when allow_override is false', async () => {
     let wrapper;
     await act(async () => {
       wrapper = mountWithContexts(
@@ -157,7 +164,31 @@ describe('<JobTemplateForm />', () => {
         />
       );
     });
-    await waitForElement(wrapper, 'EmptyStateBody', el => el.length === 0);
+    wrapper.update();
+    expect(wrapper.find('TextInputBase#template-scm-branch').length).toEqual(0);
+    await act(async () => {
+      wrapper.find('ProjectLookup').invoke('onChange')({
+        id: 4,
+        name: 'project',
+        allow_override: true,
+      });
+    });
+    wrapper.update();
+    expect(wrapper.find('TextInputBase#template-scm-branch').length).toEqual(1);
+  });
+
+  test('should update form values on input changes', async () => {
+    let wrapper;
+    await act(async () => {
+      wrapper = mountWithContexts(
+        <JobTemplateForm
+          template={mockData}
+          handleSubmit={jest.fn()}
+          handleCancel={jest.fn()}
+        />
+      );
+      await waitForElement(wrapper, 'EmptyStateBody', el => el.length === 0);
+    });
     await act(async () => {
       wrapper.find('input#template-name').simulate('change', {
         target: { value: 'new foo', name: 'name' },
@@ -189,9 +220,12 @@ describe('<JobTemplateForm />', () => {
         'devel'
       );
       wrapper.find('TextInputBase#template-limit').prop('onChange')(1234567890);
-      wrapper.find('AnsibleSelect[name="playbook"]').simulate('change', {
-        target: { value: 'new baz type', name: 'playbook' },
-      });
+      wrapper.find('Select#template-playbook').prop('onToggle')();
+      wrapper.update();
+      wrapper.find('Select#template-playbook').prop('onSelect')(
+        null,
+        'new baz type'
+      );
     });
 
     await act(async () => {
@@ -226,9 +260,9 @@ describe('<JobTemplateForm />', () => {
     expect(wrapper.find('input#template-limit').prop('value')).toEqual(
       1234567890
     );
-    expect(
-      wrapper.find('AnsibleSelect[name="playbook"]').prop('value')
-    ).toEqual('new baz type');
+    expect(wrapper.find('Select#template-playbook').prop('selections')).toEqual(
+      'new baz type'
+    );
     expect(wrapper.find('MultiCredentialsLookup').prop('value')).toEqual([
       {
         id: 2,
@@ -282,10 +316,14 @@ describe('<JobTemplateForm />', () => {
     ).toBe(true);
 
     expect(
-      wrapper.find('input[aria-label="wfjt-webhook-key"]').prop('readOnly')
+      wrapper
+        .find('input[aria-label="workflow job template webhook key"]')
+        .prop('readOnly')
     ).toBe(true);
     expect(
-      wrapper.find('input[aria-label="wfjt-webhook-key"]').prop('value')
+      wrapper
+        .find('input[aria-label="workflow job template webhook key"]')
+        .prop('value')
     ).toBe('webhook key');
     await act(() =>
       wrapper.find('Button[aria-label="Update webhook key"]').prop('onClick')()

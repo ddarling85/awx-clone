@@ -5,12 +5,11 @@
 # GNU General Public License v3.0+ (see COPYING or https://www.gnu.org/licenses/gpl-3.0.txt)
 
 from __future__ import absolute_import, division, print_function
+
 __metaclass__ = type
 
 
-ANSIBLE_METADATA = {'metadata_version': '1.1',
-                    'status': ['preview'],
-                    'supported_by': 'community'}
+ANSIBLE_METADATA = {'metadata_version': '1.1', 'status': ['preview'], 'supported_by': 'community'}
 
 
 DOCUMENTATION = '''
@@ -72,7 +71,7 @@ EXAMPLES = '''
 '''
 
 
-from ..module_utils.tower_api import TowerModule
+from ..module_utils.tower_api import TowerAPIModule
 import json
 
 
@@ -89,7 +88,7 @@ def main():
     )
 
     # Create a module for ourselves
-    module = TowerModule(argument_spec=argument_spec)
+    module = TowerAPIModule(argument_spec=argument_spec)
 
     # Extract our parameters
     name = module.params.get('name')
@@ -104,12 +103,7 @@ def main():
     inventory_id = module.resolve_name_to_id('inventories', inventory)
 
     # Attempt to look up host based on the provided name and inventory ID
-    host = module.get_one('hosts', **{
-        'data': {
-            'name': name,
-            'inventory': inventory_id
-        }
-    })
+    host = module.get_one('hosts', name_or_id=name, **{'data': {'inventory': inventory_id}})
 
     if state == 'absent':
         # If the state was absent we can let the module delete it if needed, the module will handle exiting from this
@@ -117,7 +111,7 @@ def main():
 
     # Create the data that gets sent for create and update
     host_fields = {
-        'name': new_name if new_name else name,
+        'name': new_name if new_name else (module.get_item_name(host) if host else name),
         'inventory': inventory_id,
         'enabled': enabled,
     }

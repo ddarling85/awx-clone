@@ -5,51 +5,59 @@ import { SchedulesAPI } from '../../../api';
 import ScheduleList from './ScheduleList';
 import mockSchedules from '../data.schedules.json';
 
-jest.mock('../../../api/models/Schedules');
-
-SchedulesAPI.destroy = jest.fn();
-SchedulesAPI.update.mockResolvedValue({
-  data: mockSchedules.results[0],
-});
-SchedulesAPI.read.mockResolvedValue({ data: mockSchedules });
-SchedulesAPI.readOptions.mockResolvedValue({
-  data: {
-    actions: {
-      GET: {},
-      POST: {},
-    },
-  },
-});
-
-const loadSchedules = params => SchedulesAPI.read(params);
-const loadScheduleOptions = () => SchedulesAPI.readOptions();
+jest.mock('../../../api');
 
 describe('ScheduleList', () => {
   let wrapper;
-
-  afterAll(() => {
-    jest.clearAllMocks();
-  });
+  let loadSchedules;
+  let loadScheduleOptions;
 
   describe('read call successful', () => {
-    beforeAll(async () => {
+    beforeEach(async () => {
+      SchedulesAPI.destroy = jest.fn();
+      SchedulesAPI.update.mockResolvedValue({
+        data: mockSchedules.results[0],
+      });
+      SchedulesAPI.read.mockResolvedValue({ data: mockSchedules });
+      SchedulesAPI.readOptions.mockResolvedValue({
+        data: {
+          actions: {
+            GET: {},
+            POST: {},
+          },
+        },
+      });
+      loadSchedules = jest.fn();
+      loadSchedules.mockResolvedValue({ data: mockSchedules });
+      loadScheduleOptions = jest.fn();
+      loadScheduleOptions.mockResolvedValue({
+        data: {
+          actions: {
+            GET: {},
+            POST: {},
+          },
+        },
+      });
       await act(async () => {
         wrapper = mountWithContexts(
           <ScheduleList
             loadSchedules={loadSchedules}
             loadScheduleOptions={loadScheduleOptions}
+            resource={{ type: 'job_template', inventory: 1 }}
+            launchConfig={{ survey_enabled: false }}
+            surveyConfig={{}}
           />
         );
       });
       wrapper.update();
     });
 
-    afterAll(() => {
+    afterEach(() => {
       wrapper.unmount();
     });
 
     test('should fetch schedules from api and render the list', () => {
-      expect(SchedulesAPI.read).toHaveBeenCalled();
+      expect(loadSchedules).toHaveBeenCalled();
       expect(wrapper.find('ScheduleListItem').length).toBe(5);
     });
 
@@ -59,44 +67,61 @@ describe('ScheduleList', () => {
 
     test('should check and uncheck the row item', async () => {
       expect(
-        wrapper.find('DataListCheck[id="select-schedule-1"]').props().checked
+        wrapper
+          .find('.pf-c-table__check')
+          .first()
+          .find('input')
+          .props().checked
       ).toBe(false);
       await act(async () => {
         wrapper
-          .find('DataListCheck[id="select-schedule-1"]')
+          .find('.pf-c-table__check')
+          .first()
+          .find('input')
           .invoke('onChange')(true);
       });
       wrapper.update();
       expect(
-        wrapper.find('DataListCheck[id="select-schedule-1"]').props().checked
+        wrapper
+          .find('.pf-c-table__check')
+          .first()
+          .find('input')
+          .props().checked
       ).toBe(true);
       await act(async () => {
         wrapper
-          .find('DataListCheck[id="select-schedule-1"]')
+          .find('.pf-c-table__check')
+          .first()
+          .find('input')
           .invoke('onChange')(false);
       });
       wrapper.update();
       expect(
-        wrapper.find('DataListCheck[id="select-schedule-1"]').props().checked
+        wrapper
+          .find('.pf-c-table__check')
+          .first()
+          .find('input')
+          .props().checked
       ).toBe(false);
     });
 
     test('should check all row items when select all is checked', async () => {
-      wrapper.find('DataListCheck').forEach(el => {
+      expect(wrapper.find('.pf-c-table__check input')).toHaveLength(5);
+      wrapper.find('.pf-c-table__check input').forEach(el => {
         expect(el.props().checked).toBe(false);
       });
       await act(async () => {
         wrapper.find('Checkbox#select-all').invoke('onChange')(true);
       });
       wrapper.update();
-      wrapper.find('DataListCheck').forEach(el => {
+      wrapper.find('.pf-c-table__check input').forEach(el => {
         expect(el.props().checked).toBe(true);
       });
       await act(async () => {
         wrapper.find('Checkbox#select-all').invoke('onChange')(false);
       });
       wrapper.update();
-      wrapper.find('DataListCheck').forEach(el => {
+      wrapper.find('.pf-c-table__check input').forEach(el => {
         expect(el.props().checked).toBe(false);
       });
     });
@@ -104,7 +129,8 @@ describe('ScheduleList', () => {
     test('should call api delete schedules for each selected schedule', async () => {
       await act(async () => {
         wrapper
-          .find('DataListCheck[id="select-schedule-3"]')
+          .find('.pf-c-table__check input')
+          .at(3)
           .invoke('onChange')();
       });
       wrapper.update();
@@ -122,7 +148,8 @@ describe('ScheduleList', () => {
       expect(wrapper.find('Modal').length).toBe(0);
       await act(async () => {
         wrapper
-          .find('DataListCheck[id="select-schedule-2"]')
+          .find('.pf-c-table__check input')
+          .at(2)
           .invoke('onChange')();
       });
       wrapper.update();
@@ -171,6 +198,44 @@ describe('ScheduleList', () => {
   });
 
   describe('hidden add button', () => {
+    beforeEach(async () => {
+      SchedulesAPI.destroy = jest.fn();
+      SchedulesAPI.update.mockResolvedValue({
+        data: mockSchedules.results[0],
+      });
+      SchedulesAPI.read.mockResolvedValue({ data: mockSchedules });
+      SchedulesAPI.readOptions.mockResolvedValue({
+        data: {
+          actions: {
+            GET: {},
+            POST: {},
+          },
+        },
+      });
+      loadSchedules = jest.fn();
+      loadSchedules.mockResolvedValue({ data: mockSchedules });
+      loadScheduleOptions = jest.fn();
+      loadScheduleOptions.mockResolvedValue({
+        data: {
+          actions: {
+            GET: {},
+            POST: {},
+          },
+        },
+      });
+      await act(async () => {
+        wrapper = mountWithContexts(
+          <ScheduleList
+            loadSchedules={loadSchedules}
+            loadScheduleOptions={loadScheduleOptions}
+            resource={{ type: 'job_template', inventory: 1 }}
+            launchConfig={{ survey_enabled: false }}
+            surveyConfig={{}}
+          />
+        );
+      });
+      wrapper.update();
+    });
     test('should hide add button when flag is passed', async () => {
       await act(async () => {
         wrapper = mountWithContexts(
@@ -184,11 +249,104 @@ describe('ScheduleList', () => {
       wrapper.update();
       expect(wrapper.find('ToolbarAddButton').length).toBe(0);
     });
+    test('should show missing resource icon and disabled toggle', async () => {
+      await act(async () => {
+        wrapper = mountWithContexts(
+          <ScheduleList
+            loadSchedules={loadSchedules}
+            loadScheduleOptions={loadScheduleOptions}
+            hideAddButton
+            resource={{ type: 'job_template', inventory: 1 }}
+            launchConfig={{ survey_enabled: true }}
+            surveyConfig={{ spec: [{ required: true, default: null }] }}
+          />
+        );
+      });
+      wrapper.update();
+      expect(
+        wrapper
+          .find('ScheduleListItem')
+          .at(4)
+          .prop('isMissingSurvey')
+      ).toBe('This schedule is missing required survey values');
+      expect(wrapper.find('ExclamationTriangleIcon').length).toBe(5);
+      expect(wrapper.find('Switch#schedule-5-toggle').prop('isDisabled')).toBe(
+        true
+      );
+    });
+    test('should show missing resource icon and disabled toggle', async () => {
+      await act(async () => {
+        wrapper = mountWithContexts(
+          <ScheduleList
+            loadSchedules={loadSchedules}
+            loadScheduleOptions={loadScheduleOptions}
+            hideAddButton
+            resource={{ type: 'job_template' }}
+            launchConfig={{
+              survey_enabled: true,
+              inventory_needed_to_start: true,
+            }}
+            surveyConfig={{ spec: [] }}
+          />
+        );
+      });
+      wrapper.update();
+
+      expect(
+        wrapper
+          .find('ScheduleListItem')
+          .at(3)
+          .prop('isMissingInventory')
+      ).toBe('This schedule is missing an Inventory');
+      expect(wrapper.find('ExclamationTriangleIcon').length).toBe(4);
+      expect(wrapper.find('Switch#schedule-3-toggle').prop('isDisabled')).toBe(
+        true
+      );
+    });
   });
 
   describe('read call unsuccessful', () => {
+    beforeEach(async () => {
+      SchedulesAPI.destroy = jest.fn();
+      SchedulesAPI.update.mockResolvedValue({
+        data: mockSchedules.results[0],
+      });
+      SchedulesAPI.read.mockResolvedValue({ data: mockSchedules });
+      SchedulesAPI.readOptions.mockResolvedValue({
+        data: {
+          actions: {
+            GET: {},
+            POST: {},
+          },
+        },
+      });
+      loadSchedules = jest.fn();
+      loadSchedules.mockResolvedValue({ data: mockSchedules });
+      loadScheduleOptions = jest.fn();
+      loadScheduleOptions.mockResolvedValue({
+        data: {
+          actions: {
+            GET: {},
+            POST: {},
+          },
+        },
+      });
+      await act(async () => {
+        wrapper = mountWithContexts(
+          <ScheduleList
+            loadSchedules={loadSchedules}
+            loadScheduleOptions={loadScheduleOptions}
+            resource={{ type: 'job_template', inventory: 1 }}
+            launchConfig={{ survey_enabled: false }}
+            surveyConfig={{}}
+          />
+        );
+      });
+      wrapper.update();
+    });
     test('should show content error when read call unsuccessful', async () => {
       SchedulesAPI.read.mockRejectedValue(new Error());
+      loadSchedules.mockRejectedValue(new Error());
       await act(async () => {
         wrapper = mountWithContexts(
           <ScheduleList

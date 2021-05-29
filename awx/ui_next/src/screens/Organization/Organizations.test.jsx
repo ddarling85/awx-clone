@@ -5,9 +5,12 @@ import { mountWithContexts } from '../../../testUtils/enzymeHelpers';
 import Organizations from './Organizations';
 
 jest.mock('../../api');
+jest.mock('react-router-dom', () => ({
+  ...jest.requireActual('react-router-dom'),
+}));
 
 describe('<Organizations />', () => {
-  test('initially renders succesfully', async () => {
+  test('initially renders successfully', async () => {
     await act(async () => {
       mountWithContexts(
         <Organizations

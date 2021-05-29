@@ -1,17 +1,17 @@
 import React, { useContext } from 'react';
-import { BaseSizes, Title, TitleLevel } from '@patternfly/react-core';
-import { withI18n } from '@lingui/react';
+import { Title } from '@patternfly/react-core';
+
 import { t } from '@lingui/macro';
 import { WorkflowDispatchContext } from '../../../../../contexts/Workflow';
 import LinkModal from './LinkModal';
 
-function LinkEditModal({ i18n }) {
+function LinkEditModal() {
   const dispatch = useContext(WorkflowDispatchContext);
   return (
     <LinkModal
       header={
-        <Title headingLevel={TitleLevel.h1} size={BaseSizes['2xl']}>
-          {i18n._(t`Edit Link`)}
+        <Title headingLevel="h1" size="xl">
+          {t`Edit Link`}
         </Title>
       }
       onConfirm={linkType => dispatch({ type: 'UPDATE_LINK', linkType })}
@@ -19,4 +19,4 @@ function LinkEditModal({ i18n }) {
   );
 }
 
-export default withI18n()(LinkEditModal);
+export default LinkEditModal;

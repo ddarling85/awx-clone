@@ -1,6 +1,6 @@
 import React, { Fragment, useEffect, useCallback } from 'react';
 import { useHistory } from 'react-router-dom';
-import { withI18n } from '@lingui/react';
+
 import { t } from '@lingui/macro';
 import { Button, Modal } from '@patternfly/react-core';
 import OptionsList from '../OptionsList';
@@ -8,44 +8,62 @@ import useRequest from '../../util/useRequest';
 import { getQSConfig, parseQueryString } from '../../util/qs';
 import useSelected from '../../util/useSelected';
 
-const QS_CONFIG = getQSConfig('associate', {
-  page: 1,
-  page_size: 5,
-  order_by: 'name',
-});
+const QS_CONFIG = (order_by = 'name') => {
+  return getQSConfig('associate', {
+    page: 1,
+    page_size: 5,
+    order_by,
+  });
+};
 
 function AssociateModal({
-  i18n,
-  header = i18n._(t`Items`),
-  title = i18n._(t`Select Items`),
+  header = t`Items`,
+  title = t`Select Items`,
   onClose,
   onAssociate,
   fetchRequest,
+  optionsRequest,
   isModalOpen = false,
+  displayKey = 'name',
+  ouiaId,
 }) {
   const history = useHistory();
   const { selected, handleSelect } = useSelected([]);
 
   const {
     request: fetchItems,
-    result: { items, itemCount },
+    result: { items, itemCount, relatedSearchableKeys, searchableKeys },
     error: contentError,
     isLoading,
   } = useRequest(
     useCallback(async () => {
-      const params = parseQueryString(QS_CONFIG, history.location.search);
-      const {
-        data: { count, results },
-      } = await fetchRequest(params);
+      const params = parseQueryString(
+        QS_CONFIG(displayKey),
+        history.location.search
+      );
+      const [
+        {
+          data: { count, results },
+        },
+        actionsResponse,
+      ] = await Promise.all([fetchRequest(params), optionsRequest()]);
 
       return {
         items: results,
         itemCount: count,
+        relatedSearchableKeys: (
+          actionsResponse?.data?.related_search_fields || []
+        ).map(val => val.slice(0, -8)),
+        searchableKeys: Object.keys(
+          actionsResponse.data.actions?.GET || {}
+        ).filter(key => actionsResponse.data.actions?.GET[key].filterable),
       };
-    }, [fetchRequest, history.location.search]),
+    }, [fetchRequest, optionsRequest, history.location.search, displayKey]),
     {
       items: [],
       itemCount: 0,
+      relatedSearchableKeys: [],
+      searchableKeys: [],
     }
   );
 
@@ -55,8 +73,10 @@ function AssociateModal({
 
   const clearQSParams = () => {
     const parts = history.location.search.replace(/^\?/, '').split('&');
-    const ns = QS_CONFIG.namespace;
-    const otherParts = parts.filter(param => !param.startsWith(`${ns}.`));
+    const { namespace } = QS_CONFIG(displayKey);
+    const otherParts = parts.filter(
+      param => !param.startsWith(`${namespace}.`)
+    );
     history.replace(`${history.location.pathname}?${otherParts.join('&')}`);
   };
 
@@ -74,32 +94,36 @@ function AssociateModal({
   return (
     <Fragment>
       <Modal
-        isFooterLeftAligned
-        isLarge
+        ouiaId={ouiaId}
+        variant="large"
         title={title}
+        aria-label={t`Association modal`}
         isOpen={isModalOpen}
         onClose={handleClose}
         actions={[
           <Button
-            aria-label={i18n._(t`Save`)}
+            ouiaId="associate-modal-save"
+            aria-label={t`Save`}
             key="select"
             variant="primary"
             onClick={handleSave}
             isDisabled={selected.length === 0}
           >
-            {i18n._(t`Save`)}
+            {t`Save`}
           </Button>,
           <Button
-            aria-label={i18n._(t`Cancel`)}
+            ouiaId="associate-modal-cancel"
+            aria-label={t`Cancel`}
             key="cancel"
-            variant="secondary"
+            variant="link"
             onClick={handleClose}
           >
-            {i18n._(t`Cancel`)}
+            {t`Cancel`}
           </Button>,
         ]}
       >
         <OptionsList
+          displayKey={displayKey}
           contentError={contentError}
           deselectItem={handleSelect}
           header={header}
@@ -107,35 +131,37 @@ function AssociateModal({
           multiple
           optionCount={itemCount}
           options={items}
-          qsConfig={QS_CONFIG}
+          qsConfig={QS_CONFIG(displayKey)}
           readOnly={false}
           selectItem={handleSelect}
           value={selected}
           searchColumns={[
             {
-              name: i18n._(t`Name`),
-              key: 'name',
+              name: t`Name`,
+              key: `${displayKey}__icontains`,
               isDefault: true,
             },
             {
-              name: i18n._(t`Created By (Username)`),
-              key: 'created_by__username',
+              name: t`Created By (Username)`,
+              key: 'created_by__username__icontains',
             },
             {
-              name: i18n._(t`Modified By (Username)`),
-              key: 'modified_by__username',
+              name: t`Modified By (Username)`,
+              key: 'modified_by__username__icontains',
             },
           ]}
           sortColumns={[
             {
-              name: i18n._(t`Name`),
-              key: 'name',
+              name: t`Name`,
+              key: `${displayKey}`,
             },
           ]}
+          searchableKeys={searchableKeys}
+          relatedSearchableKeys={relatedSearchableKeys}
         />
       </Modal>
     </Fragment>
   );
 }
 
-export default withI18n()(AssociateModal);
+export default AssociateModal;

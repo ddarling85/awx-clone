@@ -7,12 +7,29 @@ from prometheus_client.parser import text_string_to_metric_families
 # Django REST Framework
 from rest_framework import renderers
 from rest_framework.request import override_method
+from rest_framework.utils import encoders
+
+
+class SurrogateEncoder(encoders.JSONEncoder):
+    def encode(self, obj):
+        ret = super(SurrogateEncoder, self).encode(obj)
+        try:
+            ret.encode()
+        except UnicodeEncodeError as e:
+            if 'surrogates not allowed' in e.reason:
+                ret = ret.encode('utf-8', 'replace').decode()
+        return ret
+
+
+class DefaultJSONRenderer(renderers.JSONRenderer):
+
+    encoder_class = SurrogateEncoder
 
 
 class BrowsableAPIRenderer(renderers.BrowsableAPIRenderer):
-    '''
+    """
     Customizations to the default browsable API renderer.
-    '''
+    """
 
     def get_default_renderer(self, view):
         renderer = super(BrowsableAPIRenderer, self).get_default_renderer(view)
@@ -30,9 +47,7 @@ class BrowsableAPIRenderer(renderers.BrowsableAPIRenderer):
             # see: https://github.com/ansible/awx/issues/3108
             # https://code.djangoproject.com/ticket/28121
             return data
-        return super(BrowsableAPIRenderer, self).get_content(renderer, data,
-                                                             accepted_media_type,
-                                                             renderer_context)
+        return super(BrowsableAPIRenderer, self).get_content(renderer, data, accepted_media_type, renderer_context)
 
     def get_context(self, data, accepted_media_type, renderer_context):
         # Store the associated response status to know how to populate the raw
@@ -107,18 +122,25 @@ class AnsiDownloadRenderer(PlainTextRenderer):
 
 
 class PrometheusJSONRenderer(renderers.JSONRenderer):
-
     def render(self, data, accepted_media_type=None, renderer_context=None):
         if isinstance(data, dict):
             # HTTP errors are {'detail': ErrorDetail(string='...', code=...)}
-            return super(PrometheusJSONRenderer, self).render(
-                data, accepted_media_type, renderer_context
-            )
+            return super(PrometheusJSONRenderer, self).render(data, accepted_media_type, renderer_context)
         parsed_metrics = text_string_to_metric_families(data)
         data = {}
         for family in parsed_metrics:
+            data[family.name] = {}
+            data[family.name]['help_text'] = family.documentation
+            data[family.name]['type'] = family.type
+            data[family.name]['samples'] = []
             for sample in family.samples:
-                data[sample[0]] = {"labels": sample[1], "value": sample[2]}
-        return super(PrometheusJSONRenderer, self).render(
-            data, accepted_media_type, renderer_context
-        )
+                sample_dict = {"labels": sample[1], "value": sample[2]}
+                if family.type == 'histogram':
+                    if sample[0].endswith("_sum"):
+                        sample_dict['sample_type'] = "sum"
+                    elif sample[0].endswith("_count"):
+                        sample_dict['sample_type'] = "count"
+                    elif sample[0].endswith("_bucket"):
+                        sample_dict['sample_type'] = "bucket"
+                data[family.name]['samples'].append(sample_dict)
+        return super(PrometheusJSONRenderer, self).render(data, accepted_media_type, renderer_context)

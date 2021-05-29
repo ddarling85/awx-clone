@@ -1,7 +1,8 @@
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect } from 'react';
 import { t } from '@lingui/macro';
-import { withI18n } from '@lingui/react';
-import { Card, PageSection, CardActions } from '@patternfly/react-core';
+
+import { CaretLeftIcon } from '@patternfly/react-icons';
+import { Card, PageSection } from '@patternfly/react-core';
 import {
   Switch,
   useParams,
@@ -11,63 +12,73 @@ import {
   Redirect,
   Link,
 } from 'react-router-dom';
-import { TabbedCardHeader } from '../../components/Card';
-import CardCloseButton from '../../components/CardCloseButton';
+import useRequest from '../../util/useRequest';
 import { ResourceAccessList } from '../../components/ResourceAccessList';
 import ContentError from '../../components/ContentError';
+import ContentLoading from '../../components/ContentLoading';
 import RoutedTabs from '../../components/RoutedTabs';
 import CredentialDetail from './CredentialDetail';
 import CredentialEdit from './CredentialEdit';
 import { CredentialsAPI } from '../../api';
 
-function Credential({ i18n, setBreadcrumb }) {
-  const [credential, setCredential] = useState(null);
-  const [contentError, setContentError] = useState(null);
-  const [hasContentLoading, setHasContentLoading] = useState(true);
+function Credential({ setBreadcrumb }) {
   const { pathname } = useLocation();
+
   const match = useRouteMatch({
     path: '/credentials/:id',
   });
   const { id } = useParams();
 
-  useEffect(() => {
-    async function fetchData() {
-      try {
-        const { data } = await CredentialsAPI.readDetail(id);
-        setBreadcrumb(data);
-        setCredential(data);
-      } catch (error) {
-        setContentError(error);
-      } finally {
-        setHasContentLoading(false);
-      }
+  const {
+    request: fetchCredential,
+    result: { credential },
+    isLoading: hasContentLoading,
+    error: contentError,
+  } = useRequest(
+    useCallback(async () => {
+      const { data } = await CredentialsAPI.readDetail(id);
+      return {
+        credential: data,
+      };
+    }, [id]),
+    {
+      credential: null,
     }
-    fetchData();
-  }, [id, pathname, setBreadcrumb]);
-
-  const tabsArray = [
-    { name: i18n._(t`Details`), link: `/credentials/${id}/details`, id: 0 },
-  ];
-
-  if (credential && credential.organization) {
-    tabsArray.push({
-      name: i18n._(t`Access`),
-      link: `/credentials/${id}/access`,
-      id: 1,
-    });
-  }
-
-  let cardHeader = hasContentLoading ? null : (
-    <TabbedCardHeader>
-      <RoutedTabs tabsArray={tabsArray} />
-      <CardActions>
-        <CardCloseButton linkTo="/credentials" />
-      </CardActions>
-    </TabbedCardHeader>
   );
 
+  useEffect(() => {
+    fetchCredential();
+  }, [fetchCredential, pathname]);
+
+  useEffect(() => {
+    if (credential) {
+      setBreadcrumb(credential);
+    }
+  }, [credential, setBreadcrumb]);
+
+  const tabsArray = [
+    {
+      name: (
+        <>
+          <CaretLeftIcon />
+          {t`Back to Credentials`}
+        </>
+      ),
+      link: `/credentials`,
+      id: 99,
+    },
+    { name: t`Details`, link: `/credentials/${id}/details`, id: 0 },
+    {
+      name: t`Access`,
+      link: `/credentials/${id}/access`,
+      id: 1,
+    },
+  ];
+
+  let showCardHeader = true;
+
   if (pathname.endsWith('edit') || pathname.endsWith('add')) {
-    cardHeader = null;
+    showCardHeader = false;
   }
 
   if (!hasContentLoading && contentError) {
@@ -77,8 +88,8 @@ function Credential({ i18n, setBreadcrumb }) {
           <ContentError error={contentError}>
             {contentError.response && contentError.response.status === 404 && (
               <span>
-                {i18n._(`Credential not found.`)}{' '}
-                <Link to="/credentials">{i18n._(`View all Credentials.`)}</Link>
+                {t`Credential not found.`}{' '}
+                <Link to="/credentials">{t`View all Credentials.`}</Link>
               </span>
             )}
           </ContentError>
@@ -90,55 +101,56 @@ function Credential({ i18n, setBreadcrumb }) {
   return (
     <PageSection>
       <Card>
-        {cardHeader}
-        <Switch>
-          <Redirect
-            from="/credentials/:id"
-            to="/credentials/:id/details"
-            exact
-          />
-          {credential && [
-            <Route key="details" path="/credentials/:id/details">
-              <CredentialDetail credential={credential} />
-            </Route>,
-            <Route key="edit" path="/credentials/:id/edit">
-              <CredentialEdit credential={credential} />
-            </Route>,
-            credential.organization && (
+        {showCardHeader && <RoutedTabs tabsArray={tabsArray} />}
+        {hasContentLoading && <ContentLoading />}
+        {!hasContentLoading && credential && (
+          <Switch>
+            <Redirect
+              from="/credentials/:id"
+              to="/credentials/:id/details"
+              exact
+            />
+            {credential && [
+              <Route key="details" path="/credentials/:id/details">
+                <CredentialDetail credential={credential} />
+              </Route>,
+              <Route key="edit" path="/credentials/:id/edit">
+                <CredentialEdit credential={credential} />
+              </Route>,
               <Route key="access" path="/credentials/:id/access">
                 <ResourceAccessList
                   resource={credential}
                   apiModel={CredentialsAPI}
                 />
-              </Route>
-            ),
+              </Route>,
+              <Route key="not-found" path="*">
+                {!hasContentLoading && (
+                  <ContentError isNotFound>
+                    {match.params.id && (
+                      <Link to={`/credentials/${match.params.id}/details`}>
+                        {t`View Credential Details`}
+                      </Link>
+                    )}
+                  </ContentError>
+                )}
+              </Route>,
+            ]}
             <Route key="not-found" path="*">
               {!hasContentLoading && (
                 <ContentError isNotFound>
-                  {match.params.id && (
-                    <Link to={`/credentials/${match.params.id}/details`}>
-                      {i18n._(`View Credential Details`)}
+                  {id && (
+                    <Link to={`/credentials/${id}/details`}>
+                      {t`View Credential Details`}
                     </Link>
                   )}
                 </ContentError>
               )}
-            </Route>,
-          ]}
-          <Route key="not-found" path="*">
-            {!hasContentLoading && (
-              <ContentError isNotFound>
-                {id && (
-                  <Link to={`/credentials/${id}/details`}>
-                    {i18n._(`View Credential Details`)}
-                  </Link>
-                )}
-              </ContentError>
-            )}
-          </Route>
-        </Switch>
+            </Route>
+          </Switch>
+        )}
       </Card>
     </PageSection>
   );
 }
 
-export default withI18n()(Credential);
+export default Credential;

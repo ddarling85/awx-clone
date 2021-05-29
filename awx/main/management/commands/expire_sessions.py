@@ -12,7 +12,8 @@ from django.core.exceptions import ObjectDoesNotExist
 
 class Command(BaseCommand):
     """Expire Django auth sessions for a user/all users"""
-    help='Expire Django auth sessions. Will expire all auth sessions if --user option is not supplied.'
+
+    help = 'Expire Django auth sessions. Will expire all auth sessions if --user option is not supplied.'
 
     def add_arguments(self, parser):
         parser.add_argument('--user', dest='user', type=str)
@@ -30,6 +31,7 @@ class Command(BaseCommand):
         for session in sessions:
             user_id = session.get_decoded().get('_auth_user_id')
             if (user is None) or (user_id and user.id == int(user_id)):
+                # The Session model instance doesn't have .flush(), we need a SessionStore instance.
                 session = import_module(settings.SESSION_ENGINE).SessionStore(session.session_key)
                 # Log out the session, but without the need for a request object.
                 session.flush()

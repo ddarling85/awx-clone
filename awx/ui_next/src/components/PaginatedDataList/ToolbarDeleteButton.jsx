@@ -1,23 +1,44 @@
-import React, { Fragment } from 'react';
+import React, { useContext, useEffect, useState } from 'react';
 import {
   func,
   bool,
+  node,
   number,
   string,
   arrayOf,
   shape,
   checkPropTypes,
 } from 'prop-types';
-import { Button, Tooltip } from '@patternfly/react-core';
-import { withI18n } from '@lingui/react';
+import styled from 'styled-components';
+import {
+  Alert,
+  Badge,
+  Button,
+  DropdownItem,
+  Tooltip,
+} from '@patternfly/react-core';
 import { t } from '@lingui/macro';
 import AlertModal from '../AlertModal';
+import { KebabifiedContext } from '../../contexts/Kebabified';
+import { getRelatedResourceDeleteCounts } from '../../util/getRelatedResourceDeleteDetails';
 
-const requireNameOrUsername = props => {
-  const { name, username } = props;
-  if (!name && !username) {
+import ErrorDetail from '../ErrorDetail';
+
+const WarningMessage = styled(Alert)`
+  margin-top: 10px;
+`;
+
+const Label = styled.span`
+  && {
+    margin-right: 10px;
+  }
+`;
+
+const requiredField = props => {
+  const { name, username, image } = props;
+  if (!name && !username && !image) {
     return new Error(
-      `One of 'name' or 'username' is required by ItemToDelete component.`
+      `One of 'name', 'username' or 'image' is required by ItemToDelete component.`
     );
   }
   if (name) {
@@ -40,13 +61,24 @@ const requireNameOrUsername = props => {
       'ItemToDelete'
     );
   }
+  if (image) {
+    checkPropTypes(
+      {
+        image: string,
+      },
+      { image: props.image },
+      'prop',
+      'ItemToDelete'
+    );
+  }
   return null;
 };
 
 const ItemToDelete = shape({
   id: number.isRequired,
-  name: requireNameOrUsername,
-  username: requireNameOrUsername,
+  name: requiredField,
+  username: requiredField,
+  image: requiredField,
   summary_fields: shape({
     user_capabilities: shape({
       delete: bool.isRequired,
@@ -54,131 +86,234 @@ const ItemToDelete = shape({
   }).isRequired,
 });
 
-function cannotDelete(item) {
-  return !item.summary_fields.user_capabilities.delete;
-}
+function ToolbarDeleteButton({
+  itemsToDelete,
+  pluralizedItemName,
+  errorMessage,
+  onDelete,
+  deleteDetailsRequests,
+  warningMessage,
+  deleteMessage,
+  cannotDelete,
+}) {
+  const { isKebabified, onKebabModalChange } = useContext(KebabifiedContext);
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [deleteDetails, setDeleteDetails] = useState(null);
+  const [isLoading, setIsLoading] = useState(false);
 
-class ToolbarDeleteButton extends React.Component {
-  static propTypes = {
-    onDelete: func.isRequired,
-    itemsToDelete: arrayOf(ItemToDelete).isRequired,
-    pluralizedItemName: string,
-  };
-
-  static defaultProps = {
-    pluralizedItemName: 'Items',
-  };
-
-  constructor(props) {
-    super(props);
-
-    this.state = {
-      isModalOpen: false,
-    };
-
-    this.handleConfirmDelete = this.handleConfirmDelete.bind(this);
-    this.handleCancelDelete = this.handleCancelDelete.bind(this);
-    this.handleDelete = this.handleDelete.bind(this);
-  }
-
-  handleConfirmDelete() {
-    this.setState({ isModalOpen: true });
-  }
-
-  handleCancelDelete() {
-    this.setState({ isModalOpen: false });
-  }
-
-  handleDelete() {
-    const { onDelete } = this.props;
+  const [deleteMessageError, setDeleteMessageError] = useState();
+  const handleDelete = () => {
     onDelete();
-    this.setState({ isModalOpen: false });
-  }
+    toggleModal();
+  };
 
-  renderTooltip() {
-    const { itemsToDelete, pluralizedItemName, i18n } = this.props;
+  const toggleModal = async isOpen => {
+    setIsLoading(true);
+    setDeleteDetails(null);
+    if (
+      isOpen &&
+      itemsToDelete.length === 1 &&
+      deleteDetailsRequests?.length > 0
+    ) {
+      const { results, error } = await getRelatedResourceDeleteCounts(
+        deleteDetailsRequests
+      );
 
+      if (error) {
+        setDeleteMessageError(error);
+      } else {
+        setDeleteDetails(results);
+      }
+    }
+    setIsLoading(false);
+    setIsModalOpen(isOpen);
+  };
+
+  useEffect(() => {
+    if (isKebabified) {
+      onKebabModalChange(isModalOpen);
+    }
+  }, [isKebabified, isModalOpen, onKebabModalChange]);
+
+  const renderTooltip = () => {
     const itemsUnableToDelete = itemsToDelete
       .filter(cannotDelete)
-      .map(item => item.name)
+      .map(item => item.name || item.username)
       .join(', ');
     if (itemsToDelete.some(cannotDelete)) {
       return (
         <div>
-          {i18n._(
-            t`You do not have permission to delete the following ${pluralizedItemName}: ${itemsUnableToDelete}`
+          {errorMessage ? (
+            <>
+              <span>{errorMessage}</span>
+              <span>{`: ${itemsUnableToDelete}`}</span>
+            </>
+          ) : (
+            t`You do not have permission to delete ${pluralizedItemName}: ${itemsUnableToDelete}`
           )}
         </div>
       );
     }
     if (itemsToDelete.length) {
-      return i18n._(t`Delete`);
+      return t`Delete`;
     }
-    return i18n._(t`Select a row to delete`);
-  }
+    return t`Select a row to delete`;
+  };
 
-  render() {
-    const { itemsToDelete, pluralizedItemName, i18n } = this.props;
-    const { isModalOpen } = this.state;
-    const modalTitle = i18n._(t`Delete ${pluralizedItemName}?`);
+  const modalTitle = t`Delete ${pluralizedItemName}?`;
 
-    const isDisabled =
-      itemsToDelete.length === 0 || itemsToDelete.some(cannotDelete);
+  const isDisabled =
+    itemsToDelete.length === 0 || itemsToDelete.some(cannotDelete);
 
-    // NOTE: Once PF supports tooltips on disabled elements,
-    // we can delete the extra <div> around the <DeleteButton> below.
-    // See: https://github.com/patternfly/patternfly-react/issues/1894
+  const buildDeleteWarning = () => {
+    const deleteMessages = [];
+    if (warningMessage) {
+      deleteMessages.push(warningMessage);
+    }
+    if (deleteMessage) {
+      if (
+        itemsToDelete[0]?.type !== 'inventory' &&
+        (itemsToDelete.length > 1 || deleteDetails)
+      ) {
+        deleteMessages.push(deleteMessage);
+      } else if (deleteDetails || itemsToDelete.length > 1) {
+        deleteMessages.push(deleteMessage);
+      }
+    }
     return (
-      <Fragment>
-        <Tooltip content={this.renderTooltip()} position="top">
+      <div>
+        {deleteMessages.map(message => (
+          <div aria-label={message} key={message}>
+            {message}
+          </div>
+        ))}
+        {deleteDetails &&
+          Object.entries(deleteDetails).map(([key, value]) => (
+            <div key={key} aria-label={`${key}: ${value}`}>
+              <Label>{key}</Label>
+              <Badge>{value}</Badge>
+            </div>
+          ))}
+      </div>
+    );
+  };
+
+  if (deleteMessageError) {
+    return (
+      <AlertModal
+        isOpen={deleteMessageError}
+        title={t`Error!`}
+        onClose={() => {
+          toggleModal(false);
+          setDeleteMessageError();
+        }}
+      >
+        <ErrorDetail error={deleteMessageError} />
+      </AlertModal>
+    );
+  }
+  const shouldShowDeleteWarning =
+    warningMessage ||
+    (itemsToDelete.length === 1 && deleteDetails) ||
+    (itemsToDelete.length > 1 && deleteMessage);
+
+  return (
+    <>
+      {isKebabified ? (
+        <Tooltip content={renderTooltip()} position="top">
+          <DropdownItem
+            key="add"
+            isDisabled={isDisabled}
+            isLoading={isLoading}
+            ouiaId="delete-button"
+            spinnerAriaValueText={isLoading ? 'Loading' : undefined}
+            component="button"
+            onClick={() => {
+              toggleModal(true);
+            }}
+          >
+            {t`Delete`}
+          </DropdownItem>
+        </Tooltip>
+      ) : (
+        <Tooltip content={renderTooltip()} position="top">
           <div>
             <Button
-              variant="danger"
-              aria-label={i18n._(t`Delete`)}
-              onClick={this.handleConfirmDelete}
+              variant="secondary"
+              isLoading={isLoading}
+              ouiaId="delete-button"
+              spinnerAriaValueText={isLoading ? 'Loading' : undefined}
+              aria-label={t`Delete`}
+              onClick={() => toggleModal(true)}
               isDisabled={isDisabled}
             >
-              {i18n._(t`Delete`)}
+              {t`Delete`}
             </Button>
           </div>
         </Tooltip>
-        {isModalOpen && (
-          <AlertModal
-            variant="danger"
-            title={modalTitle}
-            isOpen={isModalOpen}
-            onClose={this.handleCancelDelete}
-            actions={[
-              <Button
-                key="delete"
-                variant="danger"
-                aria-label={i18n._(t`confirm delete`)}
-                onClick={this.handleDelete}
-              >
-                {i18n._(t`Delete`)}
-              </Button>,
-              <Button
-                key="cancel"
-                variant="secondary"
-                aria-label={i18n._(t`cancel delete`)}
-                onClick={this.handleCancelDelete}
-              >
-                {i18n._(t`Cancel`)}
-              </Button>,
-            ]}
-          >
-            <div>{i18n._(t`This action will delete the following:`)}</div>
-            {itemsToDelete.map(item => (
-              <span key={item.id}>
-                <strong>{item.name || item.username}</strong>
-                <br />
-              </span>
-            ))}
-          </AlertModal>
-        )}
-      </Fragment>
-    );
-  }
+      )}
+
+      {isModalOpen && (
+        <AlertModal
+          variant="danger"
+          title={modalTitle}
+          isOpen={isModalOpen}
+          onClose={() => toggleModal(false)}
+          actions={[
+            <Button
+              ouiaId="delete-modal-confirm"
+              key="delete"
+              variant="danger"
+              aria-label={t`confirm delete`}
+              isDisabled={Boolean(
+                deleteDetails && itemsToDelete[0]?.type === 'credential_type'
+              )}
+              onClick={handleDelete}
+            >
+              {t`Delete`}
+            </Button>,
+            <Button
+              key="cancel"
+              variant="link"
+              aria-label={t`cancel delete`}
+              onClick={() => toggleModal(false)}
+            >
+              {t`Cancel`}
+            </Button>,
+          ]}
+        >
+          <div>{t`This action will delete the following:`}</div>
+          {itemsToDelete.map(item => (
+            <span key={item.id}>
+              <strong>{item.name || item.username || item.image}</strong>
+              <br />
+            </span>
+          ))}
+          {shouldShowDeleteWarning && (
+            <WarningMessage
+              variant="warning"
+              isInline
+              title={buildDeleteWarning()}
+            />
+          )}
+        </AlertModal>
+      )}
+    </>
+  );
 }
 
-export default withI18n()(ToolbarDeleteButton);
+ToolbarDeleteButton.propTypes = {
+  onDelete: func.isRequired,
+  itemsToDelete: arrayOf(ItemToDelete).isRequired,
+  pluralizedItemName: string,
+  warningMessage: node,
+  cannotDelete: func,
+};
+
+ToolbarDeleteButton.defaultProps = {
+  pluralizedItemName: 'Items',
+  warningMessage: null,
+  cannotDelete: item => !item.summary_fields.user_capabilities.delete,
+};
+
+export default ToolbarDeleteButton;

@@ -53,43 +53,39 @@ const mockInventory = {
   pending_deletion: false,
 };
 
-CredentialTypesAPI.read.mockResolvedValue({
-  data: {
-    results: [
-      {
-        id: 14,
-        name: 'insights',
-      },
-    ],
-  },
-});
 const associatedInstanceGroups = [
   {
     id: 1,
     name: 'Foo',
   },
 ];
-InventoriesAPI.readInstanceGroups.mockResolvedValue({
-  data: {
-    results: associatedInstanceGroups,
-  },
-});
 
 describe('<InventoryEdit />', () => {
   let wrapper;
   let history;
 
   beforeEach(async () => {
+    CredentialTypesAPI.read.mockResolvedValue({
+      data: {
+        results: [
+          {
+            id: 14,
+            name: 'insights',
+          },
+        ],
+      },
+    });
+    InventoriesAPI.readInstanceGroups.mockResolvedValue({
+      data: {
+        results: associatedInstanceGroups,
+      },
+    });
     history = createMemoryHistory({ initialEntries: ['/inventories'] });
     await act(async () => {
       wrapper = mountWithContexts(<InventoryEdit inventory={mockInventory} />, {
         context: { router: { history } },
       });
     });
-  });
-
-  afterEach(() => {
-    wrapper.unmount();
   });
 
   test('initially renders successfully', async () => {
@@ -102,7 +98,9 @@ describe('<InventoryEdit />', () => {
 
   test('handleCancel returns the user to inventory detail', async () => {
     await waitForElement(wrapper, 'isLoading', el => el.length === 0);
-    wrapper.find('Button[aria-label="Cancel"]').simulate('click');
+    await act(async () => {
+      wrapper.find('Button[aria-label="Cancel"]').simulate('click');
+    });
     expect(history.location.pathname).toEqual(
       '/inventories/inventory/1/details'
     );
@@ -114,12 +112,14 @@ describe('<InventoryEdit />', () => {
       { name: 'Bizz', id: 2 },
       { name: 'Buzz', id: 3 },
     ];
-    wrapper.find('InventoryForm').prop('onSubmit')({
-      name: 'Foo',
-      id: 13,
-      organization: { id: 1 },
-      insights_credential: { id: 13 },
-      instanceGroups,
+    await act(async () => {
+      wrapper.find('InventoryForm').prop('onSubmit')({
+        name: 'Foo',
+        id: 13,
+        organization: { id: 1 },
+        insights_credential: { id: 13 },
+        instanceGroups,
+      });
     });
     await sleep(0);
     instanceGroups.map(IG =>

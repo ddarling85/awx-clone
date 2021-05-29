@@ -1,7 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useLocation, useRouteMatch } from 'react-router-dom';
-import { withI18n } from '@lingui/react';
-import { t } from '@lingui/macro';
+import { t, Plural } from '@lingui/macro';
 import { Card, PageSection } from '@patternfly/react-core';
 
 import { OrganizationsAPI } from '../../../api';
@@ -9,12 +8,17 @@ import useRequest, { useDeleteItems } from '../../../util/useRequest';
 import AlertModal from '../../../components/AlertModal';
 import DataListToolbar from '../../../components/DataListToolbar';
 import ErrorDetail from '../../../components/ErrorDetail';
-import PaginatedDataList, {
+import {
   ToolbarAddButton,
   ToolbarDeleteButton,
 } from '../../../components/PaginatedDataList';
+import PaginatedTable, {
+  HeaderRow,
+  HeaderCell,
+} from '../../../components/PaginatedTable';
 import { getQSConfig, parseQueryString } from '../../../util/qs';
 import OrganizationListItem from './OrganizationListItem';
+import { relatedResourceDeleteRequests } from '../../../util/getRelatedResourceDeleteDetails';
 
 const QS_CONFIG = getQSConfig('organization', {
   page: 1,
@@ -22,7 +26,7 @@ const QS_CONFIG = getQSConfig('organization', {
   order_by: 'name',
 });
 
-function OrganizationsList({ i18n }) {
+function OrganizationsList() {
   const location = useLocation();
   const match = useRouteMatch();
 
@@ -31,7 +35,13 @@ function OrganizationsList({ i18n }) {
   const addUrl = `${match.url}/add`;
 
   const {
-    result: { organizations, organizationCount, actions },
+    result: {
+      organizations,
+      organizationCount,
+      actions,
+      relatedSearchableKeys,
+      searchableKeys,
+    },
     error: contentError,
     isLoading: isOrgsLoading,
     request: fetchOrganizations,
@@ -46,12 +56,20 @@ function OrganizationsList({ i18n }) {
         organizations: orgs.data.results,
         organizationCount: orgs.data.count,
         actions: orgActions.data.actions,
+        relatedSearchableKeys: (
+          orgActions?.data?.related_search_fields || []
+        ).map(val => val.slice(0, -8)),
+        searchableKeys: Object.keys(orgActions.data.actions?.GET || {}).filter(
+          key => orgActions.data.actions?.GET[key].filterable
+        ),
       };
     }, [location]),
     {
       organizations: [],
       organizationCount: 0,
       actions: {},
+      relatedSearchableKeys: [],
+      searchableKeys: [],
     }
   );
 
@@ -67,7 +85,7 @@ function OrganizationsList({ i18n }) {
     deletionError,
     clearDeletionError,
   } = useDeleteItems(
-    useCallback(async () => {
+    useCallback(() => {
       return Promise.all(
         selected.map(({ id }) => OrganizationsAPI.destroy(id))
       );
@@ -98,40 +116,50 @@ function OrganizationsList({ i18n }) {
       setSelected(selected.concat(row));
     }
   };
+  const deleteDetailsRequests = relatedResourceDeleteRequests.organization(
+    selected[0]
+  );
 
   return (
     <>
       <PageSection>
         <Card>
-          <PaginatedDataList
+          <PaginatedTable
             contentError={contentError}
             hasContentLoading={hasContentLoading}
             items={organizations}
             itemCount={organizationCount}
-            pluralizedItemName={i18n._(t`Organizations`)}
+            pluralizedItemName={t`Organizations`}
             qsConfig={QS_CONFIG}
-            onRowClick={handleSelect}
             toolbarSearchColumns={[
               {
-                name: i18n._(t`Name`),
-                key: 'name',
+                name: t`Name`,
+                key: 'name__icontains',
                 isDefault: true,
               },
               {
-                name: i18n._(t`Created By (Username)`),
-                key: 'created_by__username',
+                name: t`Description`,
+                key: 'description__icontains',
               },
               {
-                name: i18n._(t`Modified By (Username)`),
-                key: 'modified_by__username',
+                name: t`Created By (Username)`,
+                key: 'created_by__username__icontains',
               },
-            ]}
-            toolbarSortColumns={[
               {
-                name: i18n._(t`Name`),
-                key: 'name',
+                name: t`Modified By (Username)`,
+                key: 'modified_by__username__icontains',
               },
             ]}
+            toolbarSearchableKeys={searchableKeys}
+            toolbarRelatedSearchableKeys={relatedSearchableKeys}
+            headerRow={
+              <HeaderRow qsConfig={QS_CONFIG}>
+                <HeaderCell sortKey="name">{t`Name`}</HeaderCell>
+                <HeaderCell>{t`Members`}</HeaderCell>
+                <HeaderCell>{t`Teams`}</HeaderCell>
+                <HeaderCell>{t`Actions`}</HeaderCell>
+              </HeaderRow>
+            }
             renderToolbar={props => (
               <DataListToolbar
                 {...props}
@@ -147,15 +175,24 @@ function OrganizationsList({ i18n }) {
                     key="delete"
                     onDelete={handleOrgDelete}
                     itemsToDelete={selected}
-                    pluralizedItemName="Organizations"
+                    pluralizedItemName={t`Organizations`}
+                    deleteDetailsRequests={deleteDetailsRequests}
+                    deleteMessage={
+                      <Plural
+                        value={selected.length}
+                        one="This organization is currently being by other resources. Are you sure you want to delete it?"
+                        other="Deleting these organizations could impact other resources that rely on them. Are you sure you want to delete anyway?"
+                      />
+                    }
                   />,
                 ]}
               />
             )}
-            renderItem={o => (
+            renderRow={(o, index) => (
               <OrganizationListItem
                 key={o.id}
                 organization={o}
+                rowIndex={index}
                 detailUrl={`${match.url}/${o.id}`}
                 isSelected={selected.some(row => row.id === o.id)}
                 onSelect={() => handleSelect(o)}
@@ -170,10 +207,10 @@ function OrganizationsList({ i18n }) {
       <AlertModal
         isOpen={deletionError}
         variant="error"
-        title={i18n._(t`Error!`)}
+        title={t`Error!`}
         onClose={clearDeletionError}
       >
-        {i18n._(t`Failed to delete one or more organizations.`)}
+        {t`Failed to delete one or more organizations.`}
         <ErrorDetail error={deletionError} />
       </AlertModal>
     </>
@@ -181,4 +218,4 @@ function OrganizationsList({ i18n }) {
 }
 
 export { OrganizationsList as _OrganizationsList };
-export default withI18n()(OrganizationsList);
+export default OrganizationsList;

@@ -1,20 +1,18 @@
 /* eslint no-nested-ternary: 0 */
-import React, { useState, useEffect } from 'react';
+import React, { useCallback, useState, useEffect } from 'react';
 import PropTypes from 'prop-types';
-import { withI18n } from '@lingui/react';
+
 import { t } from '@lingui/macro';
-import { Formik, useField } from 'formik';
+import { Formik, useField, useFormikContext } from 'formik';
 import { Form, FormGroup, Title } from '@patternfly/react-core';
-import { Config } from '../../../contexts/Config';
+import { useConfig } from '../../../contexts/Config';
 import AnsibleSelect from '../../../components/AnsibleSelect';
 import ContentError from '../../../components/ContentError';
 import ContentLoading from '../../../components/ContentLoading';
 import FormActionGroup from '../../../components/FormActionGroup/FormActionGroup';
-import FormField, {
-  FieldTooltip,
-  FormSubmitError,
-} from '../../../components/FormField';
+import FormField, { FormSubmitError } from '../../../components/FormField';
 import OrganizationLookup from '../../../components/Lookup/OrganizationLookup';
+import ExecutionEnvironmentLookup from '../../../components/Lookup/ExecutionEnvironmentLookup';
 import { CredentialTypesAPI, ProjectsAPI } from '../../../api';
 import { required } from '../../../util/validators';
 import {
@@ -23,8 +21,8 @@ import {
 } from '../../../components/FormLayout';
 import {
   GitSubForm,
-  HgSubForm,
   SvnSubForm,
+  ArchiveSubForm,
   InsightsSubForm,
   ManualSubForm,
 } from './ProjectSubForms';
@@ -68,10 +66,10 @@ const fetchCredentials = async credential => {
 };
 
 function ProjectFormFields({
+  project,
   project_base_dir,
   project_local_paths,
   formik,
-  i18n,
   setCredentials,
   credentials,
   scmTypeOptions,
@@ -85,19 +83,29 @@ function ProjectFormFields({
     credential: '',
     scm_clean: false,
     scm_delete_on_update: false,
+    scm_track_submodules: false,
     scm_update_on_launch: false,
     allow_override: false,
     scm_update_cache_timeout: 0,
   };
 
+  const { setFieldValue } = useFormikContext();
+
   const [scmTypeField, scmTypeMeta, scmTypeHelpers] = useField({
     name: 'scm_type',
-    validate: required(i18n._(t`Set a value for this field`), i18n),
+    validate: required(t`Set a value for this field`),
   });
-  const [venvField] = useField('custom_virtualenv');
   const [organizationField, organizationMeta, organizationHelpers] = useField({
     name: 'organization',
-    validate: required(i18n._(t`Select a value for this field`), i18n),
+    validate: required(t`Select a value for this field`),
+  });
+
+  const [
+    executionEnvironmentField,
+    executionEnvironmentMeta,
+    executionEnvironmentHelpers,
+  ] = useField({
+    name: 'default_environment',
   });
 
   /* Save current scm subform field values to state */
@@ -132,29 +140,39 @@ function ProjectFormFields({
     });
   };
 
-  const handleCredentialSelection = (type, value) => {
-    setCredentials({
-      ...credentials,
-      [type]: {
-        ...credentials[type],
-        value,
-      },
-    });
-  };
+  const handleCredentialSelection = useCallback(
+    (type, value) => {
+      setCredentials({
+        ...credentials,
+        [type]: {
+          ...credentials[type],
+          value,
+        },
+      });
+    },
+    [credentials, setCredentials]
+  );
+
+  const onOrganizationChange = useCallback(
+    value => {
+      setFieldValue('organization', value);
+    },
+    [setFieldValue]
+  );
 
   return (
     <>
       <FormField
         id="project-name"
-        label={i18n._(t`Name`)}
+        label={t`Name`}
         name="name"
         type="text"
-        validate={required(null, i18n)}
+        validate={required(null)}
         isRequired
       />
       <FormField
         id="project-description"
-        label={i18n._(t`Description`)}
+        label={t`Description`}
         name="description"
         type="text"
       />
@@ -162,18 +180,34 @@ function ProjectFormFields({
         helperTextInvalid={organizationMeta.error}
         isValid={!organizationMeta.touched || !organizationMeta.error}
         onBlur={() => organizationHelpers.setTouched()}
-        onChange={value => {
-          organizationHelpers.setValue(value);
-        }}
+        onChange={onOrganizationChange}
         value={organizationField.value}
         required
+        autoPopulate={!project?.id}
+      />
+      <ExecutionEnvironmentLookup
+        helperTextInvalid={executionEnvironmentMeta.error}
+        isValid={
+          !executionEnvironmentMeta.touched || !executionEnvironmentMeta.error
+        }
+        onBlur={() => executionEnvironmentHelpers.setTouched()}
+        value={executionEnvironmentField.value}
+        onChange={value => executionEnvironmentHelpers.setValue(value)}
+        popoverContent={t`The execution environment that will be used for jobs that use this project. This will be used as fallback when an execution environment has not been explicitly assigned at the job template or workflow level.`}
+        tooltip={t`Select an organization before editing the default execution environment.`}
+        globallyAvailable
+        isDisabled={!organizationField.value}
+        organizationId={organizationField.value?.id}
+        isDefaultEnvironment
       />
       <FormGroup
         fieldId="project-scm-type"
         helperTextInvalid={scmTypeMeta.error}
         isRequired
-        isValid={!scmTypeMeta.touched || !scmTypeMeta.error}
-        label={i18n._(t`Source Control Credential Type`)}
+        validated={
+          !scmTypeMeta.touched || !scmTypeMeta.error ? 'default' : 'error'
+        }
+        label={t`Source Control Credential Type`}
       >
         <AnsibleSelect
           {...scmTypeField}
@@ -182,7 +216,7 @@ function ProjectFormFields({
             {
               value: '',
               key: '',
-              label: i18n._(t`Choose a Source Control Type`),
+              label: t`Choose a Source Control Type`,
               isDisabled: true,
             },
             ...scmTypeOptions.map(([value, label]) => {
@@ -204,7 +238,9 @@ function ProjectFormFields({
       </FormGroup>
       {formik.values.scm_type !== '' && (
         <SubFormLayout>
-          <Title size="md">{i18n._(t`Type Details`)}</Title>
+          <Title size="md" headingLevel="h4">
+            {t`Type Details`}
+          </Title>
           <FormColumnLayout>
             {
               {
@@ -222,15 +258,15 @@ function ProjectFormFields({
                     scmUpdateOnLaunch={formik.values.scm_update_on_launch}
                   />
                 ),
-                hg: (
-                  <HgSubForm
+                svn: (
+                  <SvnSubForm
                     credential={credentials.scm}
                     onCredentialSelection={handleCredentialSelection}
                     scmUpdateOnLaunch={formik.values.scm_update_on_launch}
                   />
                 ),
-                svn: (
-                  <SvnSubForm
+                archive: (
+                  <ArchiveSubForm
                     credential={credentials.scm}
                     onCredentialSelection={handleCredentialSelection}
                     scmUpdateOnLaunch={formik.values.scm_update_on_launch}
@@ -241,6 +277,9 @@ function ProjectFormFields({
                     credential={credentials.insights}
                     onCredentialSelection={handleCredentialSelection}
                     scmUpdateOnLaunch={formik.values.scm_update_on_launch}
+                    autoPopulateCredential={
+                      !project?.id || project?.scm_type !== 'insights'
+                    }
                   />
                 ),
               }[formik.values.scm_type]
@@ -248,50 +287,28 @@ function ProjectFormFields({
           </FormColumnLayout>
         </SubFormLayout>
       )}
-      <Config>
-        {({ custom_virtualenvs }) =>
-          custom_virtualenvs &&
-          custom_virtualenvs.length > 1 && (
-            <FormGroup
-              fieldId="project-custom-virtualenv"
-              label={i18n._(t`Ansible Environment`)}
-            >
-              <FieldTooltip
-                content={i18n._(t`Select the playbook to be executed by
-                this job.`)}
-              />
-              <AnsibleSelect
-                id="project-custom-virtualenv"
-                data={[
-                  {
-                    label: i18n._(t`Use Default Ansible Environment`),
-                    value: '/venv/ansible/',
-                    key: 'default',
-                  },
-                  ...custom_virtualenvs
-                    .filter(datum => datum !== '/venv/ansible/')
-                    .map(datum => ({
-                      label: datum,
-                      value: datum,
-                      key: datum,
-                    })),
-                ]}
-                {...venvField}
-              />
-            </FormGroup>
-          )
-        }
-      </Config>
     </>
   );
 }
 
-function ProjectForm({ i18n, project, submitError, ...props }) {
+function ProjectForm({ project, submitError, ...props }) {
   const { handleCancel, handleSubmit } = props;
   const { summary_fields = {} } = project;
+  const { project_base_dir, project_local_paths } = useConfig();
   const [contentError, setContentError] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
-  const [scmSubFormState, setScmSubFormState] = useState(null);
+  const [scmSubFormState, setScmSubFormState] = useState({
+    scm_url: '',
+    scm_branch: '',
+    scm_refspec: '',
+    credential: '',
+    scm_clean: false,
+    scm_delete_on_update: false,
+    scm_track_submodules: false,
+    scm_update_on_launch: false,
+    allow_override: false,
+    scm_update_cache_timeout: 0,
+  });
   const [scmTypeOptions, setScmTypeOptions] = useState(null);
   const [credentials, setCredentials] = useState({
     scm: { typeId: null, value: null },
@@ -333,59 +350,57 @@ function ProjectForm({ i18n, project, submitError, ...props }) {
   }
 
   return (
-    <Config>
-      {({ project_base_dir, project_local_paths }) => (
-        <Formik
-          initialValues={{
-            allow_override: project.allow_override || false,
-            base_dir: project_base_dir || '',
-            credential: project.credential || '',
-            custom_virtualenv: project.custom_virtualenv || '',
-            description: project.description || '',
-            local_path: project.local_path || '',
-            name: project.name || '',
-            organization: project.summary_fields?.organization || null,
-            scm_branch: project.scm_branch || '',
-            scm_clean: project.scm_clean || false,
-            scm_delete_on_update: project.scm_delete_on_update || false,
-            scm_refspec: project.scm_refspec || '',
-            scm_type:
-              project.scm_type === ''
-                ? 'manual'
-                : project.scm_type === undefined
-                ? ''
-                : project.scm_type,
-            scm_update_cache_timeout: project.scm_update_cache_timeout || 0,
-            scm_update_on_launch: project.scm_update_on_launch || false,
-            scm_url: project.scm_url || '',
-          }}
-          onSubmit={handleSubmit}
-        >
-          {formik => (
-            <Form autoComplete="off" onSubmit={formik.handleSubmit}>
-              <FormColumnLayout>
-                <ProjectFormFields
-                  project_base_dir={project_base_dir}
-                  project_local_paths={project_local_paths}
-                  formik={formik}
-                  i18n={i18n}
-                  setCredentials={setCredentials}
-                  credentials={credentials}
-                  scmTypeOptions={scmTypeOptions}
-                  setScmSubFormState={setScmSubFormState}
-                  scmSubFormState={scmSubFormState}
-                />
-                <FormSubmitError error={submitError} />
-                <FormActionGroup
-                  onCancel={handleCancel}
-                  onSubmit={formik.handleSubmit}
-                />
-              </FormColumnLayout>
-            </Form>
-          )}
-        </Formik>
+    <Formik
+      initialValues={{
+        allow_override: project.allow_override || false,
+        base_dir: project_base_dir || '',
+        credential: project.credential || '',
+        description: project.description || '',
+        local_path: project.local_path || '',
+        name: project.name || '',
+        organization: project.summary_fields?.organization || null,
+        scm_branch: project.scm_branch || '',
+        scm_clean: project.scm_clean || false,
+        scm_delete_on_update: project.scm_delete_on_update || false,
+        scm_track_submodules: project.scm_track_submodules || false,
+        scm_refspec: project.scm_refspec || '',
+        scm_type:
+          project.scm_type === ''
+            ? 'manual'
+            : project.scm_type === undefined
+            ? ''
+            : project.scm_type,
+        scm_update_cache_timeout: project.scm_update_cache_timeout || 0,
+        scm_update_on_launch: project.scm_update_on_launch || false,
+        scm_url: project.scm_url || '',
+        default_environment:
+          project.summary_fields?.default_environment || null,
+      }}
+      onSubmit={handleSubmit}
+    >
+      {formik => (
+        <Form autoComplete="off" onSubmit={formik.handleSubmit}>
+          <FormColumnLayout>
+            <ProjectFormFields
+              project={project}
+              project_base_dir={project_base_dir}
+              project_local_paths={project_local_paths}
+              formik={formik}
+              setCredentials={setCredentials}
+              credentials={credentials}
+              scmTypeOptions={scmTypeOptions}
+              setScmSubFormState={setScmSubFormState}
+              scmSubFormState={scmSubFormState}
+            />
+            <FormSubmitError error={submitError} />
+            <FormActionGroup
+              onCancel={handleCancel}
+              onSubmit={formik.handleSubmit}
+            />
+          </FormColumnLayout>
+        </Form>
       )}
-    </Config>
+    </Formik>
   );
 }
 
@@ -401,4 +416,4 @@ ProjectForm.defaultProps = {
   submitError: null,
 };
 
-export default withI18n()(ProjectForm);
+export default ProjectForm;

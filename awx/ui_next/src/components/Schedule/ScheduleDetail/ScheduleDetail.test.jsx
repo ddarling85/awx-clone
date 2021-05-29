@@ -2,14 +2,47 @@ import React from 'react';
 import { Route } from 'react-router-dom';
 import { createMemoryHistory } from 'history';
 import { act } from 'react-dom/test-utils';
-import { SchedulesAPI } from '../../../api';
+import { SchedulesAPI, JobTemplatesAPI } from '../../../api';
 import {
   mountWithContexts,
   waitForElement,
 } from '../../../../testUtils/enzymeHelpers';
 import ScheduleDetail from './ScheduleDetail';
 
-jest.mock('../../../api/models/Schedules');
+jest.mock('../../../api');
+
+const allPrompts = {
+  data: {
+    ask_credential_on_launch: true,
+    ask_diff_mode_on_launch: true,
+    ask_inventory_on_launch: true,
+    ask_job_type_on_launch: true,
+    ask_limit_on_launch: true,
+    ask_scm_branch_on_launch: true,
+    ask_skip_tags_on_launch: true,
+    ask_tags_on_launch: true,
+    ask_variables_on_launch: true,
+    ask_verbosity_on_launch: true,
+    survey_enabled: true,
+    inventory_needed_to_start: true,
+  },
+};
+
+const noPrompts = {
+  data: {
+    ask_credential_on_launch: false,
+    ask_diff_mode_on_launch: false,
+    ask_inventory_on_launch: false,
+    ask_job_type_on_launch: false,
+    ask_limit_on_launch: false,
+    ask_scm_branch_on_launch: false,
+    ask_skip_tags_on_launch: false,
+    ask_tags_on_launch: false,
+    ask_variables_on_launch: false,
+    ask_verbosity_on_launch: false,
+    survey_enabled: false,
+  },
+};
 
 const schedule = {
   url: '/api/v2/schedules/1',
@@ -39,10 +72,6 @@ const schedule = {
       first_name: '',
       last_name: '',
     },
-    inventory: {
-      id: 1,
-      name: 'Test Inventory',
-    },
   },
   created: '2020-03-03T20:38:54.210306Z',
   modified: '2020-03-03T20:38:54.210336Z',
@@ -53,22 +82,45 @@ const schedule = {
   dtstart: '2020-03-16T04:00:00Z',
   dtend: '2020-07-06T04:00:00Z',
   next_run: '2020-03-16T04:00:00Z',
+  extra_data: {},
+  inventory: null,
+  scm_branch: null,
+  job_type: null,
+  job_tags: null,
+  skip_tags: null,
+  limit: null,
+  diff_mode: null,
+  verbosity: null,
 };
 
-SchedulesAPI.createPreview.mockResolvedValue({
-  data: {
-    local: [],
-    utc: [],
-  },
-});
+const scheduleWithPrompts = {
+  ...schedule,
+  job_type: 'run',
+  inventory: 1,
+  job_tags: 'tag1',
+  skip_tags: 'tag2',
+  scm_branch: 'foo/branch',
+  limit: 'localhost',
+  diff_mode: true,
+  verbosity: 1,
+  extra_data: { foo: 'fii' },
+};
 
 describe('<ScheduleDetail />', () => {
   let wrapper;
   const history = createMemoryHistory({
     initialEntries: ['/templates/job_template/1/schedules/1/details'],
   });
+  beforeEach(() => {
+    SchedulesAPI.createPreview.mockResolvedValue({
+      data: {
+        local: [],
+        utc: [],
+      },
+    });
+  });
+
   afterEach(() => {
-    wrapper.unmount();
     jest.clearAllMocks();
   });
 
@@ -79,6 +131,7 @@ describe('<ScheduleDetail />', () => {
         results: [],
       },
     });
+    JobTemplatesAPI.readLaunch.mockResolvedValueOnce(noPrompts);
     await act(async () => {
       wrapper = mountWithContexts(
         <Route
@@ -123,20 +176,22 @@ describe('<ScheduleDetail />', () => {
     expect(wrapper.find('Detail[label="Repeat Frequency"]').length).toBe(1);
     expect(wrapper.find('Detail[label="Created"]').length).toBe(1);
     expect(wrapper.find('Detail[label="Last Modified"]').length).toBe(1);
-    expect(wrapper.find('Title[children="Prompted Fields"]').length).toBe(0);
+    expect(wrapper.find('Title[children="Prompted Values"]').length).toBe(0);
     expect(wrapper.find('Detail[label="Job Type"]').length).toBe(0);
     expect(wrapper.find('Detail[label="Inventory"]').length).toBe(0);
     expect(wrapper.find('Detail[label="Source Control Branch"]').length).toBe(
       0
     );
     expect(wrapper.find('Detail[label="Limit"]').length).toBe(0);
+    expect(wrapper.find('Detail[label="Verbosity"]').length).toBe(0);
     expect(wrapper.find('Detail[label="Show Changes"]').length).toBe(0);
     expect(wrapper.find('Detail[label="Credentials"]').length).toBe(0);
     expect(wrapper.find('Detail[label="Job Tags"]').length).toBe(0);
     expect(wrapper.find('Detail[label="Skip Tags"]').length).toBe(0);
+    expect(wrapper.find('VariablesDetail').length).toBe(0);
   });
   test('details should render with the proper values with prompts', async () => {
-    SchedulesAPI.readCredentials.mockResolvedValueOnce({
+    SchedulesAPI.readCredentials.mockResolvedValue({
       data: {
         count: 2,
         results: [
@@ -151,17 +206,7 @@ describe('<ScheduleDetail />', () => {
         ],
       },
     });
-    const scheduleWithPrompts = {
-      ...schedule,
-      job_type: 'run',
-      inventory: 1,
-      job_tags: 'tag1',
-      skip_tags: 'tag2',
-      scm_branch: 'foo/branch',
-      limit: 'localhost',
-      diff_mode: true,
-      verbosity: 1,
-    };
+    JobTemplatesAPI.readLaunch.mockResolvedValueOnce(allPrompts);
     await act(async () => {
       wrapper = mountWithContexts(
         <Route
@@ -206,7 +251,7 @@ describe('<ScheduleDetail />', () => {
     expect(wrapper.find('Detail[label="Repeat Frequency"]').length).toBe(1);
     expect(wrapper.find('Detail[label="Created"]').length).toBe(1);
     expect(wrapper.find('Detail[label="Last Modified"]').length).toBe(1);
-    expect(wrapper.find('Title[children="Prompted Fields"]').length).toBe(1);
+    expect(wrapper.find('Title[children="Prompted Values"]').length).toBe(1);
     expect(
       wrapper
         .find('Detail[label="Job Type"]')
@@ -226,10 +271,101 @@ describe('<ScheduleDetail />', () => {
         .find('dd')
         .text()
     ).toBe('localhost');
+    expect(
+      wrapper
+        .find('Detail[label="Verbosity"]')
+        .find('dd')
+        .text()
+    ).toBe('1 (Verbose)');
     expect(wrapper.find('Detail[label="Show Changes"]').length).toBe(1);
     expect(wrapper.find('Detail[label="Credentials"]').length).toBe(1);
     expect(wrapper.find('Detail[label="Job Tags"]').length).toBe(1);
     expect(wrapper.find('Detail[label="Skip Tags"]').length).toBe(1);
+    expect(wrapper.find('VariablesDetail').length).toBe(1);
+  });
+  test('prompt values section should be hidden if no overrides are present on the schedule but ask_ options are all true', async () => {
+    SchedulesAPI.readCredentials.mockResolvedValueOnce({
+      data: {
+        count: 0,
+        results: [],
+      },
+    });
+    JobTemplatesAPI.readLaunch.mockResolvedValueOnce(allPrompts);
+    await act(async () => {
+      wrapper = mountWithContexts(
+        <Route
+          path="/templates/job_template/:id/schedules/:scheduleId"
+          component={() => <ScheduleDetail schedule={schedule} />}
+        />,
+        {
+          context: {
+            router: {
+              history,
+              route: {
+                location: history.location,
+                match: { params: { id: 1 } },
+              },
+            },
+          },
+        }
+      );
+    });
+    await waitForElement(wrapper, 'ContentLoading', el => el.length === 0);
+    expect(wrapper.find('Title[children="Prompted Values"]').length).toBe(0);
+    expect(wrapper.find('Detail[label="Job Type"]').length).toBe(0);
+    expect(wrapper.find('Detail[label="Inventory"]').length).toBe(0);
+    expect(wrapper.find('Detail[label="Source Control Branch"]').length).toBe(
+      0
+    );
+    expect(wrapper.find('Detail[label="Limit"]').length).toBe(0);
+    expect(wrapper.find('Detail[label="Verbosity"]').length).toBe(0);
+    expect(wrapper.find('Detail[label="Show Changes"]').length).toBe(0);
+    expect(wrapper.find('Detail[label="Credentials"]').length).toBe(0);
+    expect(wrapper.find('Detail[label="Job Tags"]').length).toBe(0);
+    expect(wrapper.find('Detail[label="Skip Tags"]').length).toBe(0);
+    expect(wrapper.find('VariablesDetail').length).toBe(0);
+  });
+  test('prompt values section should be hidden if overrides are present on the schedule but ask_ options are all false', async () => {
+    SchedulesAPI.readCredentials.mockResolvedValueOnce({
+      data: {
+        count: 0,
+        results: [],
+      },
+    });
+    JobTemplatesAPI.readLaunch.mockResolvedValueOnce(noPrompts);
+    await act(async () => {
+      wrapper = mountWithContexts(
+        <Route
+          path="/templates/job_template/:id/schedules/:scheduleId"
+          component={() => <ScheduleDetail schedule={scheduleWithPrompts} />}
+        />,
+        {
+          context: {
+            router: {
+              history,
+              route: {
+                location: history.location,
+                match: { params: { id: 1 } },
+              },
+            },
+          },
+        }
+      );
+    });
+    await waitForElement(wrapper, 'ContentLoading', el => el.length === 0);
+    expect(wrapper.find('Title[children="Prompted Values"]').length).toBe(0);
+    expect(wrapper.find('Detail[label="Job Type"]').length).toBe(0);
+    expect(wrapper.find('Detail[label="Inventory"]').length).toBe(0);
+    expect(wrapper.find('Detail[label="Source Control Branch"]').length).toBe(
+      0
+    );
+    expect(wrapper.find('Detail[label="Limit"]').length).toBe(0);
+    expect(wrapper.find('Detail[label="Verbosity"]').length).toBe(0);
+    expect(wrapper.find('Detail[label="Show Changes"]').length).toBe(0);
+    expect(wrapper.find('Detail[label="Credentials"]').length).toBe(0);
+    expect(wrapper.find('Detail[label="Job Tags"]').length).toBe(0);
+    expect(wrapper.find('Detail[label="Skip Tags"]').length).toBe(0);
+    expect(wrapper.find('VariablesDetail').length).toBe(0);
   });
   test('error shown when error encountered fetching credentials', async () => {
     SchedulesAPI.readCredentials.mockRejectedValueOnce(
@@ -244,6 +380,7 @@ describe('<ScheduleDetail />', () => {
         },
       })
     );
+    JobTemplatesAPI.readLaunch.mockResolvedValueOnce(noPrompts);
     await act(async () => {
       wrapper = mountWithContexts(
         <Route
@@ -273,6 +410,7 @@ describe('<ScheduleDetail />', () => {
         results: [],
       },
     });
+    JobTemplatesAPI.readLaunch.mockResolvedValueOnce(noPrompts);
     await act(async () => {
       wrapper = mountWithContexts(
         <Route
@@ -312,6 +450,7 @@ describe('<ScheduleDetail />', () => {
         results: [],
       },
     });
+    JobTemplatesAPI.readLaunch.mockResolvedValueOnce(noPrompts);
     await act(async () => {
       wrapper = mountWithContexts(
         <Route
@@ -349,5 +488,40 @@ describe('<ScheduleDetail />', () => {
       el => el.length === 0
     );
     expect(SchedulesAPI.destroy).toHaveBeenCalledTimes(1);
+  });
+  test('should have disabled toggle', async () => {
+    SchedulesAPI.readCredentials.mockResolvedValueOnce({
+      data: {
+        count: 0,
+        results: [],
+      },
+    });
+    JobTemplatesAPI.readLaunch.mockResolvedValueOnce(allPrompts);
+    await act(async () => {
+      wrapper = mountWithContexts(
+        <Route
+          path="/templates/job_template/:id/schedules/:scheduleId"
+          component={() => (
+            <ScheduleDetail schedule={schedule} surveyConfig={{ spec: [] }} />
+          )}
+        />,
+        {
+          context: {
+            router: {
+              history,
+              route: {
+                location: history.location,
+                match: { params: { id: 1 } },
+              },
+            },
+          },
+        }
+      );
+    });
+    await waitForElement(
+      wrapper,
+      'ScheduleToggle',
+      el => el.prop('isDisabled') === true
+    );
   });
 });

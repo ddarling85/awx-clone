@@ -16,6 +16,7 @@ const onUpdateNodeResource = jest.fn();
 describe('JobTemplatesList', () => {
   let wrapper;
   afterEach(() => {
+    jest.clearAllMocks();
     wrapper.unmount();
   });
   test('Row selected when nodeResource id matches row id and clicking new row makes expected callback', async () => {
@@ -28,14 +29,27 @@ describe('JobTemplatesList', () => {
             name: 'Test Job Template',
             type: 'job_template',
             url: '/api/v2/job_templates/1',
+            inventory: 1,
+            project: 2,
           },
           {
             id: 2,
             name: 'Test Job Template 2',
             type: 'job_template',
             url: '/api/v2/job_templates/2',
+            inventory: 1,
+            project: 2,
           },
         ],
+      },
+    });
+    JobTemplatesAPI.readOptions.mockResolvedValue({
+      data: {
+        actions: {
+          GET: {},
+          POST: {},
+        },
+        related_search_fields: [],
       },
     });
     await act(async () => {
@@ -57,16 +71,27 @@ describe('JobTemplatesList', () => {
     ).toBe(false);
     wrapper
       .find('CheckboxListItem[name="Test Job Template 2"]')
-      .simulate('click');
+      .prop('onSelect')();
     expect(onUpdateNodeResource).toHaveBeenCalledWith({
       id: 2,
       name: 'Test Job Template 2',
       type: 'job_template',
       url: '/api/v2/job_templates/2',
+      inventory: 1,
+      project: 2,
     });
   });
   test('Error shown when read() request errors', async () => {
     JobTemplatesAPI.read.mockRejectedValue(new Error());
+    JobTemplatesAPI.readOptions.mockResolvedValue({
+      data: {
+        actions: {
+          GET: {},
+          POST: {},
+        },
+        related_search_fields: [],
+      },
+    });
     await act(async () => {
       wrapper = mountWithContexts(
         <JobTemplatesList

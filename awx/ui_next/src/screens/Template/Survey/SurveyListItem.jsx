@@ -1,7 +1,7 @@
 import 'styled-components/macro';
 import React from 'react';
 import { t } from '@lingui/macro';
-import { withI18n } from '@lingui/react';
+
 import { Link } from 'react-router-dom';
 import {
   Button as _Button,
@@ -20,10 +20,12 @@ import DataListCell from '../../../components/DataListCell';
 import ChipGroup from '../../../components/ChipGroup';
 
 const DataListAction = styled(_DataListAction)`
-  margin-left: 0;
-  margin-right: 20px;
-  padding-top: 15px;
-  padding-bottom: 15px;
+  && {
+    margin-left: 0;
+    margin-right: 20px;
+    padding-top: 0;
+    padding-bottom: 0;
+  }
 `;
 const Button = styled(_Button)`
   padding-top: 0;
@@ -42,7 +44,7 @@ const Label = styled.b`
 function SurveyListItem({
   canEdit,
   question,
-  i18n,
+
   isLast,
   isFirst,
   isChecked,
@@ -52,20 +54,21 @@ function SurveyListItem({
 }) {
   return (
     <DataListItem
-      aria-labelledby={i18n._(t`Survey questions`)}
+      aria-labelledby={t`Survey questions`}
       id={`survey-list-item-${question.variable}`}
     >
       <DataListItemRow css="padding-left:16px">
         <DataListAction
           id="sortQuestions"
-          aria-labelledby={i18n._(t`Sort question order`)}
-          aria-label={i18n._(t`Sort question order`)}
+          aria-labelledby={t`Sort question order`}
+          aria-label={t`Sort question order`}
         >
           <Stack>
             <StackItem>
               <Button
+                ouiaId={`${question.variable}-move-up-button`}
                 variant="plain"
-                aria-label={i18n._(t`move up`)}
+                aria-label={t`move up`}
                 isDisabled={isFirst || !canEdit}
                 onClick={() => onMoveUp(question)}
               >
@@ -74,8 +77,9 @@ function SurveyListItem({
             </StackItem>
             <StackItem>
               <Button
+                ouiaId={`${question.variable}-move-down-button`}
                 variant="plain"
-                aria-label={i18n._(t`move down`)}
+                aria-label={t`move down`}
                 isDisabled={isLast || !canEdit}
                 onClick={() => onMoveDown(question)}
               >
@@ -94,12 +98,12 @@ function SurveyListItem({
           dataListCells={[
             <DataListCell key="name">
               <>
-                <Link to={`survey/edit/${question.variable}`}>
+                <Link to={`survey/edit?question_variable=${question.variable}`}>
                   {question.question_name}
                 </Link>
                 {question.required && (
                   <Required
-                    aria-label={i18n._(t`Required`)}
+                    aria-label={t`Required`}
                     className="pf-c-form__label-required"
                     aria-hidden="true"
                   >
@@ -110,13 +114,13 @@ function SurveyListItem({
             </DataListCell>,
 
             <DataListCell key="type">
-              <Label>{i18n._(t`Type:`)}</Label>
+              <Label>{t`Type`}</Label>
               {question.type}
             </DataListCell>,
             <DataListCell key="default">
-              <Label>{i18n._(t`Default:`)}</Label>
+              <Label>{t`Default`}</Label>
               {[question.type].includes('password') && (
-                <span>{i18n._(t`encrypted`).toUpperCase()}</span>
+                <span>{t`encrypted`.toUpperCase()}</span>
               )}
               {[question.type].includes('multiselect') &&
                 question.default.length > 0 && (
@@ -143,4 +147,4 @@ function SurveyListItem({
   );
 }
 
-export default withI18n()(SurveyListItem);
+export default SurveyListItem;

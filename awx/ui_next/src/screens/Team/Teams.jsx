@@ -1,42 +1,40 @@
 import React, { useState, useCallback } from 'react';
 import { Route, Switch } from 'react-router-dom';
-import { withI18n } from '@lingui/react';
+
 import { t } from '@lingui/macro';
 
 import { Config } from '../../contexts/Config';
-import Breadcrumbs from '../../components/Breadcrumbs';
+import ScreenHeader from '../../components/ScreenHeader';
 import TeamList from './TeamList';
 import TeamAdd from './TeamAdd';
 import Team from './Team';
 
-function Teams({ i18n }) {
+function Teams() {
   const [breadcrumbConfig, setBreadcrumbConfig] = useState({
-    '/teams': i18n._(t`Teams`),
-    '/teams/add': i18n._(t`Create New Team`),
+    '/teams': t`Teams`,
+    '/teams/add': t`Create New Team`,
   });
 
-  const buildBreadcrumbConfig = useCallback(
-    team => {
-      if (!team) {
-        return;
-      }
+  const buildBreadcrumbConfig = useCallback(team => {
+    if (!team) {
+      return;
+    }
 
-      setBreadcrumbConfig({
-        '/teams': i18n._(t`Teams`),
-        '/teams/add': i18n._(t`Create New Team`),
-        [`/teams/${team.id}`]: `${team.name}`,
-        [`/teams/${team.id}/edit`]: i18n._(t`Edit Details`),
-        [`/teams/${team.id}/details`]: i18n._(t`Details`),
-        [`/teams/${team.id}/users`]: i18n._(t`Users`),
-        [`/teams/${team.id}/access`]: i18n._(t`Access`),
-      });
-    },
-    [i18n]
-  );
+    setBreadcrumbConfig({
+      '/teams': t`Teams`,
+      '/teams/add': t`Create New Team`,
+      [`/teams/${team.id}`]: `${team.name}`,
+      [`/teams/${team.id}/edit`]: t`Edit Details`,
+      [`/teams/${team.id}/details`]: t`Details`,
+      [`/teams/${team.id}/users`]: t`Users`,
+      [`/teams/${team.id}/access`]: t`Access`,
+      [`/teams/${team.id}/roles`]: t`Roles`,
+    });
+  }, []);
 
   return (
     <>
-      <Breadcrumbs breadcrumbConfig={breadcrumbConfig} />
+      <ScreenHeader streamType="team" breadcrumbConfig={breadcrumbConfig} />
       <Switch>
         <Route path="/teams/add">
           <TeamAdd />
@@ -55,4 +53,4 @@ function Teams({ i18n }) {
 }
 
 export { Teams as _Teams };
-export default withI18n()(Teams);
+export default Teams;

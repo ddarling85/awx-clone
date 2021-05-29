@@ -157,17 +157,6 @@ One of the most important tasks in a clustered AWX installation is the periodic 
 If a node in an AWX cluster discovers that one of its peers has not updated its heartbeat within a certain grace period, it is assumed to be offline, and its capacity is set to zero to avoid scheduling new tasks on that node. Additionally, jobs allegedly running or scheduled to run on that node are assumed to be lost, and "reaped", or marked as failed.
 
 
-#### Isolated Tasks and Their Heartbeats
-
-AWX reports as much status as it can via the browsable API at `/api/v2/ping` in order to provide validation of the health of an instance, including the timestamps of the last heartbeat. Since isolated nodes don't have access to the AWX database, their heartbeats are performed by controller nodes instead. A periodic task, `awx_isolated_heartbeat`, is responsible for periodically connecting from a controller to each isolated node and retrieving its capacity (via SSH).
-
-When a job is scheduled to run on an isolated instance, the controller instance puts together the metadata required to run the job and then transfers it to the isolated instance. Once the metadata has been synchronized to the isolated host, the controller instance starts a process on the isolated instance, which consumes the metadata and starts running `ansible/ansible-playbook`. As the playbook runs, job artifacts (such as `stdout` and job events) are written to disk on the isolated instance.
-
-Alternatively: "While the job runs on the isolated instance, the controller instance periodically checks for and copies the job artifacts (_e.g._, `stdout` and job events) that it produces. It processes these until the job finishes running."
-
-To read more about Isolated Instances, refer to the [Isolated Instance Groups](https://docs.ansible.com/ansible-tower/latest/html/administration/clustering.html#isolated-instance-groups) section of the Clustering page in the Ansible Tower Administration guide.
-
-
 ## AWX Jobs
 
 ### Unified Jobs
@@ -187,7 +176,7 @@ This task spawns an `ansible` process, which then runs a command using Ansible. 
 - Build a dictionary of passwords for the SSH private key, SSH user and sudo/su.
 - Build an environment dictionary for Ansible.
 - Build a command line argument list for running Ansible, optionally using `ssh-agent` for public/private key authentication.
-- Return whether the task should use `bwrap`.
+- Return whether the task should use process isolation.
 
 For more information on ad hoc commands, read the [Running Ad Hoc Commands section](https://docs.ansible.com/ansible-tower/latest/html/userguide/inventories.html#running-ad-hoc-commands) of the Inventories page of the Ansible Tower User Guide.
 
@@ -263,9 +252,9 @@ This entire process enables a response of a `202 Accepted`, where instead of wai
 
 #### Handle Setting Changes
 
-Any time the user changes a setting in AWX (_e.g._, in `api/v2/settings`), data will be added to or altered in a database. Since querying databases directly can be extremely time-consuming, each node in a cluster runs a local `memcached` server, none of which are aware of each other. They all potentially have different values contained within, but ultimately need to be consistent. So how can this be accomplished?
+Any time the user changes a setting in AWX (_e.g._, in `api/v2/settings`), data will be added to or altered in a database. Since querying databases directly can be extremely time-consuming, each node in a cluster runs a local `redis-cache` server, none of which are aware of each other. They all potentially have different values contained within, but ultimately need to be consistent. So how can this be accomplished?
 
-"Handle Setting Changes" provides the solution!  This "fanout" task (_i.e._, all nodes execute it) makes it so that there is a single source of truth even within a clustered system. Whenever a database setting is accessed, and that setting's name is not present in `memcached`, it grabs the setting from the database and then populates it in the applicable node's cache.  When any database setting gets altered, all of the `memcached` servers on each node needs to "forget" the value that they previously retained. By deleting the setting in `memcached` on all nodes with the use of this task, we assure that the next time it is accessed, the database will be consulted for the most up-to-date value.
+"Handle Setting Changes" provides the solution!  This "fanout" task (_i.e._, all nodes execute it) makes it so that there is a single source of truth even within a clustered system. Whenever a database setting is accessed, and that setting's name is not present in `redis-cache`, it grabs the setting from the database and then populates it in the applicable node's cache.  When any database setting gets altered, all of the `redis-cache` servers on each node needs to "forget" the value that they previously retained. By deleting the setting in `redis-cache` on all nodes with the use of this task, we assure that the next time it is accessed, the database will be consulted for the most up-to-date value.
 
 
 ### Analytics and Administrative Tasks

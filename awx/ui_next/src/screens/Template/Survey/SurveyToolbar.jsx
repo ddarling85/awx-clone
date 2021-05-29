@@ -1,19 +1,21 @@
 import React from 'react';
 import { useRouteMatch } from 'react-router-dom';
 import { t } from '@lingui/macro';
-import { withI18n } from '@lingui/react';
+
 import styled from 'styled-components';
 
 import {
-  DataToolbar as _DataToolbar,
-  DataToolbarContent,
-  DataToolbarGroup,
-  DataToolbarItem,
-} from '@patternfly/react-core/dist/umd/experimental';
-import { Switch, Checkbox, Button } from '@patternfly/react-core';
+  Switch,
+  Checkbox,
+  Button,
+  Toolbar as _Toolbar,
+  ToolbarContent,
+  ToolbarGroup,
+  ToolbarItem,
+} from '@patternfly/react-core';
 import { ToolbarAddButton } from '../../../components/PaginatedDataList';
 
-const DataToolbar = styled(_DataToolbar)`
+const Toolbar = styled(_Toolbar)`
   margin-left: 52px;
 `;
 
@@ -21,7 +23,7 @@ function SurveyToolbar({
   canEdit,
   isAllSelected,
   onSelectAll,
-  i18n,
+
   surveyEnabled,
   onToggleSurvey,
   isDeleteDisabled,
@@ -30,50 +32,51 @@ function SurveyToolbar({
   isDeleteDisabled = !canEdit || isDeleteDisabled;
   const match = useRouteMatch();
   return (
-    <DataToolbar id="survey-toolbar">
-      <DataToolbarContent>
-        <DataToolbarItem>
+    <Toolbar id="survey-toolbar">
+      <ToolbarContent>
+        <ToolbarItem>
           <Checkbox
             isDisabled={!canEdit}
             isChecked={isAllSelected}
             onChange={isChecked => {
               onSelectAll(isChecked);
             }}
-            aria-label={i18n._(t`Select all`)}
+            aria-label={t`Select all`}
             id="select-all"
           />
-        </DataToolbarItem>
-        <DataToolbarItem>
+        </ToolbarItem>
+        <ToolbarItem>
           <Switch
-            aria-label={i18n._(t`Survey Toggle`)}
+            aria-label={t`Survey Toggle`}
             id="survey-toggle"
-            label={i18n._(t`On`)}
-            labelOff={i18n._(t`Off`)}
+            label={t`On`}
+            labelOff={t`Off`}
             isChecked={surveyEnabled}
             isDisabled={!canEdit}
             onChange={() => onToggleSurvey(!surveyEnabled)}
           />
-        </DataToolbarItem>
-        <DataToolbarGroup>
-          <DataToolbarItem>
+        </ToolbarItem>
+        <ToolbarGroup>
+          <ToolbarItem>
             <ToolbarAddButton
               isDisabled={!canEdit}
               linkTo={`${match.url}/add`}
             />
-          </DataToolbarItem>
-          <DataToolbarItem>
+          </ToolbarItem>
+          <ToolbarItem>
             <Button
-              variant="danger"
+              ouiaId="survey-delete-button"
+              variant="secondary"
               isDisabled={isDeleteDisabled}
               onClick={() => onToggleDeleteModal(true)}
             >
-              {i18n._(t`Delete`)}
+              {t`Delete`}
             </Button>
-          </DataToolbarItem>
-        </DataToolbarGroup>
-      </DataToolbarContent>
-    </DataToolbar>
+          </ToolbarItem>
+        </ToolbarGroup>
+      </ToolbarContent>
+    </Toolbar>
   );
 }
 
-export default withI18n()(SurveyToolbar);
+export default SurveyToolbar;

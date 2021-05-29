@@ -2,7 +2,7 @@ import React from 'react';
 import PropTypes from 'prop-types';
 import { useField } from 'formik';
 import { FormGroup, TextInput, TextArea } from '@patternfly/react-core';
-import FieldTooltip from './FieldTooltip';
+import Popover from '../Popover';
 
 function FormField(props) {
   const {
@@ -29,14 +29,14 @@ function FormField(props) {
           helperText={helperText}
           helperTextInvalid={meta.error}
           isRequired={isRequired}
-          isValid={isValid}
+          validated={isValid ? 'default' : 'error'}
           label={label}
+          labelIcon={<Popover content={tooltip} maxWidth={tooltipMaxWidth} />}
         >
-          <FieldTooltip content={tooltip} maxWidth={tooltipMaxWidth} />
           <TextArea
             id={id}
             isRequired={isRequired}
-            isValid={isValid}
+            validated={isValid ? 'default' : 'error'}
             resizeOrientation="vertical"
             {...rest}
             {...field}
@@ -51,14 +51,14 @@ function FormField(props) {
           helperText={helperText}
           helperTextInvalid={meta.error}
           isRequired={isRequired}
-          isValid={isValid}
+          validated={isValid ? 'default' : 'error'}
           label={label}
+          labelIcon={<Popover content={tooltip} maxWidth={tooltipMaxWidth} />}
         >
-          <FieldTooltip content={tooltip} maxWidth={tooltipMaxWidth} />
           <TextInput
             id={id}
             isRequired={isRequired}
-            isValid={isValid}
+            validated={isValid ? 'default' : 'error'}
             {...rest}
             {...field}
             type={type}

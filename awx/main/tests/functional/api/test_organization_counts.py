@@ -2,7 +2,7 @@ import pytest
 
 from awx.api.versioning import reverse
 
-from awx.main.models import Project
+from awx.main.models import Project, Host
 
 
 @pytest.fixture
@@ -21,11 +21,7 @@ def organization_resource_creator(organization, user):
         for i in range(inventories):
             inventory = organization.inventories.create(name="associated-inv %s" % i)
         for i in range(projects):
-            Project.objects.create(
-                name="test-proj %s" % i,
-                description="test-proj-desc",
-                organization=organization
-            )
+            Project.objects.create(name="test-proj %s" % i, description="test-proj-desc", organization=organization)
         # Mix up the inventories and projects used by the job templates
         i_proj = 0
         i_inv = 0
@@ -33,11 +29,9 @@ def organization_resource_creator(organization, user):
             project = Project.objects.filter(organization=organization)[i_proj]
             # project = organization.projects.all()[i_proj]
             inventory = organization.inventories.all()[i_inv]
-            project.jobtemplates.create(name="test-jt %s" % i,
-                                        description="test-job-template-desc",
-                                        inventory=inventory,
-                                        playbook="test_playbook.yml",
-                                        organization=organization)
+            project.jobtemplates.create(
+                name="test-jt %s" % i, description="test-job-template-desc", inventory=inventory, playbook="test_playbook.yml", organization=organization
+            )
             i_proj += 1
             i_inv += 1
             if i_proj >= Project.objects.filter(organization=organization).count():
@@ -46,25 +40,12 @@ def organization_resource_creator(organization, user):
                 i_inv = 0
 
         return organization
+
     return rf
 
 
-COUNTS_PRIMES = {
-    'users': 11,
-    'admins': 5,
-    'job_templates': 3,
-    'projects': 3,
-    'inventories': 7,
-    'teams': 5
-}
-COUNTS_ZEROS = {
-    'users': 0,
-    'admins': 0,
-    'job_templates': 0,
-    'projects': 0,
-    'inventories': 0,
-    'teams': 0
-}
+COUNTS_PRIMES = {'users': 11, 'admins': 5, 'job_templates': 3, 'projects': 3, 'inventories': 7, 'teams': 5}
+COUNTS_ZEROS = {'users': 0, 'admins': 0, 'job_templates': 0, 'projects': 0, 'inventories': 0, 'teams': 0}
 
 
 @pytest.fixture
@@ -76,11 +57,12 @@ def resourced_organization(organization_resource_creator):
 def test_org_counts_detail_admin(resourced_organization, user, get):
     # Check that all types of resources are counted by a superuser
     external_admin = user('admin', True)
-    response = get(reverse('api:organization_detail',
-                   kwargs={'pk': resourced_organization.pk}), external_admin)
+    response = get(reverse('api:organization_detail', kwargs={'pk': resourced_organization.pk}), external_admin)
     assert response.status_code == 200
 
     counts = response.data['summary_fields']['related_field_counts']
+    assert counts['hosts'] == 0
+    counts.pop('hosts')
     assert counts == COUNTS_PRIMES
 
 
@@ -88,18 +70,19 @@ def test_org_counts_detail_admin(resourced_organization, user, get):
 def test_org_counts_detail_member(resourced_organization, user, get):
     # Check that a non-admin org member can only see users / admin in detail view
     member_user = resourced_organization.member_role.members.get(username='org-member 1')
-    response = get(reverse('api:organization_detail',
-                   kwargs={'pk': resourced_organization.pk}), member_user)
+    response = get(reverse('api:organization_detail', kwargs={'pk': resourced_organization.pk}), member_user)
     assert response.status_code == 200
 
     counts = response.data['summary_fields']['related_field_counts']
+    assert counts['hosts'] == 0
+    counts.pop('hosts')
     assert counts == {
         'users': COUNTS_PRIMES['users'],  # Policy is that members can see other users and admins
         'admins': COUNTS_PRIMES['admins'],
         'job_templates': 0,
         'projects': 0,
         'inventories': 0,
-        'teams': 0
+        'teams': 0,
     }
 
 
@@ -111,6 +94,7 @@ def test_org_counts_list_admin(resourced_organization, user, get):
     assert response.status_code == 200
 
     counts = response.data['results'][0]['summary_fields']['related_field_counts']
+    assert 'hosts' not in counts  # doesn't show in list view
     assert counts == COUNTS_PRIMES
 
 
@@ -123,6 +107,7 @@ def test_org_counts_list_member(resourced_organization, user, get):
     assert response.status_code == 200
 
     counts = response.data['results'][0]['summary_fields']['related_field_counts']
+    assert 'hosts' not in counts  # doesn't show in list view
 
     assert counts == {
         'users': COUNTS_PRIMES['users'],  # Policy is that members can see other users and admins
@@ -130,7 +115,7 @@ def test_org_counts_list_member(resourced_organization, user, get):
         'job_templates': 0,
         'projects': 0,
         'inventories': 0,
-        'teams': 0
+        'teams': 0,
     }
 
 
@@ -139,12 +124,12 @@ def test_new_org_zero_counts(user, post):
     # Check that a POST to the organization list endpoint returns
     #   correct counts, including the new record
     org_list_url = reverse('api:organization_list')
-    post_response = post(url=org_list_url, data={'name': 'test organization',
-                         'description': ''}, user=user('admin', True))
+    post_response = post(url=org_list_url, data={'name': 'test organization', 'description': ''}, user=user('admin', True))
     assert post_response.status_code == 201
 
     new_org_list = post_response.render().data
     counts_dict = new_org_list['summary_fields']['related_field_counts']
+    assert 'hosts' not in counts_dict  # doesn't show in list view
     assert counts_dict == COUNTS_ZEROS
 
 
@@ -168,6 +153,19 @@ def test_two_organizations(resourced_organization, organizations, user, get):
 
 
 @pytest.mark.django_db
+def test_hosts_counted(resourced_organization, user, get):
+    admin_user = user('admin', True)
+    assert Host.objects.org_active_count(resourced_organization.id) == 0
+    resourced_organization.inventories.first().hosts.create(name='Some Host')
+    assert Host.objects.org_active_count(resourced_organization.id) == 1
+    response = get(reverse('api:organization_detail', kwargs={'pk': resourced_organization.pk}), admin_user)
+    assert response.status_code == 200
+
+    counts = response.data['summary_fields']['related_field_counts']
+    assert counts['hosts'] == Host.objects.org_active_count(resourced_organization.id) == 1
+
+
+@pytest.mark.django_db
 def test_scan_JT_counted(resourced_organization, user, get):
     admin_user = user('admin', True)
     counts_dict = COUNTS_PRIMES
@@ -180,7 +178,10 @@ def test_scan_JT_counted(resourced_organization, user, get):
     # Test detail view
     detail_response = get(reverse('api:organization_detail', kwargs={'pk': resourced_organization.pk}), admin_user)
     assert detail_response.status_code == 200
-    assert detail_response.data['summary_fields']['related_field_counts'] == counts_dict
+    counts = detail_response.data['summary_fields']['related_field_counts']
+    assert 'hosts' in counts
+    counts.pop('hosts')
+    assert counts == counts_dict
 
 
 @pytest.mark.django_db
@@ -193,7 +194,8 @@ def test_JT_not_double_counted(resourced_organization, user, get):
         inventory=resourced_organization.inventories.all()[0],
         project=proj,
         name='double-linked-job-template',
-        organization=resourced_organization)
+        organization=resourced_organization,
+    )
     counts_dict = COUNTS_PRIMES
     counts_dict['job_templates'] += 1
 
@@ -205,4 +207,7 @@ def test_JT_not_double_counted(resourced_organization, user, get):
     # Test detail view
     detail_response = get(reverse('api:organization_detail', kwargs={'pk': resourced_organization.pk}), admin_user)
     assert detail_response.status_code == 200
-    assert detail_response.data['summary_fields']['related_field_counts'] == counts_dict
+    counts = detail_response.data['summary_fields']['related_field_counts']
+    assert 'hosts' in counts
+    counts.pop('hosts')
+    assert counts == counts_dict

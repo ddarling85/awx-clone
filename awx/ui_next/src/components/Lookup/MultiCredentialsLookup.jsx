@@ -2,7 +2,7 @@ import 'styled-components/macro';
 import React, { Fragment, useState, useCallback, useEffect } from 'react';
 import { withRouter } from 'react-router-dom';
 import PropTypes from 'prop-types';
-import { withI18n } from '@lingui/react';
+
 import { t } from '@lingui/macro';
 import { ToolbarItem, Alert } from '@patternfly/react-core';
 import { CredentialsAPI, CredentialTypesAPI } from '../../api';
@@ -12,6 +12,7 @@ import OptionsList from '../OptionsList';
 import useRequest from '../../util/useRequest';
 import { getQSConfig, parseQueryString } from '../../util/qs';
 import Lookup from './Lookup';
+import useIsMounted from '../../util/useIsMounted';
 
 const QS_CONFIG = getQSConfig('credentials', {
   page: 1,
@@ -26,8 +27,9 @@ async function loadCredentials(params, selectedCredentialTypeId) {
 }
 
 function MultiCredentialsLookup(props) {
-  const { value, onChange, onError, history, i18n } = props;
+  const { value, onChange, onError, history } = props;
   const [selectedType, setSelectedType] = useState(null);
+  const isMounted = useIsMounted();
 
   const {
     result: credentialTypes,
@@ -38,8 +40,11 @@ function MultiCredentialsLookup(props) {
     useCallback(async () => {
       const types = await CredentialTypesAPI.loadAllTypes();
       const match = types.find(type => type.kind === 'ssh') || types[0];
-      setSelectedType(match);
+      if (isMounted.current) {
+        setSelectedType(match);
+      }
       return types;
+      /* eslint-disable-next-line react-hooks/exhaustive-deps */
     }, []),
     []
   );
@@ -49,7 +54,12 @@ function MultiCredentialsLookup(props) {
   }, [fetchTypes]);
 
   const {
-    result: { credentials, credentialsCount },
+    result: {
+      credentials,
+      credentialsCount,
+      relatedSearchableKeys,
+      searchableKeys,
+    },
     request: fetchCredentials,
     error: credentialsError,
     isLoading: isCredentialsLoading,
@@ -62,15 +72,36 @@ function MultiCredentialsLookup(props) {
         };
       }
       const params = parseQueryString(QS_CONFIG, history.location.search);
-      const { results, count } = await loadCredentials(params, selectedType.id);
+      const [{ results, count }, actionsResponse] = await Promise.all([
+        loadCredentials(params, selectedType.id),
+        CredentialsAPI.readOptions(),
+      ]);
+
+      results.map(result => {
+        if (result.kind === 'vault' && result.inputs?.vault_id) {
+          result.label = `${result.name} | ${result.inputs.vault_id}`;
+          return result;
+        }
+        result.label = `${result.name}`;
+        return result;
+      });
+
       return {
         credentials: results,
         credentialsCount: count,
+        relatedSearchableKeys: (
+          actionsResponse?.data?.related_search_fields || []
+        ).map(val => val.slice(0, -8)),
+        searchableKeys: Object.keys(
+          actionsResponse.data.actions?.GET || {}
+        ).filter(key => actionsResponse.data.actions?.GET[key].filterable),
       };
     }, [selectedType, history.location]),
     {
       credentials: [],
       credentialsCount: 0,
+      relatedSearchableKeys: [],
+      searchableKeys: [],
     }
   );
 
@@ -92,13 +123,12 @@ function MultiCredentialsLookup(props) {
       credential={item}
     />
   );
-
   const isVault = selectedType?.kind === 'vault';
 
   return (
     <Lookup
       id="multiCredential"
-      header={i18n._(t`Credentials`)}
+      header={t`Credentials`}
       value={value}
       multiple
       onChange={onChange}
@@ -113,20 +143,18 @@ function MultiCredentialsLookup(props) {
                 variant="info"
                 isInline
                 css="margin-bottom: 20px;"
-                title={i18n._(
-                  t`You cannot select multiple vault credentials with the same vault ID. Doing so will automatically deselect the other with the same vault ID.`
-                )}
+                title={t`You cannot select multiple vault credentials with the same vault ID. Doing so will automatically deselect the other with the same vault ID.`}
               />
             )}
             {credentialTypes && credentialTypes.length > 0 && (
               <ToolbarItem css=" display: flex; align-items: center;">
                 <div css="flex: 0 0 25%; margin-right: 32px">
-                  {i18n._(t`Selected Category`)}
+                  {t`Selected Category`}
                 </div>
                 <AnsibleSelect
                   css="flex: 1 1 75%;"
                   id="multiCredentialsLookUp-select"
-                  label={i18n._(t`Selected Category`)}
+                  label={t`Selected Category`}
                   data={credentialTypes.map(type => ({
                     key: type.id,
                     value: type.id,
@@ -148,27 +176,30 @@ function MultiCredentialsLookup(props) {
               optionCount={credentialsCount}
               searchColumns={[
                 {
-                  name: i18n._(t`Name`),
-                  key: 'name',
+                  name: t`Name`,
+                  key: 'name__icontains',
                   isDefault: true,
                 },
                 {
-                  name: i18n._(t`Created By (Username)`),
-                  key: 'created_by__username',
+                  name: t`Created By (Username)`,
+                  key: 'created_by__username__icontains',
                 },
                 {
-                  name: i18n._(t`Modified By (Username)`),
-                  key: 'modified_by__username',
+                  name: t`Modified By (Username)`,
+                  key: 'modified_by__username__icontains',
                 },
               ]}
               sortColumns={[
                 {
-                  name: i18n._(t`Name`),
+                  name: t`Name`,
                   key: 'name',
                 },
               ]}
+              searchableKeys={searchableKeys}
+              relatedSearchableKeys={relatedSearchableKeys}
               multiple={isVault}
-              header={i18n._(t`Credentials`)}
+              header={t`Credentials`}
+              displayKey={isVault ? 'label' : 'name'}
               name="credentials"
               qsConfig={QS_CONFIG}
               readOnly={!canDelete}
@@ -176,9 +207,10 @@ function MultiCredentialsLookup(props) {
                 const hasSameVaultID = val =>
                   val?.inputs?.vault_id !== undefined &&
                   val?.inputs?.vault_id === item?.inputs?.vault_id;
-                const hasSameKind = val => val.kind === item.kind;
+                const hasSameCredentialType = val =>
+                  val.credential_type === item.credential_type;
                 const selectedItems = state.selectedItems.filter(i =>
-                  isVault ? !hasSameVaultID(i) : !hasSameKind(i)
+                  isVault ? !hasSameVaultID(i) : !hasSameCredentialType(i)
                 );
                 selectedItems.push(item);
                 return dispatch({
@@ -215,4 +247,4 @@ MultiCredentialsLookup.defaultProps = {
 };
 
 export { MultiCredentialsLookup as _MultiCredentialsLookup };
-export default withI18n()(withRouter(MultiCredentialsLookup));
+export default withRouter(MultiCredentialsLookup);

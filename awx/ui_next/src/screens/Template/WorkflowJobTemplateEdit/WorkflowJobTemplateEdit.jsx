@@ -1,12 +1,21 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useHistory } from 'react-router-dom';
 
 import { CardBody } from '../../../components/Card';
 import { getAddedAndRemoved } from '../../../util/lists';
-import { WorkflowJobTemplatesAPI, OrganizationsAPI } from '../../../api';
+import {
+  WorkflowJobTemplatesAPI,
+  OrganizationsAPI,
+  UsersAPI,
+} from '../../../api';
 import { WorkflowJobTemplateForm } from '../shared';
+import { useConfig } from '../../../contexts/Config';
+import useRequest from '../../../util/useRequest';
+import ContentError from '../../../components/ContentError';
+import ContentLoading from '../../../components/ContentLoading';
 
 function WorkflowJobTemplateEdit({ template }) {
+  const { me = {} } = useConfig();
   const history = useHistory();
   const [formSubmitError, setFormSubmitError] = useState(null);
 
@@ -17,11 +26,13 @@ function WorkflowJobTemplateEdit({ template }) {
       organization,
       webhook_credential,
       webhook_key,
+      execution_environment,
       ...templatePayload
     } = values;
     templatePayload.inventory = inventory?.id || null;
-    templatePayload.organization = organization?.id;
+    templatePayload.organization = organization?.id || null;
     templatePayload.webhook_credential = webhook_credential?.id || null;
+    templatePayload.execution_environment = execution_environment?.id || null;
 
     const formOrgId =
       organization?.id || inventory?.summary_fields?.organization.id || null;
@@ -67,6 +78,33 @@ function WorkflowJobTemplateEdit({ template }) {
     history.push(`/templates/workflow_job_template/${template.id}/details`);
   };
 
+  const {
+    isLoading,
+    request: fetchUserRole,
+    result: { orgAdminResults, isOrgAdmin },
+    error: contentError,
+  } = useRequest(
+    useCallback(async () => {
+      const {
+        data: { results, count },
+      } = await UsersAPI.readAdminOfOrganizations(me?.id);
+      return { isOrgAdmin: count > 0, orgAdminResults: results };
+    }, [me.id]),
+    { isOrgAdmin: false, orgAdminResults: null }
+  );
+
+  useEffect(() => {
+    fetchUserRole();
+  }, [fetchUserRole]);
+
+  if (contentError) {
+    return <ContentError error={contentError} />;
+  }
+
+  if (isLoading || !orgAdminResults) {
+    return <ContentLoading />;
+  }
+
   return (
     <CardBody>
       <WorkflowJobTemplateForm
@@ -74,6 +112,7 @@ function WorkflowJobTemplateEdit({ template }) {
         handleCancel={handleCancel}
         template={template}
         submitError={formSubmitError}
+        isOrgAdmin={isOrgAdmin}
       />
     </CardBody>
   );

@@ -10,7 +10,6 @@ from datetime import datetime as dt
 
 from django.core.management.base import BaseCommand
 from django.db import connection
-from django.db.models import Q
 from django.db.migrations.executor import MigrationExecutor
 
 from awx.main.analytics.broadcast_websocket import (
@@ -27,8 +26,7 @@ class Command(BaseCommand):
     help = 'Launch the websocket broadcaster'
 
     def add_arguments(self, parser):
-        parser.add_argument('--status', dest='status', action='store_true',
-                            help='print the internal state of any running broadcast websocket')
+        parser.add_argument('--status', dest='status', action='store_true', help='print the internal state of any running broadcast websocket')
 
     @classmethod
     def display_len(cls, s):
@@ -58,7 +56,7 @@ class Command(BaseCommand):
     def get_connection_status(cls, me, hostnames, data):
         host_stats = [('hostname', 'state', 'start time', 'duration (sec)')]
         for h in hostnames:
-            connection_color = '91'    # red
+            connection_color = '91'  # red
             h_safe = safe_name(h)
             prefix = f'awx_{h_safe}'
             connection_state = data.get(f'{prefix}_connection', 'N/A')
@@ -67,7 +65,7 @@ class Command(BaseCommand):
             if connection_state is None:
                 connection_state = 'unknown'
             if connection_state == 'connected':
-                connection_color = '92' # green
+                connection_color = '92'  # green
                 connection_started = data.get(f'{prefix}_connection_start', 'Error')
                 if connection_started != 'Error':
                     connection_started = datetime.datetime.fromtimestamp(connection_started)
@@ -141,7 +139,7 @@ class Command(BaseCommand):
                     data[family.name] = family.samples[0].value
 
             me = Instance.objects.me()
-            hostnames = [i.hostname for i in Instance.objects.exclude(Q(hostname=me.hostname) | Q(rampart_groups__controller__isnull=False))]
+            hostnames = [i.hostname for i in Instance.objects.exclude(hostname=me.hostname)]
 
             host_stats = Command.get_connection_status(me, hostnames, data)
             lines = Command._format_lines(host_stats)

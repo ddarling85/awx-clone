@@ -30,30 +30,15 @@ SECRET_KEY = None
 # See https://docs.djangoproject.com/en/dev/ref/settings/#allowed-hosts
 ALLOWED_HOSTS = []
 
-# Absolute filesystem path to the directory for job status stdout
-# This directory should not be web-accessible
-JOBOUTPUT_ROOT = '/var/lib/awx/job_status/'
-
-# The heartbeat file for the tower scheduler
+# The heartbeat file for the scheduler
 SCHEDULE_METADATA_LOCATION = '/var/lib/awx/.tower_cycle'
 
 # Ansible base virtualenv paths and enablement
 BASE_VENV_PATH = os.path.realpath("/var/lib/awx/venv")
 ANSIBLE_VENV_PATH = os.path.join(BASE_VENV_PATH, "ansible")
 
-# Tower base virtualenv paths and enablement
+# Base virtualenv paths and enablement
 AWX_VENV_PATH = os.path.join(BASE_VENV_PATH, "awx")
-
-AWX_ISOLATED_USERNAME = 'awx'
-
-LOGGING['handlers']['tower_warnings']['filename'] = '/var/log/tower/tower.log'  # noqa
-LOGGING['handlers']['callback_receiver']['filename'] = '/var/log/tower/callback_receiver.log'  # noqa
-LOGGING['handlers']['dispatcher']['filename'] = '/var/log/tower/dispatcher.log'  # noqa
-LOGGING['handlers']['wsbroadcast']['filename'] = '/var/log/tower/wsbroadcast.log'  # noqa
-LOGGING['handlers']['task_system']['filename'] = '/var/log/tower/task_system.log'  # noqa
-LOGGING['handlers']['management_playbooks']['filename'] = '/var/log/tower/management_playbooks.log'  # noqa
-LOGGING['handlers']['system_tracking_migrations']['filename'] = '/var/log/tower/tower_system_tracking_migrations.log'  # noqa
-LOGGING['handlers']['rbac_migrations']['filename'] = '/var/log/tower/tower_rbac_migrations.log'  # noqa
 
 # Store a snapshot of default settings at this point before loading any
 # customizable config files.
@@ -70,8 +55,7 @@ settings_files = os.path.join(settings_dir, '*.py')
 
 # Load remaining settings from the global settings file specified in the
 # environment, defaulting to /etc/tower/settings.py.
-settings_file = os.environ.get('AWX_SETTINGS_FILE',
-                               '/etc/tower/settings.py')
+settings_file = os.environ.get('AWX_SETTINGS_FILE', '/etc/tower/settings.py')
 
 # Attempt to load settings from /etc/tower/settings.py first, followed by
 # /etc/tower/conf.d/*.py.
@@ -82,8 +66,9 @@ except ImportError:
     sys.exit(1)
 except IOError:
     from django.core.exceptions import ImproperlyConfigured
+
     included_file = locals().get('__included_file__', '')
-    if (not included_file or included_file == settings_file):
+    if not included_file or included_file == settings_file:
         # The import doesn't always give permission denied, so try to open the
         # settings file directly.
         try:
@@ -102,11 +87,6 @@ except IOError:
     else:
         raise
 
+# The below runs AFTER all of the custom settings are imported.
 
-CELERYBEAT_SCHEDULE.update({  # noqa
-    'isolated_heartbeat': {
-        'task': 'awx.main.tasks.awx_isolated_heartbeat',
-        'schedule': timedelta(seconds=AWX_ISOLATED_PERIODIC_CHECK),  # noqa
-        'options': {'expires': AWX_ISOLATED_PERIODIC_CHECK * 2},  # noqa
-    }
-})
+DATABASES['default'].setdefault('OPTIONS', dict()).setdefault('application_name', f'{CLUSTER_HOST_ID}-{os.getpid()}-{" ".join(sys.argv)}'[:63])  # noqa

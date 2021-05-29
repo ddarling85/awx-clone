@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { Switch, Route, useParams, useLocation } from 'react-router-dom';
-import { withI18n } from '@lingui/react';
+import { Switch, Route, useParams } from 'react-router-dom';
+
 import { t } from '@lingui/macro';
 import { JobTemplatesAPI, WorkflowJobTemplatesAPI } from '../../api';
 import ContentError from '../../components/ContentError';
@@ -9,11 +9,10 @@ import ErrorDetail from '../../components/ErrorDetail';
 import useRequest, { useDismissableError } from '../../util/useRequest';
 import { SurveyList, SurveyQuestionAdd, SurveyQuestionEdit } from './Survey';
 
-function TemplateSurvey({ template, canEdit, i18n }) {
+function TemplateSurvey({ template, canEdit }) {
   const [surveyEnabled, setSurveyEnabled] = useState(template.survey_enabled);
 
-  const { templateType } = useParams();
-  const location = useLocation();
+  const { templateType, id: templateId } = useParams();
 
   const {
     result: survey,
@@ -25,54 +24,65 @@ function TemplateSurvey({ template, canEdit, i18n }) {
     useCallback(async () => {
       const { data } =
         templateType === 'workflow_job_template'
-          ? await WorkflowJobTemplatesAPI.readSurvey(template.id)
-          : await JobTemplatesAPI.readSurvey(template.id);
+          ? await WorkflowJobTemplatesAPI.readSurvey(templateId)
+          : await JobTemplatesAPI.readSurvey(templateId);
       return data;
-    }, [template.id, templateType])
+    }, [templateId, templateType])
   );
 
   useEffect(() => {
     fetchSurvey();
-  }, [fetchSurvey, location]);
+  }, [fetchSurvey]);
 
-  const { request: updateSurvey, error: updateError } = useRequest(
+  const {
+    request: updateSurvey,
+    error: updateError,
+    isLoading: updateLoading,
+  } = useRequest(
     useCallback(
       async updatedSurvey => {
         if (templateType === 'workflow_job_template') {
-          await WorkflowJobTemplatesAPI.updateSurvey(
-            template.id,
-            updatedSurvey
-          );
+          await WorkflowJobTemplatesAPI.updateSurvey(templateId, updatedSurvey);
         } else {
-          await JobTemplatesAPI.updateSurvey(template.id, updatedSurvey);
+          await JobTemplatesAPI.updateSurvey(templateId, updatedSurvey);
         }
         setSurvey(updatedSurvey);
       },
-      [template.id, setSurvey, templateType]
+      [templateId, setSurvey, templateType]
     )
   );
   const updateSurveySpec = spec => {
     updateSurvey({
-      name: survey.name || '',
-      description: survey.description || '',
+      name: survey?.name || '',
+      description: survey?.description || '',
       spec,
     });
   };
 
   const { request: deleteSurvey, error: deleteError } = useRequest(
     useCallback(async () => {
-      await JobTemplatesAPI.destroySurvey(template.id);
+      if (templateType === 'workflow_job_template') {
+        await WorkflowJobTemplatesAPI.destroySurvey(templateId);
+      } else {
+        await JobTemplatesAPI.destroySurvey(templateId);
+      }
       setSurvey(null);
-    }, [template.id, setSurvey])
+    }, [templateId, setSurvey, templateType])
   );
 
   const { request: toggleSurvey, error: toggleError } = useRequest(
     useCallback(async () => {
-      await JobTemplatesAPI.update(template.id, {
-        survey_enabled: !surveyEnabled,
-      });
+      if (templateType === 'workflow_job_template') {
+        await WorkflowJobTemplatesAPI.update(templateId, {
+          survey_enabled: !surveyEnabled,
+        });
+      } else {
+        await JobTemplatesAPI.update(templateId, {
+          survey_enabled: !surveyEnabled,
+        });
+      }
       setSurveyEnabled(!surveyEnabled);
-    }, [template.id, surveyEnabled])
+    }, [templateId, templateType, surveyEnabled])
   );
 
   const { error, dismissError } = useDismissableError(
@@ -94,7 +104,7 @@ function TemplateSurvey({ template, canEdit, i18n }) {
           </Route>
         )}
         {canEdit && (
-          <Route path="/templates/:templateType/:id/survey/edit/:variable">
+          <Route path="/templates/:templateType/:id/survey/edit">
             <SurveyQuestionEdit
               survey={survey}
               updateSurvey={updateSurveySpec}
@@ -103,7 +113,7 @@ function TemplateSurvey({ template, canEdit, i18n }) {
         )}
         <Route path="/templates/:templateType/:id/survey" exact>
           <SurveyList
-            isLoading={isLoading}
+            isLoading={isLoading || updateLoading}
             survey={survey}
             surveyEnabled={surveyEnabled}
             toggleSurvey={toggleSurvey}
@@ -117,10 +127,10 @@ function TemplateSurvey({ template, canEdit, i18n }) {
         <AlertModal
           isOpen={error}
           variant="error"
-          title={i18n._(t`Error!`)}
+          title={t`Error!`}
           onClose={dismissError}
         >
-          {i18n._(t`Failed to update survey.`)}
+          {t`Failed to update survey.`}
           <ErrorDetail error={error} />
         </AlertModal>
       )}
@@ -128,4 +138,4 @@ function TemplateSurvey({ template, canEdit, i18n }) {
   );
 }
 
-export default withI18n()(TemplateSurvey);
+export default TemplateSurvey;

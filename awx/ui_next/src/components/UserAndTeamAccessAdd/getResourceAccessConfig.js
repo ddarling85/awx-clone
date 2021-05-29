@@ -8,201 +8,207 @@ import {
   OrganizationsAPI,
 } from '../../api';
 
-export default function getResourceAccessConfig(i18n) {
+export default function getResourceAccessConfig() {
   return [
     {
       selectedResource: 'jobTemplate',
-      label: i18n._(t`Job templates`),
+      label: t`Job templates`,
       searchColumns: [
         {
-          name: i18n._(t`Name`),
-          key: 'name',
+          name: t`Name`,
+          key: 'name__icontains',
           isDefault: true,
         },
         {
-          name: i18n._(t`Playbook name`),
-          key: 'playbook',
+          name: t`Playbook name`,
+          key: 'playbook__icontains',
         },
         {
-          name: i18n._(t`Created By (Username)`),
-          key: 'created_by__username',
+          name: t`Created By (Username)`,
+          key: 'created_by__username__icontains',
         },
         {
-          name: i18n._(t`Modified By (Username)`),
-          key: 'modified_by__username',
+          name: t`Modified By (Username)`,
+          key: 'modified_by__username__icontains',
         },
       ],
       sortColumns: [
         {
-          name: i18n._(t`Name`),
+          name: t`Name`,
           key: 'name',
         },
       ],
       fetchItems: queryParams => JobTemplatesAPI.read(queryParams),
+      fetchOptions: () => JobTemplatesAPI.readOptions(),
     },
     {
       selectedResource: 'workflowJobTemplate',
-      label: i18n._(t`Workflow job templates`),
+      label: t`Workflow job templates`,
       searchColumns: [
         {
-          name: i18n._(t`Name`),
-          key: 'name',
+          name: t`Name`,
+          key: 'name__icontains',
           isDefault: true,
         },
         {
-          name: i18n._(t`Playbook name`),
-          key: 'playbook',
+          name: t`Playbook name`,
+          key: 'playbook__icontains',
         },
         {
-          name: i18n._(t`Created By (Username)`),
-          key: 'created_by__username',
+          name: t`Created By (Username)`,
+          key: 'created_by__username__icontains',
         },
         {
-          name: i18n._(t`Modified By (Username)`),
-          key: 'modified_by__username',
+          name: t`Modified By (Username)`,
+          key: 'modified_by__username__icontains',
         },
       ],
       sortColumns: [
         {
-          name: i18n._(t`Name`),
+          name: t`Name`,
           key: 'name',
         },
       ],
       fetchItems: queryParams => WorkflowJobTemplatesAPI.read(queryParams),
+      fetchOptions: () => WorkflowJobTemplatesAPI.readOptions(),
     },
     {
       selectedResource: 'credential',
-      label: i18n._(t`Credentials`),
+      label: t`Credentials`,
       searchColumns: [
         {
-          name: i18n._(t`Name`),
-          key: 'name',
+          name: t`Name`,
+          key: 'name__icontains',
           isDefault: true,
         },
         {
-          name: i18n._(t`Type`),
-          key: 'scm_type',
+          name: t`Type`,
+          key: 'or__scm_type',
           options: [
-            [``, i18n._(t`Manual`)],
-            [`git`, i18n._(t`Git`)],
-            [`hg`, i18n._(t`Mercurial`)],
-            [`svn`, i18n._(t`Subversion`)],
-            [`insights`, i18n._(t`Red Hat Insights`)],
+            [``, t`Manual`],
+            [`git`, t`Git`],
+            [`svn`, t`Subversion`],
+            [`archive`, t`Remote Archive`],
+            [`insights`, t`Red Hat Insights`],
           ],
         },
         {
-          name: i18n._(t`Source Control URL`),
-          key: 'scm_url',
+          name: t`Source Control URL`,
+          key: 'scm_url__icontains',
         },
         {
-          name: i18n._(t`Modified By (Username)`),
-          key: 'modified_by__username',
+          name: t`Modified By (Username)`,
+          key: 'modified_by__username__icontains',
         },
         {
-          name: i18n._(t`Created By (Username)`),
-          key: 'created_by__username',
+          name: t`Created By (Username)`,
+          key: 'created_by__username__icontains',
         },
       ],
       sortColumns: [
         {
-          name: i18n._(t`Name`),
+          name: t`Name`,
           key: 'name',
         },
       ],
       fetchItems: queryParams => CredentialsAPI.read(queryParams),
+      fetchOptions: () => CredentialsAPI.readOptions(),
     },
     {
       selectedResource: 'inventory',
-      label: i18n._(t`Inventories`),
+      label: t`Inventories`,
       searchColumns: [
         {
-          name: i18n._(t`Name`),
-          key: 'name',
+          name: t`Name`,
+          key: 'name__icontains',
           isDefault: true,
         },
         {
-          name: i18n._(t`Created By (Username)`),
-          key: 'created_by__username',
+          name: t`Created By (Username)`,
+          key: 'created_by__username__icontains',
         },
         {
-          name: i18n._(t`Modified By (Username)`),
-          key: 'modified_by__username',
+          name: t`Modified By (Username)`,
+          key: 'modified_by__username__icontains',
         },
       ],
       sortColumns: [
         {
-          name: i18n._(t`Name`),
+          name: t`Name`,
           key: 'name',
         },
       ],
       fetchItems: queryParams => InventoriesAPI.read(queryParams),
+      fetchOptions: () => InventoriesAPI.readOptions(),
     },
     {
       selectedResource: 'project',
-      label: i18n._(t`Projects`),
+      label: t`Projects`,
       searchColumns: [
         {
-          name: i18n._(t`Name`),
-          key: 'name',
+          name: t`Name`,
+          key: 'name__icontains',
           isDefault: true,
         },
         {
-          name: i18n._(t`Type`),
-          key: 'scm_type',
+          name: t`Type`,
+          key: 'or__scm_type',
           options: [
-            [``, i18n._(t`Manual`)],
-            [`git`, i18n._(t`Git`)],
-            [`hg`, i18n._(t`Mercurial`)],
-            [`svn`, i18n._(t`Subversion`)],
-            [`insights`, i18n._(t`Red Hat Insights`)],
+            [``, t`Manual`],
+            [`git`, t`Git`],
+            [`svn`, t`Subversion`],
+            [`archive`, t`Remote Archive`],
+            [`insights`, t`Red Hat Insights`],
           ],
         },
         {
-          name: i18n._(t`Source Control URL`),
-          key: 'scm_url',
+          name: t`Source Control URL`,
+          key: 'scm_url__icontains',
         },
         {
-          name: i18n._(t`Modified By (Username)`),
-          key: 'modified_by__username',
+          name: t`Modified By (Username)`,
+          key: 'modified_by__username__icontains',
         },
         {
-          name: i18n._(t`Created By (Username)`),
-          key: 'created_by__username',
+          name: t`Created By (Username)`,
+          key: 'created_by__username__icontains',
         },
       ],
       sortColumns: [
         {
-          name: i18n._(t`Name`),
+          name: t`Name`,
           key: 'name',
         },
       ],
       fetchItems: queryParams => ProjectsAPI.read(queryParams),
+      fetchOptions: () => ProjectsAPI.readOptions(),
     },
     {
       selectedResource: 'organization',
-      label: i18n._(t`Organizations`),
+      label: t`Organizations`,
       searchColumns: [
         {
-          name: i18n._(t`Name`),
-          key: 'name',
+          name: t`Name`,
+          key: 'name__icontains',
           isDefault: true,
         },
         {
-          name: i18n._(t`Created By (Username)`),
-          key: 'created_by__username',
+          name: t`Created By (Username)`,
+          key: 'created_by__username__icontains',
         },
         {
-          name: i18n._(t`Modified By (Username)`),
-          key: 'modified_by__username',
+          name: t`Modified By (Username)`,
+          key: 'modified_by__username__icontains',
         },
       ],
       sortColumns: [
         {
-          name: i18n._(t`Name`),
+          name: t`Name`,
           key: 'name',
         },
       ],
       fetchItems: queryParams => OrganizationsAPI.read(queryParams),
+      fetchOptions: () => OrganizationsAPI.readOptions(),
     },
   ];
 }

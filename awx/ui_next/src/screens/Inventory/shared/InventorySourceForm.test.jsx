@@ -7,56 +7,46 @@ import {
 import InventorySourceForm from './InventorySourceForm';
 import { InventorySourcesAPI, ProjectsAPI, CredentialsAPI } from '../../../api';
 
-jest.mock('../../../api/models/Credentials');
-jest.mock('../../../api/models/InventorySources');
-jest.mock('../../../api/models/Projects');
+jest.mock('../../../api');
 
 describe('<InventorySourceForm />', () => {
   let wrapper;
-  CredentialsAPI.read.mockResolvedValue({
-    data: { count: 0, results: [] },
-  });
-  ProjectsAPI.readInventories.mockResolvedValue({
-    data: ['foo', 'bar'],
-  });
-  InventorySourcesAPI.readOptions.mockResolvedValue({
-    data: {
-      actions: {
-        GET: {
-          source: {
-            choices: [
-              ['file', 'File, Directory or Script'],
-              ['scm', 'Sourced from a Project'],
-              ['ec2', 'Amazon EC2'],
-              ['gce', 'Google Compute Engine'],
-              ['azure_rm', 'Microsoft Azure Resource Manager'],
-              ['vmware', 'VMware vCenter'],
-              ['satellite6', 'Red Hat Satellite 6'],
-              ['cloudforms', 'Red Hat CloudForms'],
-              ['openstack', 'OpenStack'],
-              ['rhv', 'Red Hat Virtualization'],
-              ['tower', 'Ansible Tower'],
-              ['custom', 'Custom Script'],
-            ],
-          },
-        },
-      },
-    },
-  });
 
   describe('Successful form submission', () => {
     const onSubmit = jest.fn();
 
     beforeAll(async () => {
-      const config = {
-        custom_virtualenvs: ['venv/foo', 'venv/bar'],
-      };
+      CredentialsAPI.read.mockResolvedValue({
+        data: { count: 0, results: [] },
+      });
+      ProjectsAPI.readInventories.mockResolvedValue({
+        data: ['foo', 'bar'],
+      });
+      InventorySourcesAPI.readOptions = async () => ({
+        data: {
+          actions: {
+            GET: {
+              source: {
+                choices: [
+                  ['file', 'File, Directory or Script'],
+                  ['scm', 'Sourced from a Project'],
+                  ['ec2', 'Amazon EC2'],
+                  ['gce', 'Google Compute Engine'],
+                  ['azure_rm', 'Microsoft Azure Resource Manager'],
+                  ['vmware', 'VMware vCenter'],
+                  ['satellite6', 'Red Hat Satellite 6'],
+                  ['openstack', 'OpenStack'],
+                  ['rhv', 'Red Hat Virtualization'],
+                  ['tower', 'Ansible Tower'],
+                ],
+              },
+            },
+          },
+        },
+      });
       await act(async () => {
         wrapper = mountWithContexts(
-          <InventorySourceForm onCancel={() => {}} onSubmit={onSubmit} />,
-          {
-            context: { config },
-          }
+          <InventorySourceForm onCancel={() => {}} onSubmit={onSubmit} />
         );
       });
       await waitForElement(wrapper, 'ContentLoading', el => el.length === 0);
@@ -64,7 +54,6 @@ describe('<InventorySourceForm />', () => {
 
     afterAll(() => {
       jest.clearAllMocks();
-      wrapper.unmount();
     });
 
     test('should initially display primary form fields', () => {
@@ -73,7 +62,8 @@ describe('<InventorySourceForm />', () => {
       expect(wrapper.find('FormGroup[label="Source"]')).toHaveLength(1);
       expect(
         wrapper.find('FormGroup[label="Ansible Environment"]')
-      ).toHaveLength(1);
+      ).toHaveLength(0);
+      expect(wrapper.find('ExecutionEnvironmentLookup')).toHaveLength(1);
     });
 
     test('should display subform when source dropdown has a value', async () => {
@@ -95,7 +85,8 @@ describe('<InventorySourceForm />', () => {
           id: 2,
           name: 'mock proj',
         });
-        wrapper.find('AnsibleSelect#source_path').prop('onChange')(null, 'foo');
+        wrapper.find('Select#source_path').prop('onToggle')();
+        wrapper.find('Select#source_path').prop('onSelect')(null, 'foo');
         wrapper.find('AnsibleSelect#verbosity').prop('onChange')(null, '2');
         wrapper.find('button[aria-label="Save"]').simulate('click');
       });
@@ -119,19 +110,6 @@ describe('<InventorySourceForm />', () => {
     });
   });
 
-  test('should display ContentError on throw', async () => {
-    InventorySourcesAPI.readOptions.mockImplementationOnce(() =>
-      Promise.reject(new Error())
-    );
-    await act(async () => {
-      wrapper = mountWithContexts(
-        <InventorySourceForm onCancel={() => {}} onSubmit={() => {}} />
-      );
-    });
-    await waitForElement(wrapper, 'ContentLoading', el => el.length === 0);
-    expect(wrapper.find('ContentError').length).toBe(1);
-  });
-
   test('calls "onCancel" when Cancel button is clicked', async () => {
     const onCancel = jest.fn();
     await act(async () => {
@@ -143,5 +121,17 @@ describe('<InventorySourceForm />', () => {
     expect(onCancel).not.toHaveBeenCalled();
     wrapper.find('button[aria-label="Cancel"]').prop('onClick')();
     expect(onCancel).toBeCalled();
+  });
+
+  test('should display ContentError on throw', async () => {
+    InventorySourcesAPI.readOptions = jest.fn();
+    InventorySourcesAPI.readOptions.mockRejectedValueOnce(new Error());
+    await act(async () => {
+      wrapper = mountWithContexts(
+        <InventorySourceForm onCancel={() => {}} onSubmit={() => {}} />
+      );
+    });
+    await waitForElement(wrapper, 'ContentLoading', el => el.length === 0);
+    expect(wrapper.find('ContentError').length).toBe(1);
   });
 });

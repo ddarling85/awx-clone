@@ -21,7 +21,7 @@ describe('<FormSubmitError>', () => {
       },
     };
     const wrapper = mountWithContexts(
-      <Formik>
+      <Formik initialValues={{ name: '' }}>
         {({ errors }) => (
           <div>
             <p>{errors.name}</p>

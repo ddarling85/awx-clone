@@ -1,42 +1,47 @@
-import React from 'react';
-import { withI18n } from '@lingui/react';
+import React, { useCallback } from 'react';
+
 import { t } from '@lingui/macro';
-import { useField } from 'formik';
+import { useField, useFormikContext } from 'formik';
 import CredentialLookup from '../../../../components/Lookup/CredentialLookup';
 import { required } from '../../../../util/validators';
 import { ScmTypeOptions } from './SharedFields';
 
 const InsightsSubForm = ({
-  i18n,
   credential,
   onCredentialSelection,
   scmUpdateOnLaunch,
+  autoPopulateCredential,
 }) => {
-  const credFieldArr = useField({
+  const { setFieldValue } = useFormikContext();
+  const [, credMeta, credHelpers] = useField({
     name: 'credential',
-    validate: required(i18n._(t`Select a value for this field`), i18n),
+    validate: required(t`Select a value for this field`),
   });
-  const credMeta = credFieldArr[1];
-  const credHelpers = credFieldArr[2];
+
+  const onCredentialChange = useCallback(
+    value => {
+      onCredentialSelection('insights', value);
+      setFieldValue('credential', value.id);
+    },
+    [onCredentialSelection, setFieldValue]
+  );
 
   return (
     <>
       <CredentialLookup
         credentialTypeId={credential.typeId}
-        label={i18n._(t`Insights Credential`)}
+        label={t`Insights Credential`}
         helperTextInvalid={credMeta.error}
         isValid={!credMeta.touched || !credMeta.error}
         onBlur={() => credHelpers.setTouched()}
-        onChange={value => {
-          onCredentialSelection('insights', value);
-          credHelpers.setValue(value.id);
-        }}
+        onChange={onCredentialChange}
         value={credential.value}
         required
+        autoPopulate={autoPopulateCredential}
       />
       <ScmTypeOptions hideAllowOverride scmUpdateOnLaunch={scmUpdateOnLaunch} />
     </>
   );
 };
 
-export default withI18n()(InsightsSubForm);
+export default InsightsSubForm;

@@ -1,4 +1,4 @@
-import contextlib
+from contextlib import contextmanager, suppress
 
 from awxkit import api, utils, exceptions
 from awxkit.config import config
@@ -31,9 +31,21 @@ def _delete_all(endpoint):
 
 
 def delete_all(v):
-    for endpoint in (v.unified_jobs, v.job_templates, v.workflow_job_templates, v.notification_templates,
-                     v.projects, v.inventory, v.hosts, v.inventory_scripts, v.labels, v.credentials,
-                     v.teams, v.users, v.organizations, v.schedules):
+    for endpoint in (
+        v.unified_jobs,
+        v.job_templates,
+        v.workflow_job_templates,
+        v.notification_templates,
+        v.projects,
+        v.inventory,
+        v.hosts,
+        v.labels,
+        v.credentials,
+        v.teams,
+        v.users,
+        v.organizations,
+        v.schedules,
+    ):
         _delete_all(endpoint)
 
 
@@ -43,7 +55,7 @@ def check_related(resource):
         if related in examined:
             continue
         print(related)
-        with utils.suppress(exceptions.NotFound):
+        with suppress(exceptions.NotFound):
             child_related = related.get()
             examined.append(related)
             if 'results' in child_related and child_related.results:
@@ -53,12 +65,12 @@ def check_related(resource):
                     if not isinstance(_related, api.page.TentativePage) or _related in examined:
                         continue
                     print(_related)
-                    with utils.suppress(exceptions.NotFound):
+                    with suppress(exceptions.NotFound):
                         _related.get()
                         examined.append(_related)
 
 
-@contextlib.contextmanager
+@contextmanager
 def as_user(v, username, password=None):
     """Context manager to allow running tests as an alternative login user."""
     access_token = False
@@ -90,7 +102,7 @@ def as_user(v, username, password=None):
             if session_id:
                 del connection.session.cookies['sessionid']
             if access_token:
-                kwargs = dict(token=access_token, auth_type='Bearer')
+                kwargs = dict(token=access_token)
             else:
                 kwargs = connection.get_session_requirements()
         else:

@@ -6,22 +6,26 @@ import {
   WorkflowJobTemplatesAPI,
   OrganizationsAPI,
   LabelsAPI,
+  ExecutionEnvironmentsAPI,
+  UsersAPI,
 } from '../../../api';
-import { mountWithContexts } from '../../../../testUtils/enzymeHelpers';
+import {
+  mountWithContexts,
+  waitForElement,
+} from '../../../../testUtils/enzymeHelpers';
 
 import WorkflowJobTemplateAdd from './WorkflowJobTemplateAdd';
 
-jest.mock('../../../api/models/WorkflowJobTemplates');
-jest.mock('../../../api/models/Organizations');
-jest.mock('../../../api/models/Labels');
-jest.mock('../../../api/models/Inventories');
+jest.mock('../../../api');
 
 describe('<WorkflowJobTemplateAdd/>', () => {
   let wrapper;
   let history;
-  const handleSubmit = jest.fn();
-  const handleCancel = jest.fn();
+  let handleSubmit;
+  let handleCancel;
   beforeEach(async () => {
+    handleSubmit = jest.fn();
+    handleCancel = jest.fn();
     WorkflowJobTemplatesAPI.create.mockResolvedValue({ data: { id: 1 } });
     OrganizationsAPI.read.mockResolvedValue({ data: { results: [{ id: 1 }] } });
     LabelsAPI.read.mockResolvedValue({
@@ -32,6 +36,14 @@ describe('<WorkflowJobTemplateAdd/>', () => {
           { name: 'Label 3', id: 3 },
         ],
       },
+    });
+
+    ExecutionEnvironmentsAPI.read.mockResolvedValueOnce({
+      data: { results: [{ id: 1, name: 'Foo', image: 'localhost.com' }] },
+    });
+
+    UsersAPI.readAdminOfOrganizations.mockResolvedValue({
+      data: { count: 0, results: [] },
     });
 
     await act(async () => {
@@ -61,11 +73,11 @@ describe('<WorkflowJobTemplateAdd/>', () => {
           }
         );
       });
+      await waitForElement(wrapper, 'ContentLoading', el => el.length === 0);
     });
   });
   afterEach(async () => {
-    wrapper.unmount();
-    jest.clearAllMocks();
+    jest.resetAllMocks();
   });
 
   test('initially renders successfully', async () => {
@@ -82,11 +94,18 @@ describe('<WorkflowJobTemplateAdd/>', () => {
         .find('LabelSelect')
         .find('SelectToggle')
         .simulate('click');
+
+      wrapper.find('ExecutionEnvironmentLookup').invoke('onChange')({
+        id: 1,
+        name: 'Foo',
+      });
     });
 
-    wrapper.update();
+    await act(async () => {
+      wrapper.update();
+    });
 
-    act(() => {
+    await act(async () => {
       wrapper
         .find('SelectOption')
         .find('button[aria-label="Label 3"]')
@@ -107,12 +126,13 @@ describe('<WorkflowJobTemplateAdd/>', () => {
       description: '',
       extra_vars: '---',
       inventory: undefined,
-      limit: '',
+      limit: null,
       organization: undefined,
       scm_branch: '',
       webhook_credential: undefined,
       webhook_service: '',
       webhook_url: '',
+      execution_environment: 1,
     });
 
     expect(WorkflowJobTemplatesAPI.associateLabel).toHaveBeenCalledTimes(1);

@@ -1,12 +1,15 @@
 import React from 'react';
 import ReactDOM from 'react-dom';
+import './setupCSP';
 import '@patternfly/react-core/dist/styles/base.css';
 import App from './App';
 import { BrandName } from './variables';
 
-document.title = `Ansible ${BrandName}`;
+document.title = `${BrandName}`;
 
 ReactDOM.render(
-  <App />,
+  <React.StrictMode>
+    <App />
+  </React.StrictMode>,
   document.getElementById('app') || document.createElement('div')
 );

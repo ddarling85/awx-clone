@@ -25,17 +25,8 @@ from awx.main.models import (
     InstanceGroup,
     InventoryUpdateEvent,
     InventoryUpdate,
-    InventorySource,
-    CustomInventoryScript,
 )
-from awx.api.generics import (
-    ListCreateAPIView,
-    RetrieveUpdateDestroyAPIView,
-    SubListAPIView,
-    SubListAttachDetachAPIView,
-    ResourceAccessList,
-    CopyAPIView,
-)
+from awx.api.generics import ListCreateAPIView, RetrieveUpdateDestroyAPIView, SubListAPIView, SubListAttachDetachAPIView, ResourceAccessList, CopyAPIView
 
 from awx.api.serializers import (
     InventorySerializer,
@@ -43,13 +34,9 @@ from awx.api.serializers import (
     RoleSerializer,
     InstanceGroupSerializer,
     InventoryUpdateEventSerializer,
-    CustomInventoryScriptSerializer,
     JobTemplateSerializer,
 )
-from awx.api.views.mixin import (
-    RelatedJobsPreventDeleteMixin,
-    ControlledByScmMixin,
-)
+from awx.api.views.mixin import RelatedJobsPreventDeleteMixin, ControlledByScmMixin
 
 logger = logging.getLogger('awx.api.views.organization')
 
@@ -66,55 +53,6 @@ class InventoryUpdateEventsList(SubListAPIView):
     def finalize_response(self, request, response, *args, **kwargs):
         response['X-UI-Max-Events'] = settings.MAX_UI_JOB_EVENTS
         return super(InventoryUpdateEventsList, self).finalize_response(request, response, *args, **kwargs)
-
-
-class InventoryScriptList(ListCreateAPIView):
-
-    deprecated = True
-
-    model = CustomInventoryScript
-    serializer_class = CustomInventoryScriptSerializer
-
-
-class InventoryScriptDetail(RetrieveUpdateDestroyAPIView):
-
-    deprecated = True
-
-    model = CustomInventoryScript
-    serializer_class = CustomInventoryScriptSerializer
-
-    def destroy(self, request, *args, **kwargs):
-        instance = self.get_object()
-        can_delete = request.user.can_access(self.model, 'delete', instance)
-        if not can_delete:
-            raise PermissionDenied(_("Cannot delete inventory script."))
-        for inv_src in InventorySource.objects.filter(source_script=instance):
-            inv_src.source_script = None
-            inv_src.save()
-        return super(InventoryScriptDetail, self).destroy(request, *args, **kwargs)
-
-
-class InventoryScriptObjectRolesList(SubListAPIView):
-
-    deprecated = True
-
-    model = Role
-    serializer_class = RoleSerializer
-    parent_model = CustomInventoryScript
-    search_fields = ('role_field', 'content_type__model',)
-
-    def get_queryset(self):
-        po = self.get_parent_object()
-        content_type = ContentType.objects.get_for_model(self.parent_model)
-        return Role.objects.filter(content_type=content_type, object_id=po.pk)
-
-
-class InventoryScriptCopy(CopyAPIView):
-
-    deprecated = True
-
-    model = CustomInventoryScript
-    copy_return_serializer_class = CustomInventoryScriptSerializer
 
 
 class InventoryList(ListCreateAPIView):
@@ -134,7 +72,7 @@ class InventoryDetail(RelatedJobsPreventDeleteMixin, ControlledByScmMixin, Retri
 
         # Do not allow changes to an Inventory kind.
         if kind is not None and obj.kind != kind:
-            return self.http_method_not_allowed(request, *args, **kwargs)
+            return Response(dict(error=_('You cannot turn a regular inventory into a "smart" inventory.')), status=status.HTTP_405_METHOD_NOT_ALLOWED)
         return super(InventoryDetail, self).update(request, *args, **kwargs)
 
     def destroy(self, request, *args, **kwargs):
@@ -174,7 +112,7 @@ class InventoryInstanceGroupsList(SubListAttachDetachAPIView):
 
 class InventoryAccessList(ResourceAccessList):
 
-    model = User # needs to be User for AccessLists's
+    model = User  # needs to be User for AccessLists's
     parent_model = Inventory
 
 
@@ -183,7 +121,7 @@ class InventoryObjectRolesList(SubListAPIView):
     model = Role
     serializer_class = RoleSerializer
     parent_model = Inventory
-    search_fields = ('role_field', 'content_type__model',)
+    search_fields = ('role_field', 'content_type__model')
 
     def get_queryset(self):
         po = self.get_parent_object()

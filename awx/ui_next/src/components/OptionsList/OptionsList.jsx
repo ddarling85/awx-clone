@@ -9,16 +9,15 @@ import {
   oneOfType,
 } from 'prop-types';
 import styled from 'styled-components';
-import { withI18n } from '@lingui/react';
 import { t } from '@lingui/macro';
 import SelectedList from '../SelectedList';
-import PaginatedDataList from '../PaginatedDataList';
 import CheckboxListItem from '../CheckboxListItem';
 import DataListToolbar from '../DataListToolbar';
 import { QSConfig, SearchColumns, SortColumns } from '../../types';
+import PaginatedTable, { HeaderCell, HeaderRow } from '../PaginatedTable';
 
 const ModalList = styled.div`
-  .pf-c-data-toolbar__content {
+  .pf-c-toolbar__content {
     padding: 0 !important;
   }
 `;
@@ -30,6 +29,8 @@ function OptionsList({
   optionCount,
   searchColumns,
   sortColumns,
+  searchableKeys,
+  relatedSearchableKeys,
   multiple,
   header,
   name,
@@ -39,21 +40,21 @@ function OptionsList({
   deselectItem,
   renderItemChip,
   isLoading,
-  i18n,
+  displayKey,
 }) {
   return (
     <ModalList>
       {value.length > 0 && (
         <SelectedList
-          label={i18n._(t`Selected`)}
+          label={t`Selected`}
           selected={value}
-          showOverflowAfter={5}
           onRemove={item => deselectItem(item)}
           isReadOnly={readOnly}
           renderItemChip={renderItemChip}
+          displayKey={displayKey}
         />
       )}
-      <PaginatedDataList
+      <PaginatedTable
         contentError={contentError}
         items={options}
         itemCount={optionCount}
@@ -61,14 +62,22 @@ function OptionsList({
         qsConfig={qsConfig}
         toolbarSearchColumns={searchColumns}
         toolbarSortColumns={sortColumns}
+        toolbarSearchableKeys={searchableKeys}
+        toolbarRelatedSearchableKeys={relatedSearchableKeys}
         hasContentLoading={isLoading}
+        headerRow={
+          <HeaderRow qsConfig={qsConfig}>
+            <HeaderCell sortKey="name">{t`Name`}</HeaderCell>
+          </HeaderRow>
+        }
         onRowClick={selectItem}
-        renderItem={item => (
+        renderRow={(item, index) => (
           <CheckboxListItem
             key={item.id}
+            rowIndex={index}
             itemId={item.id}
-            name={multiple ? item.name : name}
-            label={item.name}
+            name={multiple ? item[displayKey] : name}
+            label={item[displayKey]}
             isSelected={value.some(i => i.id === item.id)}
             onSelect={() => selectItem(item)}
             onDeselect={() => deselectItem(item)}
@@ -88,22 +97,24 @@ const Item = shape({
   url: string,
 });
 OptionsList.propTypes = {
-  value: arrayOf(Item).isRequired,
-  options: arrayOf(Item).isRequired,
-  optionCount: number.isRequired,
-  searchColumns: SearchColumns,
-  sortColumns: SortColumns,
-  multiple: bool,
-  qsConfig: QSConfig.isRequired,
-  selectItem: func.isRequired,
   deselectItem: func.isRequired,
+  displayKey: string,
+  multiple: bool,
+  optionCount: number.isRequired,
+  options: arrayOf(Item).isRequired,
+  qsConfig: QSConfig.isRequired,
   renderItemChip: func,
+  searchColumns: SearchColumns,
+  selectItem: func.isRequired,
+  sortColumns: SortColumns,
+  value: arrayOf(Item).isRequired,
 };
 OptionsList.defaultProps = {
   multiple: false,
   renderItemChip: null,
   searchColumns: [],
   sortColumns: [],
+  displayKey: 'name',
 };
 
-export default withI18n()(OptionsList);
+export default OptionsList;

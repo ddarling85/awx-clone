@@ -1,28 +1,28 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useLocation } from 'react-router-dom';
-import { withI18n } from '@lingui/react';
-import { t } from '@lingui/macro';
+import { t, Plural } from '@lingui/macro';
 
 import { Card } from '@patternfly/react-core';
 import AlertModal from '../AlertModal';
 import DatalistToolbar from '../DataListToolbar';
 import ErrorDetail from '../ErrorDetail';
-import PaginatedDataList, { ToolbarDeleteButton } from '../PaginatedDataList';
-import useRequest, { useDeleteItems } from '../../util/useRequest';
+import { ToolbarDeleteButton } from '../PaginatedDataList';
+import PaginatedTable, { HeaderRow, HeaderCell } from '../PaginatedTable';
+import useRequest, {
+  useDeleteItems,
+  useDismissableError,
+} from '../../util/useRequest';
+import { useConfig } from '../../contexts/Config';
+
+import { isJobRunning, getJobModel } from '../../util/jobs';
 import { getQSConfig, parseQueryString } from '../../util/qs';
 import JobListItem from './JobListItem';
-import {
-  AdHocCommandsAPI,
-  InventoryUpdatesAPI,
-  JobsAPI,
-  ProjectUpdatesAPI,
-  SystemJobsAPI,
-  UnifiedJobsAPI,
-  WorkflowJobsAPI,
-} from '../../api';
+import JobListCancelButton from './JobListCancelButton';
+import useWsJobs from './useWsJobs';
+import { UnifiedJobsAPI } from '../../api';
 
-function JobList({ i18n, defaultParams, showTypeColumn = false }) {
-  const QS_CONFIG = getQSConfig(
+function JobList({ defaultParams, showTypeColumn = false }) {
+  const qsConfig = getQSConfig(
     'job',
     {
       page: 1,
@@ -34,72 +34,109 @@ function JobList({ i18n, defaultParams, showTypeColumn = false }) {
     ['id', 'page', 'page_size']
   );
 
+  const { me } = useConfig();
+
   const [selected, setSelected] = useState([]);
   const location = useLocation();
-
   const {
-    result: { jobs, itemCount },
+    result: { results, count, relatedSearchableKeys, searchableKeys },
     error: contentError,
     isLoading,
     request: fetchJobs,
   } = useRequest(
-    useCallback(async () => {
-      const params = parseQueryString(QS_CONFIG, location.search);
-
-      const {
-        data: { count, results },
-      } = await UnifiedJobsAPI.read({ ...params });
-
-      return {
-        itemCount: count,
-        jobs: results,
-      };
-    }, [location]), // eslint-disable-line react-hooks/exhaustive-deps
+    useCallback(
+      async () => {
+        const params = parseQueryString(qsConfig, location.search);
+        const [response, actionsResponse] = await Promise.all([
+          UnifiedJobsAPI.read({ ...params }),
+          UnifiedJobsAPI.readOptions(),
+        ]);
+        return {
+          results: response.data.results,
+          count: response.data.count,
+          relatedSearchableKeys: (
+            actionsResponse?.data?.related_search_fields || []
+          ).map(val => val.slice(0, -8)),
+          searchableKeys: Object.keys(
+            actionsResponse.data.actions?.GET || {}
+          ).filter(key => actionsResponse.data.actions?.GET[key].filterable),
+        };
+      },
+      [location] // eslint-disable-line react-hooks/exhaustive-deps
+    ),
     {
-      jobs: [],
-      itemCount: 0,
+      results: [],
+      count: 0,
+      relatedSearchableKeys: [],
+      searchableKeys: [],
     }
   );
-
   useEffect(() => {
     fetchJobs();
   }, [fetchJobs]);
 
+  // TODO: update QS_CONFIG to be safe for deps array
+  const fetchJobsById = useCallback(
+    async ids => {
+      const params = parseQueryString(qsConfig, location.search);
+      params.id__in = ids.join(',');
+      const { data } = await UnifiedJobsAPI.read(params);
+      return data.results;
+    },
+    [location.search] // eslint-disable-line react-hooks/exhaustive-deps
+  );
+
+  const jobs = useWsJobs(results, fetchJobsById, qsConfig);
+
   const isAllSelected = selected.length === jobs.length && selected.length > 0;
+
+  const {
+    error: cancelJobsError,
+    isLoading: isCancelLoading,
+    request: cancelJobs,
+  } = useRequest(
+    useCallback(async () => {
+      return Promise.all(
+        selected.map(job => {
+          if (isJobRunning(job.status)) {
+            return getJobModel(job.type).cancel(job.id);
+          }
+          return Promise.resolve();
+        })
+      );
+    }, [selected]),
+    {}
+  );
+
+  const {
+    error: cancelError,
+    dismissError: dismissCancelError,
+  } = useDismissableError(cancelJobsError);
+
   const {
     isLoading: isDeleteLoading,
     deleteItems: deleteJobs,
     deletionError,
     clearDeletionError,
   } = useDeleteItems(
-    useCallback(async () => {
+    useCallback(() => {
       return Promise.all(
         selected.map(({ type, id }) => {
-          switch (type) {
-            case 'job':
-              return JobsAPI.destroy(id);
-            case 'ad_hoc_command':
-              return AdHocCommandsAPI.destroy(id);
-            case 'system_job':
-              return SystemJobsAPI.destroy(id);
-            case 'project_update':
-              return ProjectUpdatesAPI.destroy(id);
-            case 'inventory_update':
-              return InventoryUpdatesAPI.destroy(id);
-            case 'workflow_job':
-              return WorkflowJobsAPI.destroy(id);
-            default:
-              return null;
-          }
+          return getJobModel(type).destroy(id);
         })
       );
     }, [selected]),
     {
-      qsConfig: QS_CONFIG,
+      qsConfig,
       allItemsSelected: isAllSelected,
       fetchItems: fetchJobs,
     }
   );
+
+  const handleJobCancel = async () => {
+    await cancelJobs();
+    setSelected([]);
+  };
 
   const handleJobDelete = async () => {
     await deleteJobs();
@@ -118,132 +155,149 @@ function JobList({ i18n, defaultParams, showTypeColumn = false }) {
     }
   };
 
+  const cannotDeleteItems = selected.filter(job => isJobRunning(job.status));
+
   return (
     <>
       <Card>
-        <PaginatedDataList
+        <PaginatedTable
           contentError={contentError}
-          hasContentLoading={isLoading || isDeleteLoading}
+          hasContentLoading={isLoading || isDeleteLoading || isCancelLoading}
           items={jobs}
-          itemCount={itemCount}
-          pluralizedItemName={i18n._(t`Jobs`)}
-          qsConfig={QS_CONFIG}
-          onRowClick={handleSelect}
+          itemCount={count}
+          pluralizedItemName={t`Jobs`}
+          qsConfig={qsConfig}
           toolbarSearchColumns={[
             {
-              name: i18n._(t`Name`),
-              key: 'name',
+              name: t`Name`,
+              key: 'name__icontains',
               isDefault: true,
             },
             {
-              name: i18n._(t`ID`),
+              name: t`ID`,
               key: 'id',
             },
             {
-              name: i18n._(t`Label Name`),
-              key: 'labels__name',
+              name: t`Label Name`,
+              key: 'labels__name__icontains',
             },
             {
-              name: i18n._(t`Job Type`),
-              key: `type`,
+              name: t`Job Type`,
+              key: `or__type`,
               options: [
-                [`project_update`, i18n._(t`Source Control Update`)],
-                [`inventory_update`, i18n._(t`Inventory Sync`)],
-                [`job`, i18n._(t`Playbook Run`)],
-                [`ad_hoc_command`, i18n._(t`Command`)],
-                [`system_job`, i18n._(t`Management Job`)],
-                [`workflow_job`, i18n._(t`Workflow Job`)],
+                [`project_update`, t`Source Control Update`],
+                [`inventory_update`, t`Inventory Sync`],
+                [`job`, t`Playbook Run`],
+                [`ad_hoc_command`, t`Command`],
+                [`system_job`, t`Management Job`],
+                [`workflow_job`, t`Workflow Job`],
               ],
             },
             {
-              name: i18n._(t`Launched By (Username)`),
-              key: 'created_by__username',
+              name: t`Launched By (Username)`,
+              key: 'created_by__username__icontains',
             },
             {
-              name: i18n._(t`Status`),
+              name: t`Status`,
               key: 'status',
               options: [
-                [`new`, i18n._(t`New`)],
-                [`pending`, i18n._(t`Pending`)],
-                [`waiting`, i18n._(t`Waiting`)],
-                [`running`, i18n._(t`Running`)],
-                [`successful`, i18n._(t`Successful`)],
-                [`failed`, i18n._(t`Failed`)],
-                [`error`, i18n._(t`Error`)],
-                [`canceled`, i18n._(t`Canceled`)],
+                [`new`, t`New`],
+                [`pending`, t`Pending`],
+                [`waiting`, t`Waiting`],
+                [`running`, t`Running`],
+                [`successful`, t`Successful`],
+                [`failed`, t`Failed`],
+                [`error`, t`Error`],
+                [`canceled`, t`Canceled`],
               ],
             },
             {
-              name: i18n._(t`Limit`),
+              name: t`Limit`,
               key: 'job__limit',
             },
           ]}
-          toolbarSortColumns={[
-            {
-              name: i18n._(t`Finish Time`),
-              key: 'finished',
-            },
-            {
-              name: i18n._(t`ID`),
-              key: 'id',
-            },
-            {
-              name: i18n._(t`Launched By`),
-              key: 'created_by__id',
-            },
-            {
-              name: i18n._(t`Name`),
-              key: 'name',
-            },
-            {
-              name: i18n._(t`Project`),
-              key: 'unified_job_template__project__id',
-            },
-            {
-              name: i18n._(t`Start Time`),
-              key: 'started',
-            },
-          ]}
+          headerRow={
+            <HeaderRow qsConfig={qsConfig} isExpandable>
+              <HeaderCell sortKey="name">{t`Name`}</HeaderCell>
+              <HeaderCell sortKey="status">{t`Status`}</HeaderCell>
+              {showTypeColumn && <HeaderCell>{t`Type`}</HeaderCell>}
+              <HeaderCell sortKey="started">{t`Start Time`}</HeaderCell>
+              <HeaderCell sortKey="finished">{t`Finish Time`}</HeaderCell>
+              <HeaderCell>{t`Actions`}</HeaderCell>
+            </HeaderRow>
+          }
+          toolbarSearchableKeys={searchableKeys}
+          toolbarRelatedSearchableKeys={relatedSearchableKeys}
           renderToolbar={props => (
             <DatalistToolbar
               {...props}
               showSelectAll
-              showExpandCollapse
               isAllSelected={isAllSelected}
               onSelectAll={handleSelectAll}
-              qsConfig={QS_CONFIG}
+              qsConfig={qsConfig}
               additionalControls={[
                 <ToolbarDeleteButton
                   key="delete"
                   onDelete={handleJobDelete}
                   itemsToDelete={selected}
-                  pluralizedItemName="Jobs"
+                  pluralizedItemName={t`Jobs`}
+                  cannotDelete={item =>
+                    isJobRunning(item.status) ||
+                    !item.summary_fields.user_capabilities.delete
+                  }
+                  errorMessage={
+                    <Plural
+                      value={cannotDeleteItems.length}
+                      one="The selected job cannot be deleted due to insufficient permission or a running job status"
+                      other="The selected jobs cannot be deleted due to insufficient permissions or a running job status"
+                    />
+                  }
+                />,
+                <JobListCancelButton
+                  key="cancel"
+                  onCancel={handleJobCancel}
+                  jobsToCancel={selected}
                 />,
               ]}
             />
           )}
-          renderItem={job => (
+          renderRow={(job, index) => (
             <JobListItem
               key={job.id}
               job={job}
+              isSuperUser={me?.is_superuser}
               showTypeColumn={showTypeColumn}
               onSelect={() => handleSelect(job)}
               isSelected={selected.some(row => row.id === job.id)}
+              rowIndex={index}
             />
           )}
         />
       </Card>
-      <AlertModal
-        isOpen={deletionError}
-        variant="error"
-        title={i18n._(t`Error!`)}
-        onClose={clearDeletionError}
-      >
-        {i18n._(t`Failed to delete one or more jobs.`)}
-        <ErrorDetail error={deletionError} />
-      </AlertModal>
+      {deletionError && (
+        <AlertModal
+          isOpen
+          variant="error"
+          title={t`Error!`}
+          onClose={clearDeletionError}
+        >
+          {t`Failed to delete one or more jobs.`}
+          <ErrorDetail error={deletionError} />
+        </AlertModal>
+      )}
+      {cancelError && (
+        <AlertModal
+          isOpen
+          variant="error"
+          title={t`Error!`}
+          onClose={dismissCancelError}
+        >
+          {t`Failed to cancel one or more jobs.`}
+          <ErrorDetail error={cancelError} />
+        </AlertModal>
+      )}
     </>
   );
 }
 
-export default withI18n()(JobList);
+export default JobList;

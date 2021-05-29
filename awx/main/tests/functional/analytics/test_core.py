@@ -10,19 +10,19 @@ from awx.main.analytics import gather, register
 
 
 @register('example', '1.0')
-def example(since):
+def example(since, **kwargs):
     return {'awx': 123}
 
 
 @register('bad_json', '1.0')
-def bad_json(since):
+def bad_json(since, **kwargs):
     return set()
 
 
 @register('throws_error', '1.0')
-def throws_error(since):
+def throws_error(since, **kwargs):
     raise ValueError()
-    
+
 
 def _valid_license():
     pass
@@ -38,10 +38,10 @@ def mock_valid_license():
 @pytest.mark.django_db
 def test_gather(mock_valid_license):
     settings.INSIGHTS_TRACKING_STATE = True
-    
-    tgz = gather(module=importlib.import_module(__name__))
+
+    tgzfiles = gather(module=importlib.import_module(__name__), collection_type='dry-run')
     files = {}
-    with tarfile.open(tgz, "r:gz") as archive:
+    with tarfile.open(tgzfiles[0], "r:gz") as archive:
         for member in archive.getmembers():
             files[member.name] = archive.extractfile(member)
 
@@ -53,7 +53,7 @@ def test_gather(mock_valid_license):
         assert './bad_json.json' not in files.keys()
         assert './throws_error.json' not in files.keys()
     try:
-        os.remove(tgz)
+        for tgz in tgzfiles:
+            os.remove(tgz)
     except Exception:
         pass
-        

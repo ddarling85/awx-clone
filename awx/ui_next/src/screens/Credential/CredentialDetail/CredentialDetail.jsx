@@ -1,9 +1,8 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { Fragment, useEffect, useCallback } from 'react';
 import { Link, useHistory } from 'react-router-dom';
-import { withI18n } from '@lingui/react';
-import { t } from '@lingui/macro';
-import { shape } from 'prop-types';
 
+import { t } from '@lingui/macro';
+import styled from 'styled-components';
 import { Button, List, ListItem } from '@patternfly/react-core';
 import AlertModal from '../../../components/AlertModal';
 import { CardBody, CardActionsRow } from '../../../components/Card';
@@ -11,16 +10,28 @@ import ContentError from '../../../components/ContentError';
 import ContentLoading from '../../../components/ContentLoading';
 import DeleteButton from '../../../components/DeleteButton';
 import {
-  DetailList,
   Detail,
+  DetailList,
   UserDateDetail,
 } from '../../../components/DetailList';
+import ChipGroup from '../../../components/ChipGroup';
+import CodeEditor from '../../../components/CodeEditor';
+import CredentialChip from '../../../components/CredentialChip';
 import ErrorDetail from '../../../components/ErrorDetail';
 import { CredentialsAPI, CredentialTypesAPI } from '../../../api';
 import { Credential } from '../../../types';
 import useRequest, { useDismissableError } from '../../../util/useRequest';
+import { relatedResourceDeleteRequests } from '../../../util/getRelatedResourceDeleteDetails';
 
-function CredentialDetail({ i18n, credential }) {
+const PluginInputMetadata = styled.div`
+  grid-column: 1 / -1;
+`;
+
+const PluginFieldText = styled.p`
+  margin-top: 10px;
+`;
+
+function CredentialDetail({ credential }) {
   const {
     id: credentialId,
     name,
@@ -36,31 +47,44 @@ function CredentialDetail({ i18n, credential }) {
       user_capabilities,
     },
   } = credential;
-
-  const [fields, setFields] = useState([]);
-  const [managedByTower, setManagedByTower] = useState([]);
-  const [contentError, setContentError] = useState(null);
-  const [hasContentLoading, setHasContentLoading] = useState(true);
   const history = useHistory();
 
-  useEffect(() => {
-    (async () => {
-      setContentError(null);
-      setHasContentLoading(true);
-      try {
-        const {
+  const {
+    result: { fields, managedByTower, inputSources },
+    request: fetchDetails,
+    isLoading: hasContentLoading,
+    error: contentError,
+  } = useRequest(
+    useCallback(async () => {
+      const [
+        {
           data: { inputs: credentialTypeInputs, managed_by_tower },
-        } = await CredentialTypesAPI.readDetail(credential_type.id);
-
-        setFields(credentialTypeInputs.fields || []);
-        setManagedByTower(managed_by_tower);
-      } catch (error) {
-        setContentError(error);
-      } finally {
-        setHasContentLoading(false);
-      }
-    })();
-  }, [credential_type]);
+        },
+        {
+          data: { results: loadedInputSources },
+        },
+      ] = await Promise.all([
+        CredentialTypesAPI.readDetail(credential_type.id),
+        CredentialsAPI.readInputSources(credentialId),
+      ]);
+      return {
+        fields: credentialTypeInputs.fields || [],
+        managedByTower: managed_by_tower,
+        inputSources: loadedInputSources.reduce(
+          (inputSourcesMap, inputSource) => {
+            inputSourcesMap[inputSource.input_field_name] = inputSource;
+            return inputSourcesMap;
+          },
+          {}
+        ),
+      };
+    }, [credentialId, credential_type.id]),
+    {
+      fields: [],
+      managedByTower: true,
+      inputSources: {},
+    }
+  );
 
   const {
     request: deleteCredential,
@@ -75,33 +99,95 @@ function CredentialDetail({ i18n, credential }) {
 
   const { error, dismissError } = useDismissableError(deleteError);
 
-  const renderDetail = ({ id, label, type }) => {
-    let detail;
+  const renderDetail = ({ id, label, type, ask_at_runtime }) => {
+    if (inputSources[id]) {
+      return (
+        <Fragment key={id}>
+          <Detail
+            dataCy={`credential-${id}-detail`}
+            id={`credential-${id}-detail`}
+            fullWidth
+            label={<span>{label} *</span>}
+            value={
+              <ChipGroup numChips={1} totalChips={1}>
+                <CredentialChip
+                  credential={inputSources[id].summary_fields.source_credential}
+                  isReadOnly
+                />
+              </ChipGroup>
+            }
+          />
+          <PluginInputMetadata>
+            <CodeEditor
+              dataCy={`credential-${id}-detail`}
+              id={`credential-${id}-metadata`}
+              mode="javascript"
+              readOnly
+              value={JSON.stringify(inputSources[id].metadata, null, 2)}
+              onChange={() => {}}
+              rows={5}
+              hasErrors={false}
+            />
+          </PluginInputMetadata>
+        </Fragment>
+      );
+    }
 
     if (type === 'boolean') {
-      detail = (
+      return (
         <Detail
+          dataCy={`credential-${id}-detail`}
+          id={`credential-${id}-detail`}
           key={id}
-          label={i18n._(t`Options`)}
+          label={t`Options`}
           value={<List>{inputs[id] && <ListItem>{label}</ListItem>}</List>}
         />
       );
-    } else if (inputs[id] === '$encrypted$') {
-      const isEncrypted = true;
-      detail = (
-        <Detail
-          key={id}
-          label={label}
-          value={i18n._(t`Encrypted`)}
-          isEncrypted={isEncrypted}
-        />
-      );
-    } else {
-      detail = <Detail key={id} label={label} value={inputs[id]} />;
     }
 
-    return detail;
+    if (inputs[id] === '$encrypted$') {
+      return (
+        <Detail
+          dataCy={`credential-${id}-detail`}
+          id={`credential-${id}-detail`}
+          key={id}
+          label={label}
+          value={t`Encrypted`}
+          isEncrypted
+        />
+      );
+    }
+
+    if (ask_at_runtime && inputs[id] === 'ASK') {
+      return (
+        <Detail
+          dataCy={`credential-${id}-detail`}
+          id={`credential-${id}-detail`}
+          key={id}
+          label={label}
+          value={t`Prompt on launch`}
+        />
+      );
+    }
+
+    return (
+      <Detail
+        dataCy={`credential-${id}-detail`}
+        id={`credential-${id}-detail`}
+        key={id}
+        label={label}
+        value={inputs[id]}
+      />
+    );
   };
+
+  useEffect(() => {
+    fetchDetails();
+  }, [fetchDetails]);
+
+  const deleteDetailsRequests = relatedResourceDeleteRequests.credential(
+    credential
+  );
 
   if (hasContentLoading) {
     return <ContentLoading />;
@@ -114,11 +200,23 @@ function CredentialDetail({ i18n, credential }) {
   return (
     <CardBody>
       <DetailList>
-        <Detail label={i18n._(t`Name`)} value={name} />
-        <Detail label={i18n._(t`Description`)} value={description} />
+        <Detail
+          dataCy="credential-name-detail"
+          id="credential-name-detail"
+          label={t`Name`}
+          value={name}
+        />
+        <Detail
+          dataCy="credential-description-detail"
+          id="credential-description-detail"
+          label={t`Description`}
+          value={description}
+        />
         {organization && (
           <Detail
-            label={i18n._(t`Organization`)}
+            dataCy="credential-organization-detail"
+            id="credential-organization-detail"
+            label={t`Organization`}
             value={
               <Link to={`/organizations/${organization.id}/details`}>
                 {organization.name}
@@ -127,7 +225,9 @@ function CredentialDetail({ i18n, credential }) {
           />
         )}
         <Detail
-          label={i18n._(t`Credential Type`)}
+          dataCy="credential-credential_type-detail"
+          id="credential-credential_type-detail"
+          label={t`Credential Type`}
           value={
             managedByTower ? (
               credential_type.name
@@ -142,30 +242,46 @@ function CredentialDetail({ i18n, credential }) {
         {fields.map(field => renderDetail(field))}
 
         <UserDateDetail
-          label={i18n._(t`Created`)}
+          dataCy="credential-created-detail"
+          id="credential-created-detail"
+          label={t`Created`}
           date={created}
           user={created_by}
         />
         <UserDateDetail
-          label={i18n._(t`Last Modified`)}
+          dataCy="credential-last_modified-detail"
+          id="credential-last_modified-detail"
+          label={t`Last Modified`}
           date={modified}
           user={modified_by}
         />
       </DetailList>
+      {Object.keys(inputSources).length > 0 && (
+        <PluginFieldText>
+          {t`* This field will be retrieved from an external secret management system using the specified credential.`}
+        </PluginFieldText>
+      )}
       <CardActionsRow>
         {user_capabilities.edit && (
-          <Button component={Link} to={`/credentials/${credentialId}/edit`}>
-            {i18n._(t`Edit`)}
+          <Button
+            ouiaId="credential-detail-edit-button"
+            component={Link}
+            to={`/credentials/${credentialId}/edit`}
+          >
+            {t`Edit`}
           </Button>
         )}
         {user_capabilities.delete && (
           <DeleteButton
             name={name}
-            modalTitle={i18n._(t`Delete Credential`)}
+            itemToDelete={credential}
+            modalTitle={t`Delete Credential`}
             onConfirm={deleteCredential}
             isLoading={isLoading}
+            deleteDetailsRequests={deleteDetailsRequests}
+            deleteMessage={t`This credential is currently being used by other resources. Are you sure you want to delete it?`}
           >
-            {i18n._(t`Delete`)}
+            {t`Delete`}
           </DeleteButton>
         )}
       </CardActionsRow>
@@ -173,10 +289,10 @@ function CredentialDetail({ i18n, credential }) {
         <AlertModal
           isOpen={error}
           variant="error"
-          title={i18n._(t`Error!`)}
+          title={t`Error!`}
           onClose={dismissError}
         >
-          {i18n._(t`Failed to delete credential.`)}
+          {t`Failed to delete credential.`}
           <ErrorDetail error={error} />
         </AlertModal>
       )}
@@ -186,7 +302,6 @@ function CredentialDetail({ i18n, credential }) {
 
 CredentialDetail.propTypes = {
   credential: Credential.isRequired,
-  i18n: shape({}).isRequired,
 };
 
-export default withI18n()(CredentialDetail);
+export default CredentialDetail;

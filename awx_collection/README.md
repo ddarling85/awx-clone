@@ -1,7 +1,18 @@
 # AWX Ansible Collection
 
-This Ansible collection allows for easy interaction with an AWX or Ansible Tower
-server via Ansible playbooks.
+[comment]: # (*******************************************************)
+[comment]: # (*                                                     *)
+[comment]: # (*             WARNING                                 *)
+[comment]: # (*                                                     *)
+[comment]: # (*  This file is templated and not to be               *)
+[comment]: # (*  edited directly! Instead modify:                   *)
+[comment]: # (*  tools/roles/template_galaxy/templates/README.md.j2 *)
+[comment]: # (*                                                     *)
+[comment]: # (*  Changes to the base README.md file are refreshed   *)
+[comment]: # (*  upon build of the collection                       *)
+[comment]: # (*******************************************************)
+
+This Ansible collection allows for easy interaction with an AWX server via Ansible playbooks.
 
 This source for this collection lives in the `awx_collection` folder inside of the
 AWX source.
@@ -56,10 +67,13 @@ Notable releases of the `awx.awx` collection:
 
  - 7.0.0 is intended to be identical to the content prior to the migration, aside from changes necessary to function as a collection.
  - 11.0.0 has no non-deprecated modules that depend on the deprecated `tower-cli` [PyPI](https://pypi.org/project/ansible-tower-cli/).
+ - 0.0.1-devel is the version you should see if installing from source, which is intended for development and expected to be unstable.
 
 The following notes are changes that may require changes to playbooks:
 
  - When a project is created, it will wait for the update/sync to finish by default; this can be turned off with the `wait` parameter, if desired.
+ - When using the wait parameter with project update, if the project did not undergo a revision update, the result will be 
+ 'not changed'
  - Creating a "scan" type job template is no longer supported.
  - Specifying a custom certificate via the `TOWER_CERTIFICATE` environment variable no longer works.
  - Type changes of variable fields:
@@ -79,9 +93,9 @@ The following notes are changes that may require changes to playbooks:
  - Specified `tower_config` file used to handle `k=v` pairs on a single line; this is no longer supported. Please use a file formatted as `yaml`, `json` or `ini` only.
  - Some return values (e.g., `credential_type`) have been removed. Use of `id` is recommended.
  - `tower_job_template` no longer supports the deprecated `extra_vars_path` parameter, please use `extra_vars` with the lookup plugin to replace this functionality.
- - The `notification_configuration` parameter of `tower_notification` has changed from a string to a dict. Please use the `lookup` plugin to read an existing file into a dict.
+ - The `notification_configuration` parameter of `tower_notification_template` has changed from a string to a dict. Please use the `lookup` plugin to read an existing file into a dict.
  - `tower_credential` no longer supports passing a file name to ssh_key_data.
- - The HipChat `notification_type` has been removed and can no longer be created using the `tower_notification` module.
+ - The HipChat `notification_type` has been removed and can no longer be created using the `tower_notification_template` module.
 
 ## Running Unit Tests
 

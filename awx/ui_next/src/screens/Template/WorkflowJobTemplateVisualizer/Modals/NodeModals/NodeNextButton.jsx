@@ -1,5 +1,5 @@
 import React, { useEffect } from 'react';
-import { func, number, shape, string } from 'prop-types';
+import { func, oneOfType, number, shape, string } from 'prop-types';
 import { Button } from '@patternfly/react-core';
 
 function NodeNextButton({
@@ -8,6 +8,7 @@ function NodeNextButton({
   onClick,
   onNext,
   triggerNext,
+  isDisabled,
 }) {
   useEffect(() => {
     if (!triggerNext) {
@@ -18,11 +19,12 @@ function NodeNextButton({
 
   return (
     <Button
+      ouiaId="node-modal-next-button"
       id="next-node-modal"
       variant="primary"
       type="submit"
       onClick={() => onClick(activeStep)}
-      isDisabled={!activeStep.enableNext}
+      isDisabled={isDisabled || !activeStep.enableNext}
     >
       {buttonText}
     </Button>
@@ -34,7 +36,7 @@ NodeNextButton.propTypes = {
   buttonText: string.isRequired,
   onClick: func.isRequired,
   onNext: func.isRequired,
-  triggerNext: number.isRequired,
+  triggerNext: oneOfType([string, number]).isRequired,
 };
 
 export default NodeNextButton;

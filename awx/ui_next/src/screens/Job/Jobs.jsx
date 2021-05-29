@@ -1,45 +1,33 @@
 import React, { useState, useCallback } from 'react';
-import {
-  Route,
-  Switch,
-  useHistory,
-  useLocation,
-  useParams,
-  useRouteMatch,
-} from 'react-router-dom';
-import { withI18n } from '@lingui/react';
+import { Route, Switch, useParams, useRouteMatch } from 'react-router-dom';
+
 import { t } from '@lingui/macro';
 import { PageSection } from '@patternfly/react-core';
-import Breadcrumbs from '../../components/Breadcrumbs/Breadcrumbs';
+import ScreenHeader from '../../components/ScreenHeader/ScreenHeader';
 import Job from './Job';
 import JobTypeRedirect from './JobTypeRedirect';
 import JobList from '../../components/JobList';
 import { JOB_TYPE_URL_SEGMENTS } from '../../constants';
 
-function Jobs({ i18n }) {
-  const history = useHistory();
-  const location = useLocation();
+function Jobs() {
   const match = useRouteMatch();
   const [breadcrumbConfig, setBreadcrumbConfig] = useState({
-    '/jobs': i18n._(t`Jobs`),
+    '/jobs': t`Jobs`,
   });
 
-  const buildBreadcrumbConfig = useCallback(
-    job => {
-      if (!job) {
-        return;
-      }
+  const buildBreadcrumbConfig = useCallback(job => {
+    if (!job) {
+      return;
+    }
 
-      const type = JOB_TYPE_URL_SEGMENTS[job.type];
-      setBreadcrumbConfig({
-        '/jobs': i18n._(t`Jobs`),
-        [`/jobs/${type}/${job.id}`]: `${job.name}`,
-        [`/jobs/${type}/${job.id}/output`]: i18n._(t`Output`),
-        [`/jobs/${type}/${job.id}/details`]: i18n._(t`Details`),
-      });
-    },
-    [i18n]
-  );
+    const typeSegment = JOB_TYPE_URL_SEGMENTS[job.type];
+    setBreadcrumbConfig({
+      '/jobs': t`Jobs`,
+      [`/jobs/${typeSegment}/${job.id}`]: `${job.name}`,
+      [`/jobs/${typeSegment}/${job.id}/output`]: t`Output`,
+      [`/jobs/${typeSegment}/${job.id}/details`]: t`Details`,
+    });
+  }, []);
 
   function TypeRedirect({ view }) {
     const { id } = useParams();
@@ -49,7 +37,7 @@ function Jobs({ i18n }) {
 
   return (
     <>
-      <Breadcrumbs breadcrumbConfig={breadcrumbConfig} />
+      <ScreenHeader streamType="job" breadcrumbConfig={breadcrumbConfig} />
       <Switch>
         <Route exact path={match.path}>
           <PageSection>
@@ -62,12 +50,8 @@ function Jobs({ i18n }) {
         <Route path={`${match.path}/:id/output`}>
           <TypeRedirect view="output" />
         </Route>
-        <Route path={`${match.path}/:type/:id`}>
-          <Job
-            history={history}
-            location={location}
-            setBreadcrumb={buildBreadcrumbConfig}
-          />
+        <Route path={`${match.path}/:typeSegment/:id`}>
+          <Job setBreadcrumb={buildBreadcrumbConfig} />
         </Route>
         <Route path={`${match.path}/:id`}>
           <TypeRedirect />
@@ -78,4 +62,4 @@ function Jobs({ i18n }) {
 }
 
 export { Jobs as _Jobs };
-export default withI18n()(Jobs);
+export default Jobs;

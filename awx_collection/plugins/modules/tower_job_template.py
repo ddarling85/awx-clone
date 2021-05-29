@@ -5,12 +5,11 @@
 # GNU General Public License v3.0+ (see COPYING or https://www.gnu.org/licenses/gpl-3.0.txt)
 
 from __future__ import absolute_import, division, print_function
+
 __metaclass__ = type
 
 
-ANSIBLE_METADATA = {'metadata_version': '1.1',
-                    'status': ['preview'],
-                    'supported_by': 'community'}
+ANSIBLE_METADATA = {'metadata_version': '1.1', 'status': ['preview'], 'supported_by': 'community'}
 
 
 DOCUMENTATION = '''
@@ -30,6 +29,14 @@ options:
     new_name:
       description:
         - Setting this option will change the existing name (looed up via the name field.
+      type: str
+    copy_from:
+      description:
+        - Name or id to copy the job template from.
+        - This will copy an existing job template and change any parameters supplied.
+        - The new job template name will be the one provided in the name parameter.
+        - The organization parameter is not used in this, to facilitate copy from one organization to another.
+        - Provide the id or use the lookup plugin to provide the id if multiple job templates share the same name.
       type: str
     description:
       description:
@@ -75,6 +82,21 @@ options:
         - Name of the vault credential to use for the job template.
         - Deprecated, use 'credentials'.
       type: str
+    execution_environment:
+      description:
+        - Execution Environment to use for the JT.
+      type: str
+    custom_virtualenv:
+      description:
+        - Local absolute file path containing a custom Python virtualenv to use.
+        - Only compatible with older versions of AWX/Tower
+        - Deprecated, will be removed in the future
+      type: str
+    instance_groups:
+      description:
+        - list of Instance Groups for this Organization to run on.
+      type: list
+      elements: str
     forks:
       description:
         - The number of parallel or simultaneous processes to use while executing the playbook.
@@ -223,10 +245,6 @@ options:
       description:
         - Maximum time in seconds to wait for a job to finish (server-side).
       type: int
-    custom_virtualenv:
-      description:
-        - Local absolute file path containing a custom Python virtualenv to use.
-      type: str
     job_slice_count:
       description:
         - The number of jobs to slice into at runtime. Will cause the Job Template to launch a workflow if value is greater than 1.
@@ -300,7 +318,6 @@ EXAMPLES = '''
     tower_config_file: "~/tower_cli.cfg"
     survey_enabled: yes
     survey_spec: "{{ lookup('file', 'my_survey.json') }}"
-    custom_virtualenv: "/var/lib/awx/venv/custom-venv/"
 
 - name: Add start notification to Job Template
   tower_job_template:
@@ -315,9 +332,18 @@ EXAMPLES = '''
     notification_templates_started:
       - Notification2
 
+- name: Copy Job Template
+  tower_job_template:
+    name: copy job template
+    copy_from: test job template
+    job_type: "run"
+    inventory: Copy Foo Inventory
+    project: test
+    playbook: hello_world.yml
+    state: "present"
 '''
 
-from ..module_utils.tower_api import TowerModule
+from ..module_utils.tower_api import TowerAPIModule
 import json
 
 
@@ -340,24 +366,27 @@ def main():
     argument_spec = dict(
         name=dict(required=True),
         new_name=dict(),
-        description=dict(default=''),
+        copy_from=dict(),
+        description=dict(),
         organization=dict(),
         job_type=dict(choices=['run', 'check']),
         inventory=dict(),
         project=dict(),
         playbook=dict(),
-        credential=dict(default=''),
-        vault_credential=dict(default=''),
-        custom_virtualenv=dict(),
+        credential=dict(),
+        vault_credential=dict(),
         credentials=dict(type='list', elements='str'),
+        execution_environment=dict(),
+        custom_virtualenv=dict(),
+        instance_groups=dict(type="list", elements='str'),
         forks=dict(type='int'),
-        limit=dict(default=''),
+        limit=dict(),
         verbosity=dict(type='int', choices=[0, 1, 2, 3, 4], default=0),
         extra_vars=dict(type='dict'),
-        job_tags=dict(default=''),
+        job_tags=dict(),
         force_handlers=dict(type='bool', default=False, aliases=['force_handlers_enabled']),
-        skip_tags=dict(default=''),
-        start_at_task=dict(default=''),
+        skip_tags=dict(),
+        start_at_task=dict(),
         timeout=dict(type='int', default=0),
         use_fact_cache=dict(type='bool', aliases=['fact_caching_enabled']),
         host_config_key=dict(),
@@ -388,28 +417,29 @@ def main():
     )
 
     # Create a module for ourselves
-    module = TowerModule(argument_spec=argument_spec)
+    module = TowerAPIModule(argument_spec=argument_spec)
 
     # Extract our parameters
     name = module.params.get('name')
     new_name = module.params.get("new_name")
+    copy_from = module.params.get('copy_from')
     state = module.params.get('state')
 
     # Deal with legacy credential and vault_credential
     credential = module.params.get('credential')
     vault_credential = module.params.get('vault_credential')
     credentials = module.params.get('credentials')
-    if vault_credential != '':
+    if vault_credential:
         if credentials is None:
             credentials = []
         credentials.append(vault_credential)
-    if credential != '':
+    if credential:
         if credentials is None:
             credentials = []
         credentials.append(credential)
 
     new_fields = {}
-    search_fields = {'name': name}
+    search_fields = {}
 
     # Attempt to look up the related items the user specified (these will fail the module if not found)
     organization_id = None
@@ -418,25 +448,66 @@ def main():
         organization_id = module.resolve_name_to_id('organizations', organization)
         search_fields['organization'] = new_fields['organization'] = organization_id
 
+    ee = module.params.get('execution_environment')
+    if ee:
+        new_fields['execution_environment'] = module.resolve_name_to_id('execution_environments', ee)
+
     # Attempt to look up an existing item based on the provided data
-    existing_item = module.get_one('job_templates', **{'data': search_fields})
+    existing_item = module.get_one('job_templates', name_or_id=name, **{'data': search_fields})
+
+    # Attempt to look up credential to copy based on the provided name
+    if copy_from:
+        # a new existing item is formed when copying and is returned.
+        existing_item = module.copy_item(
+            existing_item,
+            copy_from,
+            name,
+            endpoint='job_templates',
+            item_type='job_template',
+            copy_lookup_data={},
+        )
 
     if state == 'absent':
         # If the state was absent we can let the module delete it if needed, the module will handle exiting from this
         module.delete_if_needed(existing_item)
 
     # Create the data that gets sent for create and update
-    new_fields['name'] = new_name if new_name else name
+    new_fields['name'] = new_name if new_name else (module.get_item_name(existing_item) if existing_item else name)
     for field_name in (
-        'description', 'job_type', 'playbook', 'scm_branch', 'forks', 'limit', 'verbosity',
-        'job_tags', 'force_handlers', 'skip_tags', 'start_at_task', 'timeout', 'use_fact_cache',
-        'host_config_key', 'ask_scm_branch_on_launch', 'ask_diff_mode_on_launch', 'ask_variables_on_launch',
-        'ask_limit_on_launch', 'ask_tags_on_launch', 'ask_skip_tags_on_launch', 'ask_job_type_on_launch',
-        'ask_verbosity_on_launch', 'ask_inventory_on_launch', 'ask_credential_on_launch', 'survey_enabled',
-        'become_enabled', 'diff_mode', 'allow_simultaneous', 'custom_virtualenv', 'job_slice_count', 'webhook_service',
+        'description',
+        'job_type',
+        'playbook',
+        'scm_branch',
+        'forks',
+        'limit',
+        'verbosity',
+        'job_tags',
+        'force_handlers',
+        'skip_tags',
+        'start_at_task',
+        'timeout',
+        'use_fact_cache',
+        'host_config_key',
+        'ask_scm_branch_on_launch',
+        'ask_diff_mode_on_launch',
+        'ask_variables_on_launch',
+        'ask_limit_on_launch',
+        'ask_tags_on_launch',
+        'ask_skip_tags_on_launch',
+        'ask_job_type_on_launch',
+        'ask_verbosity_on_launch',
+        'ask_inventory_on_launch',
+        'ask_credential_on_launch',
+        'survey_enabled',
+        'become_enabled',
+        'diff_mode',
+        'allow_simultaneous',
+        'custom_virtualenv',
+        'job_slice_count',
+        'webhook_service',
     ):
         field_val = module.params.get(field_name)
-        if field_val:
+        if field_val is not None:
             new_fields[field_name] = field_val
 
         # Special treatment of extra_vars parameter
@@ -453,16 +524,17 @@ def main():
         new_fields['inventory'] = module.resolve_name_to_id('inventories', inventory)
     if project is not None:
         if organization_id is not None:
-            project_data = module.get_one('projects', **{
-                'data': {
-                    'name': project,
-                    'organization': organization_id,
+            project_data = module.get_one(
+                'projects',
+                name_or_id=project,
+                **{
+                    'data': {
+                        'organization': organization_id,
+                    }
                 }
-            })
+            )
             if project_data is None:
-                module.fail_json(msg="The project {0} in organization {1} was not found on the Tower server".format(
-                    project, organization
-                ))
+                module.fail_json(msg="The project {0} in organization {1} was not found on the Tower server".format(project, organization))
             new_fields['project'] = project_data['id']
         else:
             new_fields['project'] = module.resolve_name_to_id('projects', project)
@@ -480,7 +552,8 @@ def main():
     if labels is not None:
         association_fields['labels'] = []
         for item in labels:
-            association_fields['labels'].append(module.resolve_name_to_id('labels', item))
+            label_id = module.get_one('labels', name_or_id=item, **{'data': search_fields})
+            association_fields['labels'].append(label_id['id'])
 
     notifications_start = module.params.get('notification_templates_started')
     if notifications_start is not None:
@@ -500,6 +573,12 @@ def main():
         for item in notifications_error:
             association_fields['notification_templates_error'].append(module.resolve_name_to_id('notification_templates', item))
 
+    instance_group_names = module.params.get('instance_groups')
+    if instance_group_names is not None:
+        association_fields['instance_groups'] = []
+        for item in instance_group_names:
+            association_fields['instance_groups'].append(module.resolve_name_to_id('instance_groups', item))
+
     on_change = None
     new_spec = module.params.get('survey_spec')
     if new_spec is not None:
@@ -515,10 +594,13 @@ def main():
 
     # If the state was present and we can let the module build or update the existing item, this will return on its own
     module.create_or_update_if_needed(
-        existing_item, new_fields,
-        endpoint='job_templates', item_type='job_template',
+        existing_item,
+        new_fields,
+        endpoint='job_templates',
+        item_type='job_template',
         associations=association_fields,
-        on_create=on_change, on_update=on_change,
+        on_create=on_change,
+        on_update=on_change,
     )
 
 

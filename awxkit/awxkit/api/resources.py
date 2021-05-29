@@ -1,4 +1,3 @@
-
 class Resources(object):
 
     _activity = r'activity_stream/\d+/'
@@ -16,6 +15,7 @@ class Resources(object):
     _auth = 'auth/'
     _authtoken = 'authtoken/'
     _config = 'config/'
+    _config_attach = 'config/attach/'
     _credential = r'credentials/\d+/'
     _credential_access_list = r'credentials/\d+/access_list/'
     _credential_copy = r'credentials/\d+/copy/'
@@ -27,6 +27,8 @@ class Resources(object):
     _credential_types = 'credential_types/'
     _credentials = 'credentials/'
     _dashboard = 'dashboard/'
+    _execution_environment = r'execution_environments/\d+/'
+    _execution_environments = 'execution_environments/'
     _fact_view = r'hosts/\d+/fact_view/'
     _group = r'groups/\d+/'
     _group_access_list = r'groups/\d+/access_list/'
@@ -63,9 +65,6 @@ class Resources(object):
     _inventory_related_root_groups = r'inventories/\d+/root_groups/'
     _inventory_related_script = r'inventories/\d+/script/'
     _inventory_related_update_inventory_sources = r'inventories/\d+/update_inventory_sources/'
-    _inventory_script = r'inventory_scripts/\d+/'
-    _inventory_script_copy = r'inventory_scripts/\d+/copy/'
-    _inventory_scripts = 'inventory_scripts/'
     _inventory_source = r'inventory_sources/\d+/'
     _inventory_source_schedule = r'inventory_sources/\d+/schedules/\d+/'
     _inventory_source_schedules = r'inventory_sources/\d+/schedules/'
@@ -140,6 +139,8 @@ class Resources(object):
     _organization_access_list = r'organizations/\d+/access_list/'
     _organization_admins = r'organizations/\d+/admins/'
     _organization_applications = r'organizations/\d+/applications/'
+    _organization_execution_environments = r'organizations/\d+/execution_environments/'
+    _organization_galaxy_credentials = r'organizations/\d+/galaxy_credentials/'
     _organization_inventories = r'organizations/\d+/inventories/'
     _organization_users = r'organizations/\d+/users/'
     _organizations = 'organizations/'

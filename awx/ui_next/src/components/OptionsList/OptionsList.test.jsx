@@ -17,7 +17,9 @@ describe('<OptionsList />', () => {
         value={[]}
         options={options}
         optionCount={3}
-        searchColumns={[{ name: 'Foo', key: 'foo', isDefault: true }]}
+        searchColumns={[
+          { name: 'Foo', key: 'foo__icontains', isDefault: true },
+        ]}
         sortColumns={[{ name: 'Foo', key: 'foo' }]}
         qsConfig={qsConfig}
         selectItem={() => {}}
@@ -25,7 +27,7 @@ describe('<OptionsList />', () => {
         name="Item"
       />
     );
-    expect(wrapper.find('PaginatedDataList').prop('items')).toEqual(options);
+    expect(wrapper.find('PaginatedTable').prop('items')).toEqual(options);
     expect(wrapper.find('SelectedList')).toHaveLength(0);
   });
 
@@ -40,7 +42,9 @@ describe('<OptionsList />', () => {
         value={[options[1]]}
         options={options}
         optionCount={3}
-        searchColumns={[{ name: 'Foo', key: 'foo', isDefault: true }]}
+        searchColumns={[
+          { name: 'Foo', key: 'foo__icontains', isDefault: true },
+        ]}
         sortColumns={[{ name: 'Foo', key: 'foo' }]}
         qsConfig={qsConfig}
         selectItem={() => {}}

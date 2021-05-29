@@ -6,15 +6,29 @@ import { getLanguage } from './language';
 const prependZeros = value => value.toString().padStart(2, 0);
 
 export function formatDateString(dateString, lang = getLanguage(navigator)) {
+  if (dateString === null) {
+    return null;
+  }
   return new Date(dateString).toLocaleString(lang);
 }
 
 export function formatDateStringUTC(dateString, lang = getLanguage(navigator)) {
+  if (dateString === null) {
+    return null;
+  }
   return new Date(dateString).toLocaleString(lang, { timeZone: 'UTC' });
 }
 
 export function secondsToHHMMSS(seconds) {
   return new Date(seconds * 1000).toISOString().substr(11, 8);
+}
+
+export function secondsToDays(seconds) {
+  let duration = Math.floor(parseInt(seconds, 10) / 86400);
+  if (duration < 0) {
+    duration = 0;
+  }
+  return duration.toString();
 }
 
 export function timeOfDay() {
@@ -24,8 +38,8 @@ export function timeOfDay() {
   const second = prependZeros(date.getSeconds());
   const time =
     hour > 12
-      ? `${hour - 12}:${minute} :${second} PM`
-      : `${hour}:${minute}:${second}`;
+      ? `${hour - 12}:${minute}:${second} PM`
+      : `${hour}:${minute}:${second} AM`;
   return time;
 }
 
@@ -41,7 +55,7 @@ export function dateToInputDateTime(dateObj) {
   return `${year}-${month}-${day}T${hour}:${minute}:${second}`;
 }
 
-export function getRRuleDayConstants(dayString, i18n) {
+export function getRRuleDayConstants(dayString) {
   switch (dayString) {
     case 'sunday':
       return RRule.SU;
@@ -72,6 +86,6 @@ export function getRRuleDayConstants(dayString, i18n) {
     case 'weekendDay':
       return [RRule.SA, RRule.SU];
     default:
-      throw new Error(i18n._(t`Unrecognized day string`));
+      throw new Error(t`Unrecognized day string`);
   }
 }

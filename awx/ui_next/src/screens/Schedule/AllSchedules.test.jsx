@@ -3,6 +3,10 @@ import { createMemoryHistory } from 'history';
 import { mountWithContexts } from '../../../testUtils/enzymeHelpers';
 import AllSchedules from './AllSchedules';
 
+jest.mock('react-router-dom', () => ({
+  ...jest.requireActual('react-router-dom'),
+}));
+
 describe('<AllSchedules />', () => {
   let wrapper;
 
@@ -10,7 +14,7 @@ describe('<AllSchedules />', () => {
     wrapper.unmount();
   });
 
-  test('initially renders succesfully', () => {
+  test('initially renders successfully', () => {
     wrapper = mountWithContexts(<AllSchedules />);
   });
 
@@ -30,7 +34,6 @@ describe('<AllSchedules />', () => {
       },
     });
 
-    expect(wrapper.find('Crumb').length).toBe(1);
-    expect(wrapper.find('BreadcrumbHeading').text()).toBe('Schedules');
+    expect(wrapper.find('Title').text()).toBe('Schedules');
   });
 });

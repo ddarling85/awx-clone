@@ -24,7 +24,8 @@
         "instance_groups": "/api/v2/job_templates/7/instance_groups/",
         "slice_workflow_jobs": "/api/v2/job_templates/7/slice_workflow_jobs/",
         "copy": "/api/v2/job_templates/7/copy/",
-        "webhook_receiver": "/api/v2/job_templates/7/github/"
+        "webhook_receiver": "/api/v2/job_templates/7/github/",
+        "webhook_key": "/api/v2/job_templates/7/webhook_key/"
     },
     "summary_fields": {
         "inventory": {
@@ -132,6 +133,12 @@
             "id": "1",
             "name": "Webhook Credential"
 
+        },
+        "execution_environment": {
+            "id": 1,
+            "name": "Default EE",
+            "description": "",
+            "image": "quay.io/ansible/awx-ee"
         }
     },
     "created": "2019-09-30T16:18:34.564820Z",
@@ -176,5 +183,6 @@
     "job_slice_count": 1,
     "webhook_credential": 1,
     "webhook_key": "asertdyuhjkhgfd234567kjgfds",
-    "webhook_service": "github"
+    "webhook_service": "github",
+    "execution_environment": 1
 }

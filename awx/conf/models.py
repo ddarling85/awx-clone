@@ -7,7 +7,7 @@ import json
 # Django
 from django.db import models
 
-# Tower
+# AWX
 from awx.main.models.base import CreatedModifiedModel, prevent_search
 from awx.main.fields import JSONField
 from awx.main.utils import encrypt_field
@@ -18,20 +18,9 @@ __all__ = ['Setting']
 
 class Setting(CreatedModifiedModel):
 
-    key = models.CharField(
-        max_length=255,
-    )
-    value = JSONField(
-        null=True,
-    )
-    user = prevent_search(models.ForeignKey(
-        'auth.User',
-        related_name='settings',
-        default=None,
-        null=True,
-        editable=False,
-        on_delete=models.CASCADE,
-    ))
+    key = models.CharField(max_length=255)
+    value = JSONField(null=True)
+    user = prevent_search(models.ForeignKey('auth.User', related_name='settings', default=None, null=True, editable=False, on_delete=models.CASCADE))
 
     def __str__(self):
         try:
@@ -66,6 +55,7 @@ class Setting(CreatedModifiedModel):
         # field and save again.
         if encrypted and new_instance:
             from awx.main.signals import disable_activity_stream
+
             with disable_activity_stream():
                 self.value = self._saved_value
                 self.save(update_fields=['value'])
@@ -78,18 +68,11 @@ class Setting(CreatedModifiedModel):
     def get_cache_id_key(self, key):
         return '{}_ID'.format(key)
 
-    def display_value(self):
-        if self.key == 'LICENSE' and 'license_key' in self.value:
-            # don't log the license key in activity stream
-            value = self.value.copy()
-            value['license_key'] = '********'
-            return value
-        return self.value
-
 
 import awx.conf.signals  # noqa
 
 from awx.main.registrar import activity_stream_registrar  # noqa
+
 activity_stream_registrar.connect(Setting)
 
 import awx.conf.access  # noqa

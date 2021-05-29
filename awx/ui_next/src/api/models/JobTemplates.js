@@ -10,17 +10,23 @@ class JobTemplates extends SchedulesMixin(
     super(http);
     this.baseUrl = '/api/v2/job_templates/';
 
+    this.createSchedule = this.createSchedule.bind(this);
     this.launch = this.launch.bind(this);
     this.readLaunch = this.readLaunch.bind(this);
     this.associateLabel = this.associateLabel.bind(this);
     this.disassociateLabel = this.disassociateLabel.bind(this);
     this.readCredentials = this.readCredentials.bind(this);
     this.readAccessList = this.readAccessList.bind(this);
+    this.readAccessOptions = this.readAccessOptions.bind(this);
     this.readWebhookKey = this.readWebhookKey.bind(this);
   }
 
   launch(id, data) {
     return this.http.post(`${this.baseUrl}${id}/launch/`, data);
+  }
+
+  readTemplateOptions(id) {
+    return this.http.options(`${this.baseUrl}${id}/`);
   }
 
   readLaunch(id) {
@@ -64,6 +70,10 @@ class JobTemplates extends SchedulesMixin(
     return this.http.get(`${this.baseUrl}${id}/access_list/`, {
       params,
     });
+  }
+
+  readAccessOptions(id) {
+    return this.http.options(`${this.baseUrl}${id}/access_list/`);
   }
 
   readScheduleList(id, params) {

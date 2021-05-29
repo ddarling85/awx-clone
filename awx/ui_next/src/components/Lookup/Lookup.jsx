@@ -14,10 +14,10 @@ import {
   Button,
   ButtonVariant,
   Chip,
-  InputGroup as PFInputGroup,
+  InputGroup,
   Modal,
 } from '@patternfly/react-core';
-import { withI18n } from '@lingui/react';
+
 import { t } from '@lingui/macro';
 import styled from 'styled-components';
 import ChipGroup from '../ChipGroup';
@@ -25,31 +25,11 @@ import ChipGroup from '../ChipGroup';
 import reducer, { initReducer } from './shared/reducer';
 import { QSConfig } from '../../types';
 
-const SearchButton = styled(Button)`
-  ::after {
-    border: var(--pf-c-button--BorderWidth) solid
-      var(--pf-global--BorderColor--200);
-  }
-`;
-SearchButton.displayName = 'SearchButton';
-
-const InputGroup = styled(PFInputGroup)`
-  ${props =>
-    props.multiple &&
-    `
-    --pf-c-form-control--Height: 90px;
-    overflow-y: auto;
-  `}
-`;
-
 const ChipHolder = styled.div`
-  --pf-c-form-control--BorderTopColor: var(--pf-global--BorderColor--200);
-  --pf-c-form-control--BorderRightColor: var(--pf-global--BorderColor--200);
   --pf-c-form-control--Height: auto;
-  border-top-right-radius: 3px;
-  border-bottom-right-radius: 3px;
+  background-color: ${props =>
+    props.isDisabled ? 'var(--pf-global--disabled-color--300)' : null};
 `;
-
 function Lookup(props) {
   const {
     id,
@@ -64,7 +44,8 @@ function Lookup(props) {
     renderItemChip,
     renderOptionsList,
     history,
-    i18n,
+
+    isDisabled,
   } = props;
 
   const [state, dispatch] = useReducer(
@@ -110,7 +91,8 @@ function Lookup(props) {
   };
 
   const { isModalOpen, selectedItems } = state;
-  const canDelete = !required || (multiple && value.length > 1);
+  const canDelete =
+    (!required || (multiple && value.length > 1)) && !isDisabled;
   let items = [];
   if (multiple) {
     items = value;
@@ -120,16 +102,16 @@ function Lookup(props) {
   return (
     <Fragment>
       <InputGroup onBlur={onBlur}>
-        <SearchButton
-          aria-label="Search"
+        <Button
+          aria-label={t`Search`}
           id={id}
           onClick={() => dispatch({ type: 'TOGGLE_MODAL' })}
-          variant={ButtonVariant.tertiary}
-          isDisabled={isLoading}
+          variant={ButtonVariant.control}
+          isDisabled={isLoading || isDisabled}
         >
           <SearchIcon />
-        </SearchButton>
-        <ChipHolder className="pf-c-form-control">
+        </Button>
+        <ChipHolder isDisabled={isDisabled} className="pf-c-form-control">
           <ChipGroup numChips={5} totalChips={items.length}>
             {items.map(item =>
               renderItemChip({
@@ -141,23 +123,31 @@ function Lookup(props) {
           </ChipGroup>
         </ChipHolder>
       </InputGroup>
+
       <Modal
-        isFooterLeftAligned
-        isLarge
-        title={i18n._(t`Select ${header || i18n._(t`Items`)}`)}
+        variant="large"
+        title={t`Select ${header || t`Items`}`}
+        aria-label={t`Lookup modal`}
         isOpen={isModalOpen}
         onClose={closeModal}
         actions={[
           <Button
+            ouiaId="modal-select-button"
             key="select"
             variant="primary"
             onClick={save}
             isDisabled={required && selectedItems.length === 0}
           >
-            {i18n._(t`Select`)}
+            {t`Select`}
           </Button>,
-          <Button key="cancel" variant="secondary" onClick={closeModal}>
-            {i18n._(t`Cancel`)}
+          <Button
+            ouiaId="modal-cancel-button"
+            key="cancel"
+            variant="link"
+            onClick={closeModal}
+            aria-label={t`Cancel lookup`}
+          >
+            {t`Cancel`}
           </Button>,
         ]}
       >
@@ -207,4 +197,4 @@ Lookup.defaultProps = {
 };
 
 export { Lookup as _Lookup };
-export default withI18n()(withRouter(Lookup));
+export default withRouter(Lookup);

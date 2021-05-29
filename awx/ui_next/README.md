@@ -1,27 +1,41 @@
 # AWX-PF
 
 ## Requirements
-- node 10.x LTS, npm 6.x LTS, make, git
+- node 14.x LTS, npm 6.x LTS, make, git
 
 ## Development
 The API development server will need to be running. See [CONTRIBUTING.md](../../CONTRIBUTING.md).
 
 ```shell
+# install
+npm --prefix=awx/ui_next install
+
 # Start the ui development server. While running, the ui will be reachable
-# at https://127.0.01:3001 and updated automatically when code changes.
+# at https://127.0.0.1:3001 and updated automatically when code changes.
 npm --prefix=awx/ui_next start
+```
+
+### Build for the Development Containers
+If you just want to build a ui for the container-based awx development
+environment, use these make targets:
+
+```shell
+# The ui will be reachable at https://localhost:8043 or
+# http://localhost:8013
+make ui-devel 
+
+# clean up 
+make clean-ui
 ```
 
 ### Using an External Server
 If you normally run awx on an external host/server (in this example, `awx.local`),
-you'll need to update your django settings and use the `TARGET_HOST` and `TARGET_PORT` environment variables:
+you'll need use the `TARGET` environment variable when starting the ui development
+server:
 
 ```shell
-echo "CSRF_TRUSTED_ORIGINS = ['awx.local:8043']" >> /awx/settings/development.py
-TARGET_HOST='awx.local:8043' TARGET_PORT=8043 npm --prefix awx/ui_next start
+TARGET='https://awx.local:8043' npm --prefix awx/ui_next start
 ```
-**Note:** When using an external server, you must also manually update the `proxy` field in `package.json`
-to point to the new websocket url.
 
 ## Testing
 ```shell
@@ -39,32 +53,48 @@ npm --prefix awx/ui_next test -- src/screens/Login/Login.test.jsx
 
 # start the test watcher and run tests on files that you've changed
 npm --prefix awx/ui_next run test-watch
+
+# start the tests and get the coverage report after the tests have completed
+npm --prefix awx/ui_next run test -- --coverage
 ```
 #### Note:
 - Once the test watcher is up and running you can hit `a` to run all the tests.
 - All commands are run on your host machine and not in the api development containers.
 
 
-## Adding Dependencies
+## Updating Dependencies
+It is not uncommon to run the ui development tooling outside of the awx development
+container. That said, dependencies should always be modified from within the
+container to ensure consistency.
+
 ```shell
-# add an exact development or build dependency
-npm --prefix awx/ui_next install --save-dev --save-exact dev-package@1.2.3
+# make sure the awx development container is running and open a shell
+docker exec -it tools_awx_1 bash
+
+# start with a fresh install of the current dependencies
+(tools_awx_1)$ make clean-ui && npm --prefix=awx/ui_next ci
+
+# add an exact development dependency
+(tools_awx_1)$ npm --prefix awx/ui_next install --save-dev --save-exact dev-package@1.2.3
 
 # add an exact production dependency
-npm --prefix awx/ui_next install --save --save-exact prod-package@1.23
+(tools_awx_1)$ npm --prefix awx/ui_next install --save --save-exact prod-package@1.23
+
+# remove a development dependency
+(tools_awx_1)$ npm --prefix awx/ui_next uninstall --save-dev dev-package
+
+# remove a production dependency
+(tools_awx_1)$ npm --prefix awx/ui_next uninstall --save prod-package
+
+# exit the container
+(tools_awx_1)$ exit
 
 # add the updated package.json and package-lock.json files to scm
 git add awx/ui_next_next/package.json awx/ui_next_next/package-lock.json
 ```
-
-## Removing Dependencies
-```shell
-# remove a development or build dependency
-npm --prefix awx/ui_next uninstall --save-dev dev-package
-
-# remove a production dependency
-npm --prefix awx/ui_next uninstall --save prod-package
-```
+#### Note:
+- Building the ui can use up a lot of resources. If you're running docker for mac or similar
+virtualization, the default memory limit may not be enough and you should increase it.
 
 ## Building for Production
 ```shell
@@ -79,7 +109,7 @@ To run:
 ```shell
 cd awx/awx/ui_next
 docker build -t awx-ui-next .
-docker run --name tools_ui_next_1 --network tools_default --link 'tools_awx_1:awx' -e TARGET_HOST=awx -p '3001:3001' --rm -v $(pwd)/src:/ui_next/src awx-ui-next
+docker run --name tools_ui_next_1 --network tools_default --link 'tools_awx_1:awx' -e TARGET="https://awx:8043" -p '3001:3001' --rm -v $(pwd)/src:/ui_next/src awx-ui-next
 ```
 
-**Note:** This is for CI, test systems, zuul, etc. For local development, see [usage](https://github.com/ansible/awx/blob/devel/awx/ui_next/README.md#usage)
+**Note:** This is for CI, test systems, zuul, etc. For local development, see [usage](https://github.com/ansible/awx/blob/devel/awx/ui_next/README.md#Development)

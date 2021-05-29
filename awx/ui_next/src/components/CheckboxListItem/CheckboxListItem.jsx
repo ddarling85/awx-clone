@@ -1,59 +1,58 @@
 import React from 'react';
 import PropTypes from 'prop-types';
-import {
-  DataListItem,
-  DataListItemRow,
-  DataListItemCells,
-  DataListCheck,
-  Radio,
-} from '@patternfly/react-core';
-import DataListCell from '../DataListCell';
+import { t } from '@lingui/macro';
+import { Td, Tr } from '@patternfly/react-table';
 
 const CheckboxListItem = ({
-  isDisabled = false,
   isRadio = false,
   isSelected = false,
   itemId,
   label,
   name,
   onDeselect,
+  rowIndex,
   onSelect,
+  columns,
+  item,
 }) => {
-  const CheckboxRadio = isRadio ? Radio : DataListCheck;
+  const handleRowClick = () => {
+    if (isSelected && !isRadio) {
+      onDeselect(itemId);
+    } else {
+      onSelect(itemId);
+    }
+  };
 
   return (
-    <DataListItem
-      key={itemId}
-      aria-labelledby={`check-action-item-${itemId}`}
-      id={`${itemId}`}
+    <Tr
+      ouiaId={`list-item-${itemId}`}
+      id={`list-item-${itemId}`}
+      onClick={handleRowClick}
     >
-      <DataListItemRow>
-        <CheckboxRadio
-          aria-label={`check-action-item-${itemId}`}
-          aria-labelledby={`check-action-item-${itemId}`}
-          checked={isSelected}
-          disabled={isDisabled}
-          id={`selected-${itemId}`}
-          isChecked={isSelected}
-          name={name}
-          onChange={isSelected ? onDeselect : onSelect}
-          value={itemId}
-        />
-        <DataListItemCells
-          dataListCells={[
-            <DataListCell key="name">
-              <label
-                id={`check-action-item-${itemId}`}
-                htmlFor={`selected-${itemId}`}
-                className="check-action-item"
-              >
-                <b>{label}</b>
-              </label>
-            </DataListCell>,
-          ]}
-        />
-      </DataListItemRow>
-    </DataListItem>
+      <Td
+        id={`check-action-item-${itemId}`}
+        select={{
+          rowIndex,
+          isSelected,
+          onSelect: isSelected ? onDeselect : onSelect,
+          variant: isRadio ? 'radio' : 'checkbox',
+        }}
+        name={name}
+        dataLabel={t`Selected`}
+      />
+
+      {columns?.length > 0 ? (
+        columns.map(col => (
+          <Td aria-label={col.name} dataLabel={col.key}>
+            {item[col.key]}
+          </Td>
+        ))
+      ) : (
+        <Td aria-labelledby={itemId} dataLabel={label}>
+          <b>{label}</b>
+        </Td>
+      )}
+    </Tr>
   );
 };
 

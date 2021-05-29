@@ -1,0 +1,206 @@
+import 'styled-components/macro';
+import React, { Fragment } from 'react';
+import PropTypes from 'prop-types';
+import { TableComposable, Tbody } from '@patternfly/react-table';
+
+import { t } from '@lingui/macro';
+import { useHistory } from 'react-router-dom';
+
+import ListHeader from '../ListHeader';
+import ContentEmpty from '../ContentEmpty';
+import ContentError from '../ContentError';
+import ContentLoading from '../ContentLoading';
+import Pagination from '../Pagination';
+import DataListToolbar from '../DataListToolbar';
+import LoadingSpinner from '../LoadingSpinner';
+
+import {
+  encodeNonDefaultQueryString,
+  parseQueryString,
+  replaceParams,
+} from '../../util/qs';
+import { QSConfig, SearchColumns } from '../../types';
+
+function PaginatedTable({
+  contentError,
+  hasContentLoading,
+  emptyStateControls,
+  items,
+  itemCount,
+  qsConfig,
+  headerRow,
+  renderRow,
+  toolbarSearchColumns,
+  toolbarSearchableKeys,
+  toolbarRelatedSearchableKeys,
+  pluralizedItemName,
+  showPageSizeOptions,
+  renderToolbar,
+  emptyContentMessage,
+  ouiaId,
+}) {
+  const history = useHistory();
+
+  const pushHistoryState = params => {
+    const { pathname, search } = history.location;
+    const nonNamespacedParams = parseQueryString({}, search);
+    const encodedParams = encodeNonDefaultQueryString(
+      qsConfig,
+      params,
+      nonNamespacedParams
+    );
+    history.push(encodedParams ? `${pathname}?${encodedParams}` : pathname);
+  };
+
+  const handleSetPage = (event, pageNumber) => {
+    const oldParams = parseQueryString(qsConfig, history.location.search);
+    pushHistoryState(replaceParams(oldParams, { page: pageNumber }));
+  };
+
+  const handleSetPageSize = (event, pageSize, page) => {
+    const oldParams = parseQueryString(qsConfig, history.location.search);
+    pushHistoryState(replaceParams(oldParams, { page_size: pageSize, page }));
+  };
+
+  const searchColumns = toolbarSearchColumns.length
+    ? toolbarSearchColumns
+    : [
+        {
+          name: t`Name`,
+          key: 'name',
+          isDefault: true,
+        },
+      ];
+  const queryParams = parseQueryString(qsConfig, history.location.search);
+
+  const dataListLabel = t`${pluralizedItemName} List`;
+  const emptyContentTitle = t`No ${pluralizedItemName} Found `;
+
+  let Content;
+  if (hasContentLoading && items.length <= 0) {
+    Content = <ContentLoading />;
+  } else if (contentError) {
+    Content = <ContentError error={contentError} />;
+  } else if (items.length <= 0) {
+    Content = (
+      <ContentEmpty
+        title={emptyContentTitle}
+        message={
+          emptyContentMessage ||
+          t`Please add ${pluralizedItemName} to populate this list `
+        }
+      />
+    );
+  } else {
+    Content = (
+      <div css="overflow: auto">
+        {hasContentLoading && <LoadingSpinner />}
+        <TableComposable
+          aria-label={dataListLabel}
+          ouiaId={ouiaId || `paginated-table-${pluralizedItemName}`}
+        >
+          {headerRow}
+          <Tbody>{items.map(renderRow)}</Tbody>
+        </TableComposable>
+      </div>
+    );
+  }
+
+  const ToolbarPagination = (
+    <Pagination
+      isCompact
+      dropDirection="down"
+      itemCount={itemCount}
+      page={queryParams.page || 1}
+      perPage={queryParams.page_size}
+      perPageOptions={
+        showPageSizeOptions
+          ? [
+              { title: '5', value: 5 },
+              { title: '10', value: 10 },
+              { title: '20', value: 20 },
+              { title: '50', value: 50 },
+            ]
+          : []
+      }
+      onSetPage={handleSetPage}
+      onPerPageSelect={handleSetPageSize}
+      titles={{
+        paginationTitle: t`Top Pagination`,
+      }}
+    />
+  );
+
+  return (
+    <Fragment>
+      <ListHeader
+        itemCount={itemCount}
+        renderToolbar={renderToolbar}
+        emptyStateControls={emptyStateControls}
+        searchColumns={searchColumns}
+        searchableKeys={toolbarSearchableKeys}
+        relatedSearchableKeys={toolbarRelatedSearchableKeys}
+        qsConfig={qsConfig}
+        pagination={ToolbarPagination}
+      />
+      {Content}
+      {items.length ? (
+        <Pagination
+          variant="bottom"
+          itemCount={itemCount}
+          page={queryParams.page || 1}
+          perPage={queryParams.page_size}
+          perPageOptions={
+            showPageSizeOptions
+              ? [
+                  { title: '5', value: 5 },
+                  { title: '10', value: 10 },
+                  { title: '20', value: 20 },
+                  { title: '50', value: 50 },
+                ]
+              : []
+          }
+          onSetPage={handleSetPage}
+          onPerPageSelect={handleSetPageSize}
+        />
+      ) : null}
+    </Fragment>
+  );
+}
+
+const Item = PropTypes.shape({
+  id: PropTypes.number.isRequired,
+  url: PropTypes.string.isRequired,
+  name: PropTypes.string,
+});
+
+PaginatedTable.propTypes = {
+  items: PropTypes.arrayOf(Item).isRequired,
+  itemCount: PropTypes.number.isRequired,
+  pluralizedItemName: PropTypes.string,
+  qsConfig: QSConfig.isRequired,
+  renderRow: PropTypes.func.isRequired,
+  toolbarSearchColumns: SearchColumns,
+  toolbarSearchableKeys: PropTypes.arrayOf(PropTypes.string),
+  toolbarRelatedSearchableKeys: PropTypes.arrayOf(PropTypes.string),
+  showPageSizeOptions: PropTypes.bool,
+  renderToolbar: PropTypes.func,
+  hasContentLoading: PropTypes.bool,
+  contentError: PropTypes.shape(),
+  ouiaId: PropTypes.string,
+};
+
+PaginatedTable.defaultProps = {
+  hasContentLoading: false,
+  contentError: null,
+  toolbarSearchColumns: [],
+  toolbarSearchableKeys: [],
+  toolbarRelatedSearchableKeys: [],
+  pluralizedItemName: 'Items',
+  showPageSizeOptions: true,
+  renderToolbar: props => <DataListToolbar {...props} />,
+  ouiaId: null,
+};
+
+export { PaginatedTable as _PaginatedTable };
+export default PaginatedTable;

@@ -40,12 +40,18 @@ class HasStatus(object):
         if not getattr(self, 'event_processing_finished', True):
             elapsed = datetime.utcnow() - start_time
             time_left = timeout - elapsed.total_seconds()
-            poll_until(lambda: getattr(self.get(), 'event_processing_finished', True),
-                       interval=interval, timeout=time_left, **kwargs)
+            poll_until(lambda: getattr(self.get(), 'event_processing_finished', True), interval=interval, timeout=time_left, **kwargs)
         return self
 
     def wait_until_started(self, interval=1, timeout=60):
         return self.wait_until_status(self.started_statuses, interval=interval, timeout=timeout)
+
+    def failure_output_details(self):
+        if getattr(self, 'result_stdout', ''):
+            output = bytes_to_str(self.result_stdout)
+            if output:
+                return '\nstdout:\n{}'.format(output)
+        return ''
 
     def assert_status(self, status_list, msg=None):
         if isinstance(status_list, str):
@@ -58,25 +64,20 @@ class HasStatus(object):
             msg = ''
         else:
             msg += '\n'
-        msg += '{0}-{1} has status of {2}, which is not in {3}.'.format(
-            self.type.title(), self.id, self.status, status_list
-        )
+        msg += '{0}-{1} has status of {2}, which is not in {3}.'.format(self.type.title(), self.id, self.status, status_list)
         if getattr(self, 'job_explanation', ''):
             msg += '\njob_explanation: {}'.format(bytes_to_str(self.job_explanation))
         if getattr(self, 'result_traceback', ''):
             msg += '\nresult_traceback:\n{}'.format(bytes_to_str(self.result_traceback))
-        if getattr(self, 'result_stdout', ''):
-            output = bytes_to_str(self.result_stdout)
-            if output:
-                msg = msg + '\nstdout:\n{}'.format(output)
+
+        msg += self.failure_output_details()
+
         if getattr(self, 'job_explanation', '').startswith('Previous Task Failed'):
             try:
                 data = json.loads(self.job_explanation.replace('Previous Task Failed: ', ''))
                 dep_output = self.connection.get(
-                    '{0}/api/v2/{1}s/{2}/stdout/'.format(
-                        self.endpoint.split('/api')[0], data['job_type'], data['job_id']
-                    ),
-                    query_parameters=dict(format='txt_download')
+                    '{0}/api/v2/{1}s/{2}/stdout/'.format(self.endpoint.split('/api')[0], data['job_type'], data['job_id']),
+                    query_parameters=dict(format='txt_download'),
                 ).content
                 msg += '\nDependency output:\n{}'.format(bytes_to_str(dep_output))
             except Exception as e:

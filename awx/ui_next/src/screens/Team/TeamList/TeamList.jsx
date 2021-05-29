@@ -1,6 +1,6 @@
 import React, { Fragment, useState, useEffect, useCallback } from 'react';
 import { useLocation, useRouteMatch } from 'react-router-dom';
-import { withI18n } from '@lingui/react';
+
 import { t } from '@lingui/macro';
 import { Card, PageSection } from '@patternfly/react-core';
 
@@ -9,7 +9,11 @@ import useRequest, { useDeleteItems } from '../../../util/useRequest';
 import AlertModal from '../../../components/AlertModal';
 import DataListToolbar from '../../../components/DataListToolbar';
 import ErrorDetail from '../../../components/ErrorDetail';
-import PaginatedDataList, {
+import PaginatedTable, {
+  HeaderRow,
+  HeaderCell,
+} from '../../../components/PaginatedTable';
+import {
   ToolbarAddButton,
   ToolbarDeleteButton,
 } from '../../../components/PaginatedDataList';
@@ -23,13 +27,19 @@ const QS_CONFIG = getQSConfig('team', {
   order_by: 'name',
 });
 
-function TeamList({ i18n }) {
+function TeamList() {
   const location = useLocation();
   const match = useRouteMatch();
   const [selected, setSelected] = useState([]);
 
   const {
-    result: { teams, itemCount, actions },
+    result: {
+      teams,
+      itemCount,
+      actions,
+      relatedSearchableKeys,
+      searchableKeys,
+    },
     error: contentError,
     isLoading,
     request: fetchTeams,
@@ -44,12 +54,20 @@ function TeamList({ i18n }) {
         teams: response.data.results,
         itemCount: response.data.count,
         actions: actionsResponse.data.actions,
+        relatedSearchableKeys: (
+          actionsResponse?.data?.related_search_fields || []
+        ).map(val => val.slice(0, -8)),
+        searchableKeys: Object.keys(
+          actionsResponse.data.actions?.GET || {}
+        ).filter(key => actionsResponse.data.actions?.GET[key].filterable),
       };
     }, [location]),
     {
       teams: [],
       itemCount: 0,
       actions: {},
+      relatedSearchableKeys: [],
+      searchableKeys: [],
     }
   );
 
@@ -64,7 +82,7 @@ function TeamList({ i18n }) {
     deletionError,
     clearDeletionError,
   } = useDeleteItems(
-    useCallback(async () => {
+    useCallback(() => {
       return Promise.all(selected.map(team => TeamsAPI.destroy(team.id)));
     }, [selected]),
     {
@@ -98,39 +116,46 @@ function TeamList({ i18n }) {
     <Fragment>
       <PageSection>
         <Card>
-          <PaginatedDataList
+          <PaginatedTable
             contentError={contentError}
             hasContentLoading={hasContentLoading}
             items={teams}
             itemCount={itemCount}
-            pluralizedItemName={i18n._(t`Teams`)}
+            pluralizedItemName={t`Teams`}
             qsConfig={QS_CONFIG}
             onRowClick={handleSelect}
             toolbarSearchColumns={[
               {
-                name: i18n._(t`Name`),
-                key: 'name',
+                name: t`Name`,
+                key: 'name__icontains',
                 isDefault: true,
               },
               {
-                name: i18n._(t`Organization Name`),
-                key: 'organization__name',
+                name: t`Description`,
+                key: 'description__icontains',
               },
               {
-                name: i18n._(t`Created By (Username)`),
-                key: 'created_by__username',
+                name: t`Organization Name`,
+                key: 'organization__name__icontains',
               },
               {
-                name: i18n._(t`Modified By (Username)`),
-                key: 'modified_by__username',
+                name: t`Created By (Username)`,
+                key: 'created_by__username__icontains',
+              },
+              {
+                name: t`Modified By (Username)`,
+                key: 'modified_by__username__icontains',
               },
             ]}
-            toolbarSortColumns={[
-              {
-                name: i18n._(t`Name`),
-                key: 'name',
-              },
-            ]}
+            toolbarSearchableKeys={searchableKeys}
+            toolbarRelatedSearchableKeys={relatedSearchableKeys}
+            headerRow={
+              <HeaderRow qsConfig={QS_CONFIG}>
+                <HeaderCell sortKey="name">{t`Name`}</HeaderCell>
+                <HeaderCell>{t`Organization`}</HeaderCell>
+                <HeaderCell>{t`Actions`}</HeaderCell>
+              </HeaderRow>
+            }
             renderToolbar={props => (
               <DataListToolbar
                 {...props}
@@ -151,18 +176,19 @@ function TeamList({ i18n }) {
                     key="delete"
                     onDelete={handleTeamDelete}
                     itemsToDelete={selected}
-                    pluralizedItemName={i18n._(t`Teams`)}
+                    pluralizedItemName={t`Teams`}
                   />,
                 ]}
               />
             )}
-            renderItem={o => (
+            renderRow={(team, index) => (
               <TeamListItem
-                key={o.id}
-                team={o}
-                detailUrl={`${match.url}/${o.id}`}
-                isSelected={selected.some(row => row.id === o.id)}
-                onSelect={() => handleSelect(o)}
+                key={team.id}
+                team={team}
+                detailUrl={`${match.url}/${team.id}`}
+                isSelected={selected.some(row => row.id === team.id)}
+                onSelect={() => handleSelect(team)}
+                rowIndex={index}
               />
             )}
             emptyStateControls={
@@ -176,14 +202,14 @@ function TeamList({ i18n }) {
       <AlertModal
         isOpen={deletionError}
         variant="error"
-        title={i18n._(t`Error!`)}
+        title={t`Error!`}
         onClose={clearDeletionError}
       >
-        {i18n._(t`Failed to delete one or more teams.`)}
+        {t`Failed to delete one or more teams.`}
         <ErrorDetail error={deletionError} />
       </AlertModal>
     </Fragment>
   );
 }
 
-export default withI18n()(TeamList);
+export default TeamList;

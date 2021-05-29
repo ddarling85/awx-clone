@@ -1,33 +1,30 @@
 import React from 'react';
 import { bool, node, string } from 'prop-types';
-import { withI18n } from '@lingui/react';
+
 import { t } from '@lingui/macro';
 import styled from 'styled-components';
-import { CheckboxField, FieldTooltip } from '../FormField';
+import { CheckboxField } from '../FormField';
+import Popover from '../Popover';
 
 const FieldHeader = styled.div`
   display: flex;
-  justify-content: space-between;
-  padding-bottom: var(--pf-c-form__label--PaddingBottom);
-
-  label {
-    --pf-c-form__label--PaddingBottom: 0px;
-  }
+  padding-bottom: var(--pf-c-form__group-label--PaddingBottom);
 `;
 
 const StyledCheckboxField = styled(CheckboxField)`
   --pf-c-check__label--FontSize: var(--pf-c-form__label--FontSize);
+  margin-left: auto;
 `;
 
 function FieldWithPrompt({
   children,
   fieldId,
-  i18n,
   isRequired,
   label,
   promptId,
   promptName,
   tooltip,
+  isDisabled,
 }) {
   return (
     <div className="pf-c-form__group">
@@ -41,11 +38,12 @@ function FieldWithPrompt({
               </span>
             )}
           </label>
-          {tooltip && <FieldTooltip content={tooltip} />}
+          {tooltip && <Popover content={tooltip} id={`${fieldId}-tooltip`} />}
         </div>
         <StyledCheckboxField
+          isDisabled={isDisabled}
           id={promptId}
-          label={i18n._(t`Prompt on launch`)}
+          label={t`Prompt on launch`}
           name={promptName}
         />
       </FieldHeader>
@@ -68,4 +66,4 @@ FieldWithPrompt.defaultProps = {
   tooltip: null,
 };
 
-export default withI18n()(FieldWithPrompt);
+export default FieldWithPrompt;

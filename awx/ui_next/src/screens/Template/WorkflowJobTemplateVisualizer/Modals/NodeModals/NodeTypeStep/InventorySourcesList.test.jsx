@@ -38,6 +38,15 @@ describe('InventorySourcesList', () => {
         ],
       },
     });
+    InventorySourcesAPI.readOptions.mockResolvedValue({
+      data: {
+        actions: {
+          GET: {},
+          POST: {},
+        },
+        related_search_fields: [],
+      },
+    });
     await act(async () => {
       wrapper = mountWithContexts(
         <InventorySourcesList
@@ -57,7 +66,7 @@ describe('InventorySourcesList', () => {
     ).toBe(false);
     wrapper
       .find('CheckboxListItem[name="Test Inventory Source 2"]')
-      .simulate('click');
+      .prop('onSelect')();
     expect(onUpdateNodeResource).toHaveBeenCalledWith({
       id: 2,
       name: 'Test Inventory Source 2',

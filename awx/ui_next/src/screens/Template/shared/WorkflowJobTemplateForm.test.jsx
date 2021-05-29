@@ -11,13 +11,20 @@ import {
   LabelsAPI,
   OrganizationsAPI,
   InventoriesAPI,
+  ProjectsAPI,
+  CredentialTypesAPI,
+  ExecutionEnvironmentsAPI,
+  CredentialsAPI,
 } from '../../../api';
 
-jest.mock('../../../api/models/CredentialTypes');
+jest.mock('../../../api/models/ExecutionEnvironments');
 jest.mock('../../../api/models/WorkflowJobTemplates');
 jest.mock('../../../api/models/Labels');
 jest.mock('../../../api/models/Organizations');
 jest.mock('../../../api/models/Inventories');
+jest.mock('../../../api/models/Projects');
+jest.mock('../../../api/models/CredentialTypes');
+jest.mock('../../../api/models/Credentials');
 
 describe('<WorkflowJobTemplateForm/>', () => {
   let wrapper;
@@ -44,7 +51,9 @@ describe('<WorkflowJobTemplateForm/>', () => {
     related: {
       webhook_receiver: '/api/v2/workflow_job_templates/57/gitlab/',
     },
+    webhook_credential: null,
     webhook_key: 'sdfghjklmnbvcdsew435678iokjhgfd',
+    webhook_service: 'github',
   };
 
   beforeEach(async () => {
@@ -61,13 +70,39 @@ describe('<WorkflowJobTemplateForm/>', () => {
       },
     });
     OrganizationsAPI.read.mockResolvedValue({
-      results: [{ id: 1 }, { id: 2 }],
+      data: {
+        results: [
+          { id: 1, name: 'Organization 1' },
+          { id: 2, name: 'Organization 2' },
+        ],
+      },
     });
     InventoriesAPI.read.mockResolvedValue({
       results: [
         { id: 1, name: 'Foo' },
         { id: 2, name: 'Bar' },
       ],
+    });
+    CredentialTypesAPI.read.mockResolvedValue({
+      data: { results: [{ id: 1 }] },
+    });
+    InventoriesAPI.readOptions.mockResolvedValue({
+      data: { actions: { GET: {}, POST: {} } },
+    });
+    ProjectsAPI.readOptions.mockResolvedValue({
+      data: { actions: { GET: {}, POST: {} } },
+    });
+    ExecutionEnvironmentsAPI.read.mockResolvedValue({
+      data: { results: [] },
+    });
+    ExecutionEnvironmentsAPI.readOptions.mockResolvedValue({
+      data: { actions: { GET: {}, POST: {} } },
+    });
+    CredentialsAPI.read.mockResolvedValue({
+      data: { results: [] },
+    });
+    CredentialsAPI.readOptions.mockResolvedValue({
+      data: { actions: { GET: {}, POST: {} } },
     });
 
     history = createMemoryHistory({
@@ -101,12 +136,45 @@ describe('<WorkflowJobTemplateForm/>', () => {
   });
 
   afterEach(() => {
-    wrapper.unmount();
     jest.clearAllMocks();
   });
 
   test('renders successfully', () => {
     expect(wrapper.length).toBe(1);
+  });
+
+  test('organization is a required field for organization admins', async () => {
+    await act(async () => {
+      wrapper = mountWithContexts(
+        <Route
+          path="/templates/workflow_job_template/:id/edit"
+          component={() => (
+            <WorkflowJobTemplateForm
+              template={mockTemplate}
+              handleCancel={handleCancel}
+              handleSubmit={handleSubmit}
+              isOrgAdmin
+            />
+          )}
+        />,
+        {
+          context: {
+            router: {
+              history,
+              route: {
+                location: history.location,
+                match: { params: { id: 6 } },
+              },
+            },
+          },
+        }
+      );
+    });
+
+    wrapper.update();
+    expect(
+      wrapper.find('FormGroup[label="Organization"]').prop('isRequired')
+    ).toBeTruthy();
   });
 
   test('all the fields render successfully', () => {
@@ -125,6 +193,9 @@ describe('<WorkflowJobTemplateForm/>', () => {
       expect(wrapper.find(`${field}`).length).toBe(1);
     };
     fields.map((field, index) => assertField(field, index));
+    expect(
+      wrapper.find('FormGroup[label="Organization"]').prop('isRequired')
+    ).toBeFalsy();
   });
 
   test('changing inputs should update values', async () => {
@@ -174,22 +245,14 @@ describe('<WorkflowJobTemplateForm/>', () => {
 
   test('test changes in FieldWithPrompt', async () => {
     await act(async () => {
-      wrapper.find('TextInputBase#text-wfjt-scm-branch').prop('onChange')(
-        'main'
-      );
-      wrapper.find('TextInputBase#text-wfjt-limit').prop('onChange')(
-        1234567890
-      );
+      wrapper.find('TextInputBase#wfjt-scm-branch').prop('onChange')('main');
+      wrapper.find('TextInputBase#wfjt-limit').prop('onChange')(1234567890);
     });
 
     wrapper.update();
 
-    expect(wrapper.find('input#text-wfjt-scm-branch').prop('value')).toEqual(
-      'main'
-    );
-    expect(wrapper.find('input#text-wfjt-limit').prop('value')).toEqual(
-      1234567890
-    );
+    expect(wrapper.find('input#wfjt-scm-branch').prop('value')).toEqual('main');
+    expect(wrapper.find('input#wfjt-limit').prop('value')).toEqual(1234567890);
   });
 
   test('webhooks and enable concurrent jobs functions properly', async () => {
@@ -206,10 +269,14 @@ describe('<WorkflowJobTemplateForm/>', () => {
       wrapper.find('Checkbox[aria-label="Enable Webhook"]').prop('isChecked')
     ).toBe(true);
     expect(
-      wrapper.find('input[aria-label="wfjt-webhook-key"]').prop('readOnly')
+      wrapper
+        .find('input[aria-label="workflow job template webhook key"]')
+        .prop('readOnly')
     ).toBe(true);
     expect(
-      wrapper.find('input[aria-label="wfjt-webhook-key"]').prop('value')
+      wrapper
+        .find('input[aria-label="workflow job template webhook key"]')
+        .prop('value')
     ).toBe('sdfghjklmnbvcdsew435678iokjhgfd');
     await act(() =>
       wrapper.find('Button[aria-label="Update webhook key"]').prop('onClick')()
@@ -248,5 +315,9 @@ describe('<WorkflowJobTemplateForm/>', () => {
     });
 
     expect(handleCancel).toBeCalled();
+  });
+
+  test('should not show inventory field as required', () => {
+    expect(wrapper.find('InventoryLookup').prop('required')).toBe(false);
   });
 });

@@ -1,11 +1,11 @@
-import React from 'react';
-import { Formik, useField } from 'formik';
-import { withI18n } from '@lingui/react';
+import React, { useCallback } from 'react';
+import { Formik, useField, useFormikContext } from 'formik';
+
 import { t } from '@lingui/macro';
 import { func, number, shape } from 'prop-types';
 
 import { Form } from '@patternfly/react-core';
-import { VariablesField } from '../../../components/CodeMirrorInput';
+import { VariablesField } from '../../../components/CodeEditor';
 import FormField, { FormSubmitError } from '../../../components/FormField';
 import FormActionGroup from '../../../components/FormActionGroup';
 import { required } from '../../../util/validators';
@@ -17,31 +17,42 @@ import {
   FormFullWidthLayout,
 } from '../../../components/FormLayout';
 
-function InventoryFormFields({ i18n, credentialTypeId }) {
+function InventoryFormFields({ credentialTypeId, inventory }) {
+  const { setFieldValue } = useFormikContext();
   const [organizationField, organizationMeta, organizationHelpers] = useField({
     name: 'organization',
-    validate: required(i18n._(t`Select a value for this field`), i18n),
+    validate: required(t`Select a value for this field`),
   });
-  const instanceGroupsFieldArr = useField('instanceGroups');
-  const instanceGroupsField = instanceGroupsFieldArr[0];
-  const instanceGroupsHelpers = instanceGroupsFieldArr[2];
+  const [instanceGroupsField, , instanceGroupsHelpers] = useField(
+    'instanceGroups'
+  );
+  const [insightsCredentialField] = useField('insights_credential');
+  const onOrganizationChange = useCallback(
+    value => {
+      setFieldValue('organization', value);
+    },
+    [setFieldValue]
+  );
+  const onCredentialChange = useCallback(
+    value => {
+      setFieldValue('insights_credential', value);
+    },
+    [setFieldValue]
+  );
 
-  const insightsCredentialFieldArr = useField('insights_credential');
-  const insightsCredentialField = insightsCredentialFieldArr[0];
-  const insightsCredentialHelpers = insightsCredentialFieldArr[2];
   return (
     <>
       <FormField
         id="inventory-name"
-        label={i18n._(t`Name`)}
+        label={t`Name`}
         name="name"
         type="text"
-        validate={required(null, i18n)}
+        validate={required(null)}
         isRequired
       />
       <FormField
         id="inventory-description"
-        label={i18n._(t`Description`)}
+        label={t`Description`}
         name="description"
         type="text"
       />
@@ -49,18 +60,17 @@ function InventoryFormFields({ i18n, credentialTypeId }) {
         helperTextInvalid={organizationMeta.error}
         isValid={!organizationMeta.touched || !organizationMeta.error}
         onBlur={() => organizationHelpers.setTouched()}
-        onChange={value => {
-          organizationHelpers.setValue(value);
-        }}
+        onChange={onOrganizationChange}
         value={organizationField.value}
         touched={organizationMeta.touched}
         error={organizationMeta.error}
         required
+        autoPopulate={!inventory?.id}
       />
       <CredentialLookup
-        label={i18n._(t`Insights Credential`)}
+        label={t`Insights Credential`}
         credentialTypeId={credentialTypeId}
-        onChange={value => insightsCredentialHelpers.setValue(value)}
+        onChange={onCredentialChange}
         value={insightsCredentialField.value}
       />
       <InstanceGroupsLookup
@@ -71,12 +81,10 @@ function InventoryFormFields({ i18n, credentialTypeId }) {
       />
       <FormFullWidthLayout>
         <VariablesField
-          tooltip={i18n._(
-            t`Enter inventory variables using either JSON or YAML syntax. Use the radio button to toggle between the two. Refer to the Ansible Tower documentation for example syntax`
-          )}
+          tooltip={t`Enter inventory variables using either JSON or YAML syntax. Use the radio button to toggle between the two. Refer to the Ansible Tower documentation for example syntax`}
           id="inventory-variables"
           name="variables"
-          label={i18n._(t`Variables`)}
+          label={t`Variables`}
         />
       </FormFullWidthLayout>
     </>
@@ -115,7 +123,7 @@ function InventoryForm({
       {formik => (
         <Form autoComplete="off" onSubmit={formik.handleSubmit}>
           <FormColumnLayout>
-            <InventoryFormFields {...rest} />
+            <InventoryFormFields {...rest} inventory={inventory} />
             <FormSubmitError error={submitError} />
             <FormActionGroup
               onCancel={onCancel}
@@ -128,7 +136,7 @@ function InventoryForm({
   );
 }
 
-InventoryForm.proptype = {
+InventoryForm.propType = {
   handleSubmit: func.isRequired,
   handleCancel: func.isRequired,
   instanceGroups: shape(),
@@ -143,4 +151,4 @@ InventoryForm.defaultProps = {
   submitError: null,
 };
 
-export default withI18n()(InventoryForm);
+export default InventoryForm;

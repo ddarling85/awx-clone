@@ -5,16 +5,14 @@ from __future__ import absolute_import, unicode_literals
 from django.conf import settings
 from django.conf.urls import include, url
 
-from awx.api.generics import (
-    LoggedLoginView,
-    LoggedLogoutView,
-)
+from awx.api.generics import LoggedLoginView, LoggedLogoutView
 from awx.api.views import (
     ApiRootView,
     ApiV2RootView,
     ApiV2PingView,
     ApiV2ConfigView,
     ApiV2SubscriptionView,
+    ApiV2AttachView,
     AuthView,
     UserMeList,
     DashboardView,
@@ -32,21 +30,19 @@ from awx.api.views import (
     OAuth2ApplicationDetail,
 )
 
-from awx.api.views.metrics import (
-    MetricsView,
-)
+from awx.api.views.metrics import MetricsView
 
 from .organization import urls as organization_urls
 from .user import urls as user_urls
 from .project import urls as project_urls
 from .project_update import urls as project_update_urls
 from .inventory import urls as inventory_urls
+from .execution_environments import urls as execution_environment_urls
 from .team import urls as team_urls
 from .host import urls as host_urls
 from .group import urls as group_urls
 from .inventory_source import urls as inventory_source_urls
 from .inventory_update import urls as inventory_update_urls
-from .inventory_script import urls as inventory_script_urls
 from .credential_type import urls as credential_type_urls
 from .credential import urls as credential_urls
 from .credential_input_source import urls as credential_input_source_urls
@@ -94,6 +90,7 @@ v2_urls = [
     url(r'^ping/$', ApiV2PingView.as_view(), name='api_v2_ping_view'),
     url(r'^config/$', ApiV2ConfigView.as_view(), name='api_v2_config_view'),
     url(r'^config/subscriptions/$', ApiV2SubscriptionView.as_view(), name='api_v2_subscription_view'),
+    url(r'^config/attach/$', ApiV2AttachView.as_view(), name='api_v2_attach_view'),
     url(r'^auth/$', AuthView.as_view()),
     url(r'^me/$', UserMeList.as_view(), name='user_me_list'),
     url(r'^dashboard/$', DashboardView.as_view(), name='dashboard_view'),
@@ -104,6 +101,7 @@ v2_urls = [
     url(r'^schedules/', include(schedule_urls)),
     url(r'^organizations/', include(organization_urls)),
     url(r'^users/', include(user_urls)),
+    url(r'^execution_environments/', include(execution_environment_urls)),
     url(r'^projects/', include(project_urls)),
     url(r'^project_updates/', include(project_update_urls)),
     url(r'^teams/', include(team_urls)),
@@ -112,7 +110,6 @@ v2_urls = [
     url(r'^groups/', include(group_urls)),
     url(r'^inventory_sources/', include(inventory_source_urls)),
     url(r'^inventory_updates/', include(inventory_update_urls)),
-    url(r'^inventory_scripts/', include(inventory_script_urls)),
     url(r'^credentials/', include(credential_urls)),
     url(r'^roles/', include(role_urls)),
     url(r'^job_templates/', include(job_template_urls)),
@@ -142,17 +139,11 @@ app_name = 'api'
 urlpatterns = [
     url(r'^$', ApiRootView.as_view(), name='api_root_view'),
     url(r'^(?P<version>(v2))/', include(v2_urls)),
-    url(r'^login/$', LoggedLoginView.as_view(
-        template_name='rest_framework/login.html',
-        extra_context={'inside_login_context': True}
-    ), name='login'),
-    url(r'^logout/$', LoggedLogoutView.as_view(
-        next_page='/api/', redirect_field_name='next'
-    ), name='logout'),
+    url(r'^login/$', LoggedLoginView.as_view(template_name='rest_framework/login.html', extra_context={'inside_login_context': True}), name='login'),
+    url(r'^logout/$', LoggedLogoutView.as_view(next_page='/api/', redirect_field_name='next'), name='logout'),
     url(r'^o/', include(oauth2_root_urls)),
 ]
 if settings.SETTINGS_MODULE == 'awx.settings.development':
     from awx.api.swagger import SwaggerSchemaView
-    urlpatterns += [
-        url(r'^swagger/$', SwaggerSchemaView.as_view(), name='swagger_view'),
-    ]
+
+    urlpatterns += [url(r'^swagger/$', SwaggerSchemaView.as_view(), name='swagger_view')]

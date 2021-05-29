@@ -34,7 +34,7 @@ describe('<WebhookSubForm />', () => {
       wrapper = mountWithContexts(
         <Route path="templates/:templateType/:id/edit">
           <Formik initialValues={initialValues}>
-            <WebhookSubForm enableWebhooks templateType="job_template" />
+            <WebhookSubForm templateType="job_template" />
           </Formik>
         </Route>,
         {
@@ -65,7 +65,9 @@ describe('<WebhookSubForm />', () => {
       wrapper.find('TextInputBase[aria-label="Webhook URL"]').prop('value')
     ).toContain('/api/v2/job_templates/51/github/');
     expect(
-      wrapper.find('TextInputBase[aria-label="wfjt-webhook-key"]').prop('value')
+      wrapper
+        .find('TextInputBase[aria-label="workflow job template webhook key"]')
+        .prop('value')
     ).toBe('webhook key');
     expect(
       wrapper
@@ -89,7 +91,9 @@ describe('<WebhookSubForm />', () => {
       wrapper.find('TextInputBase[aria-label="Webhook URL"]').prop('value')
     ).toContain('/api/v2/job_templates/51/gitlab/');
     expect(
-      wrapper.find('TextInputBase[aria-label="wfjt-webhook-key"]').prop('value')
+      wrapper
+        .find('TextInputBase[aria-label="workflow job template webhook key"]')
+        .prop('value')
     ).toBe('A NEW WEBHOOK KEY WILL BE GENERATED ON SAVE.');
   });
   test('should have disabled button to update webhook key', async () => {
@@ -103,7 +107,7 @@ describe('<WebhookSubForm />', () => {
               webhook_key: 'A NEW WEBHOOK KEY WILL BE GENERATED ON SAVE.',
             }}
           >
-            <WebhookSubForm enableWebhooks templateType="job_template" />
+            <WebhookSubForm templateType="job_template" />
           </Formik>
         </Route>,
         {
@@ -133,10 +137,7 @@ describe('<WebhookSubForm />', () => {
       newWrapper = mountWithContexts(
         <Route path="templates/:templateType/:id/edit">
           <Formik initialValues={{ ...initialValues, webhook_url }}>
-            <WebhookSubForm
-              enableWebhooks
-              templateType="workflow_job_template"
-            />
+            <WebhookSubForm templateType="workflow_job_template" />
           </Formik>
         </Route>,
         {

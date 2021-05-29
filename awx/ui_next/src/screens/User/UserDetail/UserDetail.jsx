@@ -1,9 +1,9 @@
 import React, { useCallback } from 'react';
 import { Link, useHistory } from 'react-router-dom';
-import { withI18n } from '@lingui/react';
+
 import { t } from '@lingui/macro';
 
-import { Button } from '@patternfly/react-core';
+import { Button, Label } from '@patternfly/react-core';
 import AlertModal from '../../../components/AlertModal';
 import { CardBody, CardActionsRow } from '../../../components/Card';
 import DeleteButton from '../../../components/DeleteButton';
@@ -13,7 +13,7 @@ import { formatDateString } from '../../../util/dates';
 import { UsersAPI } from '../../../api';
 import useRequest, { useDismissableError } from '../../../util/useRequest';
 
-function UserDetail({ user, i18n }) {
+function UserDetail({ user }) {
   const {
     id,
     username,
@@ -39,53 +39,64 @@ function UserDetail({ user, i18n }) {
 
   let user_type;
   if (is_superuser) {
-    user_type = i18n._(t`System Administrator`);
+    user_type = t`System Administrator`;
   } else if (is_system_auditor) {
-    user_type = i18n._(t`System Auditor`);
+    user_type = t`System Auditor`;
   } else {
-    user_type = i18n._(t`Normal User`);
+    user_type = t`Normal User`;
+  }
+
+  let userAuthType;
+  if (user.ldap_dn) {
+    userAuthType = t`LDAP`;
+  } else if (user.auth.length > 0) {
+    userAuthType = t`SOCIAL`;
   }
 
   return (
     <CardBody>
       <DetailList>
         <Detail
-          label={i18n._(t`Username`)}
+          label={t`Username`}
           value={username}
           dataCy="user-detail-username"
         />
-        <Detail label={i18n._(t`Email`)} value={email} />
-        <Detail label={i18n._(t`First Name`)} value={`${first_name}`} />
-        <Detail label={i18n._(t`Last Name`)} value={`${last_name}`} />
-        <Detail label={i18n._(t`User Type`)} value={`${user_type}`} />
-        {last_login && (
+        <Detail label={t`Email`} value={email} />
+        <Detail label={t`First Name`} value={`${first_name}`} />
+        <Detail label={t`Last Name`} value={`${last_name}`} />
+        <Detail label={t`User Type`} value={`${user_type}`} />
+        {userAuthType && (
           <Detail
-            label={i18n._(t`Last Login`)}
-            value={formatDateString(last_login)}
+            label={t`Type`}
+            value={<Label aria-label={t`login type`}>{userAuthType}</Label>}
           />
         )}
-        <Detail label={i18n._(t`Created`)} value={formatDateString(created)} />
+        {last_login && (
+          <Detail label={t`Last Login`} value={formatDateString(last_login)} />
+        )}
+        <Detail label={t`Created`} value={formatDateString(created)} />
       </DetailList>
       <CardActionsRow>
         {summary_fields.user_capabilities &&
           summary_fields.user_capabilities.edit && (
             <Button
-              aria-label={i18n._(t`edit`)}
+              ouiaId="user-detail-edit-button"
+              aria-label={t`edit`}
               component={Link}
               to={`/users/${id}/edit`}
             >
-              {i18n._(t`Edit`)}
+              {t`Edit`}
             </Button>
           )}
         {summary_fields.user_capabilities &&
           summary_fields.user_capabilities.delete && (
             <DeleteButton
               name={username}
-              modalTitle={i18n._(t`Delete User`)}
+              modalTitle={t`Delete User`}
               onConfirm={deleteUser}
               isDisabled={isLoading}
             >
-              {i18n._(t`Delete`)}
+              {t`Delete`}
             </DeleteButton>
           )}
       </CardActionsRow>
@@ -93,10 +104,10 @@ function UserDetail({ user, i18n }) {
         <AlertModal
           isOpen={error}
           variant="error"
-          title={i18n._(t`Error!`)}
+          title={t`Error!`}
           onClose={dismissError}
         >
-          {i18n._(t`Failed to delete user.`)}
+          {t`Failed to delete user.`}
           <ErrorDetail error={error} />
         </AlertModal>
       )}
@@ -104,4 +115,4 @@ function UserDetail({ user, i18n }) {
   );
 }
 
-export default withI18n()(UserDetail);
+export default UserDetail;

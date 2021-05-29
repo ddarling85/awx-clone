@@ -5,12 +5,11 @@
 # GNU General Public License v3.0+ (see COPYING or https://www.gnu.org/licenses/gpl-3.0.txt)
 
 from __future__ import absolute_import, division, print_function
+
 __metaclass__ = type
 
 
-ANSIBLE_METADATA = {'metadata_version': '1.1',
-                    'status': ['preview'],
-                    'supported_by': 'community'}
+ANSIBLE_METADATA = {'metadata_version': '1.1', 'status': ['preview'], 'supported_by': 'community'}
 
 
 DOCUMENTATION = '''
@@ -80,7 +79,7 @@ results:
 '''
 
 
-from ..module_utils.tower_api import TowerModule
+from ..module_utils.tower_api import TowerAPIModule
 
 
 def main():
@@ -93,11 +92,11 @@ def main():
     )
 
     # Create a module for ourselves
-    module = TowerModule(
+    module = TowerAPIModule(
         argument_spec=argument_spec,
         mutually_exclusive=[
             ('page', 'all_pages'),
-        ]
+        ],
     )
 
     # Extract our parameters

@@ -42,6 +42,18 @@ export const AccessRecord = shape({
   type: string,
 });
 
+export const Application = shape({
+  id: number.isRequired,
+  name: string.isRequired,
+  organization: number,
+  summary_fields: shape({
+    organization: shape({
+      id: number.isRequired,
+      name: string.isRequired,
+    }),
+  }),
+});
+
 export const Organization = shape({
   id: number.isRequired,
   name: string.isRequired,
@@ -71,6 +83,7 @@ export const JobTemplate = shape({
   job_type: oneOf(['run', 'check']),
   playbook: string,
   project: number,
+  scm_branch: string,
 });
 
 export const WorkFlowJobTemplate = shape({
@@ -95,7 +108,18 @@ export const Inventory = shape({
   total_inventory_sources: number,
 });
 
+export const InventoryScript = shape({
+  description: string,
+  id: number.isRequired,
+  name: string,
+});
+
 export const InstanceGroup = shape({
+  id: number.isRequired,
+  name: string.isRequired,
+});
+
+export const Instance = shape({
   id: number.isRequired,
   name: string.isRequired,
 });
@@ -130,12 +154,13 @@ export const Project = shape({
   created: string,
   name: string.isRequired,
   description: string,
-  scm_type: oneOf(['', 'git', 'hg', 'svn', 'insights']),
+  scm_type: oneOf(['', 'git', 'svn', 'archive', 'insights']),
   scm_url: string,
   scm_branch: string,
   scm_refspec: string,
   scm_clean: bool,
   scm_delete_on_update: bool,
+  scm_track_submodules: bool,
   credential: number,
   status: oneOf([
     'new',
@@ -216,6 +241,13 @@ export const Team = shape({
   organization: number,
 });
 
+export const Token = shape({
+  id: number.isRequired,
+  expires: string.isRequired,
+  summary_fields: shape({}),
+  scope: string.isRequired,
+});
+
 export const User = shape({
   id: number.isRequired,
   type: oneOf(['user']),
@@ -228,7 +260,7 @@ export const User = shape({
   username: string,
   first_name: string,
   last_name: string,
-  email: string.isRequired,
+  email: string,
   is_superuser: bool,
   is_system_auditor: bool,
   ldap_dn: string,
@@ -323,4 +355,69 @@ export const Survey = shape({
   name: string,
   description: string,
   spec: arrayOf(SurveyQuestion),
+});
+
+export const CredentialType = shape({
+  id: number.isRequired,
+  type: string.isRequired,
+  url: string.isRequired,
+  related: shape({}),
+  summary_fields: shape({}),
+  name: string.isRequired,
+  description: string,
+  kind: string.isRequired,
+  namespace: string,
+  inputs: shape({}).isRequired,
+});
+
+export const NotificationType = oneOf([
+  'email',
+  'grafana',
+  'irc',
+  'mattermost',
+  'pagerduty',
+  'rocketchat',
+  'slack',
+  'twilio',
+  'webhook',
+]);
+
+export const NotificationTemplate = shape({
+  id: number.isRequired,
+  name: string.isRequired,
+  description: string,
+  url: string.isRequired,
+  organization: number.isRequired,
+  notification_type: NotificationType,
+  summary_fields: shape({
+    organization: Organization,
+  }),
+});
+
+export const WorkflowApproval = shape({
+  id: number.isRequired,
+  name: string.isRequired,
+  description: string,
+  url: string.isRequired,
+  failed: bool,
+  started: string,
+  finished: string,
+  canceled_on: string,
+  elapsed: number,
+  job_explanation: string,
+  can_approve_or_deny: bool,
+  approval_expiration: string,
+  timed_out: bool,
+});
+
+export const ExecutionEnvironment = shape({
+  id: number.isRequired,
+  name: string,
+  organization: number,
+  credential: number,
+  image: string,
+  url: string,
+  summary_fields: shape({}),
+  description: string,
+  pull: string,
 });

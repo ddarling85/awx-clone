@@ -1,5 +1,5 @@
 import React, { useEffect, useReducer } from 'react';
-import { withI18n } from '@lingui/react';
+
 import styled from 'styled-components';
 import { shape } from 'prop-types';
 import { CardBody as PFCardBody } from '@patternfly/react-core';
@@ -16,6 +16,7 @@ import workflowReducer, {
 import { WorkflowJobsAPI } from '../../../api';
 import WorkflowOutputGraph from './WorkflowOutputGraph';
 import WorkflowOutputToolbar from './WorkflowOutputToolbar';
+import useWsWorkflowOutput from './useWsWorkflowOutput';
 
 const CardBody = styled(PFCardBody)`
   display: flex;
@@ -42,7 +43,7 @@ const fetchWorkflowNodes = async (jobId, pageNo = 1, nodes = []) => {
   return nodes.concat(data.results);
 };
 
-function WorkflowOutput({ job, i18n }) {
+function WorkflowOutput({ job }) {
   const [state, dispatch] = useReducer(workflowReducer, {}, initReducer);
   const { contentError, isLoading, links, nodePositions, nodes } = state;
 
@@ -53,7 +54,6 @@ function WorkflowOutput({ job, i18n }) {
         dispatch({
           type: 'GENERATE_NODES_AND_LINKS',
           nodes: workflowNodes,
-          i18n,
         });
       } catch (error) {
         dispatch({ type: 'SET_CONTENT_ERROR', value: error });
@@ -63,7 +63,7 @@ function WorkflowOutput({ job, i18n }) {
     }
     dispatch({ type: 'RESET' });
     fetchData();
-  }, [job.id, i18n]);
+  }, [job.id]);
 
   // Update positions of nodes/links
   useEffect(() => {
@@ -78,6 +78,12 @@ function WorkflowOutput({ job, i18n }) {
       dispatch({ type: 'SET_NODE_POSITIONS', value: newNodePositions });
     }
   }, [job.id, links, nodes]);
+
+  const updatedNodes = useWsWorkflowOutput(job.id, nodes);
+
+  useEffect(() => {
+    dispatch({ type: 'SET_NODES', value: updatedNodes });
+  }, [updatedNodes]);
 
   if (isLoading) {
     return (
@@ -113,4 +119,4 @@ WorkflowOutput.propTypes = {
   job: shape().isRequired,
 };
 
-export default withI18n()(WorkflowOutput);
+export default WorkflowOutput;

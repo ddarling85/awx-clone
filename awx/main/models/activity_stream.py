@@ -1,7 +1,7 @@
 # Copyright (c) 2015 Ansible, Inc.
 # All Rights Reserved.
 
-# Tower
+# AWX
 from awx.api.versioning import reverse
 from awx.main.fields import JSONField
 from awx.main.models.base import accepts_json
@@ -16,9 +16,9 @@ __all__ = ['ActivityStream']
 
 
 class ActivityStream(models.Model):
-    '''
+    """
     Model used to describe activity stream (audit) events
-    '''
+    """
 
     class Meta:
         app_label = 'main'
@@ -29,7 +29,7 @@ class ActivityStream(models.Model):
         ('update', _("Entity Updated")),
         ('delete', _("Entity Deleted")),
         ('associate', _("Entity Associated with another Entity")),
-        ('disassociate', _("Entity was Disassociated with another Entity"))
+        ('disassociate', _("Entity was Disassociated with another Entity")),
     ]
 
     actor = models.ForeignKey('auth.User', null=True, on_delete=models.SET_NULL, related_name='activity_stream')
@@ -61,6 +61,7 @@ class ActivityStream(models.Model):
     team = models.ManyToManyField("Team", blank=True)
     project = models.ManyToManyField("Project", blank=True)
     project_update = models.ManyToManyField("ProjectUpdate", blank=True)
+    execution_environment = models.ManyToManyField("ExecutionEnvironment", blank=True)
     job_template = models.ManyToManyField("JobTemplate", blank=True)
     job = models.ManyToManyField("Job", blank=True)
     workflow_job_template_node = models.ManyToManyField("WorkflowJobTemplateNode", blank=True)
@@ -73,7 +74,7 @@ class ActivityStream(models.Model):
     unified_job = models.ManyToManyField("UnifiedJob", blank=True, related_name='activity_stream_as_unified_job+')
     ad_hoc_command = models.ManyToManyField("AdHocCommand", blank=True)
     schedule = models.ManyToManyField("Schedule", blank=True)
-    custom_inventory_script = models.ManyToManyField("CustomInventoryScript", blank=True)
+    execution_environment = models.ManyToManyField("ExecutionEnvironment", blank=True)
     notification_template = models.ManyToManyField("NotificationTemplate", blank=True)
     notification = models.ManyToManyField("Notification", blank=True)
     label = models.ManyToManyField("Label", blank=True)
@@ -82,8 +83,6 @@ class ActivityStream(models.Model):
     instance_group = models.ManyToManyField("InstanceGroup", blank=True)
     o_auth2_application = models.ManyToManyField("OAuth2Application", blank=True)
     o_auth2_access_token = models.ManyToManyField("OAuth2AccessToken", blank=True)
-
-
 
     setting = JSONField(blank=True)
 

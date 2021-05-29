@@ -8,9 +8,7 @@ import sys
 from requests.exceptions import RequestException
 
 from .custom import handle_custom_actions
-from .format import (add_authentication_arguments,
-                     add_output_formatting_arguments,
-                     FORMATTERS, format_response)
+from .format import add_authentication_arguments, add_output_formatting_arguments, FORMATTERS, format_response
 from .options import ResourceOptionsParser, UNIQUENESS_RULES
 from .resource import parse_resource, is_control_resource
 from awxkit import api, config, utils, exceptions, WSClient  # noqa
@@ -70,9 +68,10 @@ class CLI(object):
     subparsers = {}
     original_action = None
 
-    def __init__(self, stdout=sys.stdout, stderr=sys.stderr):
+    def __init__(self, stdout=sys.stdout, stderr=sys.stderr, stdin=sys.stdin):
         self.stdout = stdout
         self.stderr = stderr
+        self.stdin = stdin
 
     def get_config(self, key):
         """Helper method for looking up the value of a --conf.xyz flag"""
@@ -87,7 +86,9 @@ class CLI(object):
         token = self.get_config('token')
         if token:
             self.root.connection.login(
-                None, None, token=token, auth_type='Bearer'
+                None,
+                None,
+                token=token,
             )
         else:
             config.use_sessions = True
@@ -101,12 +102,14 @@ class CLI(object):
         if self.get_config('insecure'):
             config.assume_untrusted = True
 
-        config.credentials = utils.PseudoNamespace({
-            'default': {
-                'username': self.get_config('username'),
-                'password': self.get_config('password'),
+        config.credentials = utils.PseudoNamespace(
+            {
+                'default': {
+                    'username': self.get_config('username'),
+                    'password': self.get_config('password'),
+                }
             }
-        })
+        )
 
         _, remainder = self.parser.parse_known_args()
         if remainder and remainder[0] == 'config':
@@ -132,11 +135,7 @@ class CLI(object):
         try:
             self.v2 = self.root.get().available_versions.v2.get()
         except AttributeError:
-            raise RuntimeError(
-                'An error occurred while fetching {}/api/'.format(
-                    self.get_config('host')
-                )
-            )
+            raise RuntimeError('An error occurred while fetching {}/api/'.format(self.get_config('host')))
 
     def parse_resource(self, skip_deprecated=False):
         """Attempt to parse the <resource> (e.g., jobs) specified on the CLI
@@ -169,33 +168,15 @@ class CLI(object):
             _filter = self.get_config('filter')
 
             # human format for metrics, settings is special
-            if (
-                self.resource in ('metrics', 'settings') and
-                self.get_config('format') == 'human'
-            ):
-                response.json = {
-                    'count': len(response.json),
-                    'results': [
-                        {'key': k, 'value': v}
-                        for k, v in response.json.items()
-                    ]
-                }
+            if self.resource in ('metrics', 'settings') and self.get_config('format') == 'human':
+                response.json = {'count': len(response.json), 'results': [{'key': k, 'value': v} for k, v in response.json.items()]}
                 _filter = 'key, value'
 
-            if (
-                self.get_config('format') == 'human' and
-                _filter == '.' and
-                self.resource in UNIQUENESS_RULES
-            ):
+            if self.get_config('format') == 'human' and _filter == '.' and self.resource in UNIQUENESS_RULES:
                 _filter = ', '.join(UNIQUENESS_RULES[self.resource])
 
             formatted = format_response(
-                response,
-                fmt=self.get_config('format'),
-                filter=_filter,
-                changed=self.original_action in (
-                    'modify', 'create', 'associate', 'disassociate'
-                )
+                response, fmt=self.get_config('format'), filter=_filter, changed=self.original_action in ('modify', 'create', 'associate', 'disassociate')
             )
             if formatted:
                 print(utils.to_str(formatted), file=self.stdout)
@@ -218,10 +199,7 @@ class CLI(object):
                             _without_ triggering a SystemExit (argparse's
                             behavior if required arguments are missing)
         """
-        subparsers = self.subparsers[self.resource].add_subparsers(
-            dest='action',
-            metavar='action'
-        )
+        subparsers = self.subparsers[self.resource].add_subparsers(dest='action', metavar='action')
         subparsers.required = True
 
         # parse the action from OPTIONS
@@ -251,10 +229,7 @@ class CLI(object):
         if self.resource != 'settings':
             for method in ('list', 'modify', 'create'):
                 if method in parser.parser.choices:
-                    parser.build_query_arguments(
-                        method,
-                        'GET' if method == 'list' else 'POST'
-                    )
+                    parser.build_query_arguments(method, 'GET' if method == 'list' else 'POST')
         if from_sphinx:
             parsed, extra = self.parser.parse_known_args(self.argv)
         else:
@@ -262,10 +237,7 @@ class CLI(object):
 
         if extra and self.verbose:
             # If extraneous arguments were provided, warn the user
-            cprint('{}: unrecognized arguments: {}'.format(
-                self.parser.prog,
-                ' '.join(extra)
-            ), 'yellow', file=self.stdout)
+            cprint('{}: unrecognized arguments: {}'.format(self.parser.prog, ' '.join(extra)), 'yellow', file=self.stdout)
 
         # build a dictionary of all of the _valid_ flags specified on the
         # command line so we can pass them on to the underlying awxkit call
@@ -274,14 +246,7 @@ class CLI(object):
         # everything else is a flag used as a query argument for the HTTP
         # request we'll make (e.g., --username="Joe", --verbosity=3)
         parsed = parsed.__dict__
-        parsed = dict(
-            (k, v) for k, v in parsed.items()
-            if (
-                v is not None and
-                k not in ('help', 'resource') and
-                not k.startswith('conf.')
-            )
-        )
+        parsed = dict((k, v) for k, v in parsed.items() if (v is not None and k not in ('help', 'resource') and not k.startswith('conf.')))
 
         # if `id` is one of the arguments, it's a detail view
         if 'id' in parsed:
@@ -289,9 +254,7 @@ class CLI(object):
 
         # determine the awxkit method to call
         action = self.original_action = parsed.pop('action')
-        page, action = handle_custom_actions(
-            self.resource, action, page
-        )
+        page, action = handle_custom_actions(self.resource, action, page)
         self.method = {
             'list': 'get',
             'modify': 'patch',
@@ -326,13 +289,7 @@ class CLI(object):
             action='store_true',
             help='prints usage information for the awx tool',
         )
-        self.parser.add_argument(
-            '--version',
-            dest='conf.version',
-            action='version',
-            help='display awx CLI version',
-            version=__version__
-        )
+        self.parser.add_argument('--version', dest='conf.version', action='version', help='display awx CLI version', version=__version__)
         add_authentication_arguments(self.parser, env)
         add_output_formatting_arguments(self.parser, env)
 

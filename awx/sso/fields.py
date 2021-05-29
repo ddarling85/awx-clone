@@ -14,10 +14,7 @@ from django.utils.translation import ugettext_lazy as _
 
 # Django Auth LDAP
 import django_auth_ldap.config
-from django_auth_ldap.config import (
-    LDAPSearch,
-    LDAPSearchUnion,
-)
+from django_auth_ldap.config import LDAPSearch, LDAPSearchUnion
 
 from rest_framework.exceptions import ValidationError
 from rest_framework.fields import empty, Field, SkipField
@@ -25,7 +22,7 @@ from rest_framework.fields import empty, Field, SkipField
 # This must be imported so get_subclasses picks it up
 from awx.sso.ldap_group_types import PosixUIDGroupType  # noqa
 
-# Tower
+# AWX
 from awx.conf import fields
 from awx.main.validators import validate_certificate
 from awx.sso.validators import (  # noqa
@@ -46,9 +43,9 @@ def get_subclasses(cls):
 
 
 def find_class_in_modules(class_name):
-    '''
+    """
     Used to find ldap subclasses by string
-    '''
+    """
     module_search_space = [django_auth_ldap.config, awx.sso.ldap_group_types]
     for m in module_search_space:
         cls = getattr(m, class_name, None)
@@ -57,7 +54,7 @@ def find_class_in_modules(class_name):
     return None
 
 
-class DependsOnMixin():
+class DependsOnMixin:
     def get_depends_on(self):
         """
         Get the value of the dependent field.
@@ -65,38 +62,34 @@ class DependsOnMixin():
         Then fall back to the raw value from the setting in the DB.
         """
         from django.conf import settings
+
         dependent_key = next(iter(self.depends_on))
 
         if self.context:
             request = self.context.get('request', None)
-            if request and request.data and \
-                    request.data.get(dependent_key, None):
+            if request and request.data and request.data.get(dependent_key, None):
                 return request.data.get(dependent_key)
         res = settings._get_local(dependent_key, validate=False)
         return res
 
 
 class _Forbidden(Field):
-    default_error_messages = {
-        'invalid': _('Invalid field.'),
-    }
+    default_error_messages = {'invalid': _('Invalid field.')}
 
     def run_validation(self, value):
         self.fail('invalid')
 
 
 class HybridDictField(fields.DictField):
-    """A DictField, but with defined fixed Fields for certain keys.
-    """
+    """A DictField, but with defined fixed Fields for certain keys."""
 
     def __init__(self, *args, **kwargs):
         self.allow_blank = kwargs.pop('allow_blank', False)
 
         fields = [
             sorted(
-                ((field_name, obj) for field_name, obj in cls.__dict__.items()
-                 if isinstance(obj, Field) and field_name != 'child'),
-                key=lambda x: x[1]._creation_counter
+                ((field_name, obj) for field_name, obj in cls.__dict__.items() if isinstance(obj, Field) and field_name != 'child'),
+                key=lambda x: x[1]._creation_counter,
             )
             for cls in reversed(self.__class__.__mro__)
         ]
@@ -108,10 +101,7 @@ class HybridDictField(fields.DictField):
         fields = copy.deepcopy(self._declared_fields)
         return {
             key: field.to_representation(val) if val is not None else None
-            for key, val, field in (
-                (six.text_type(key), val, fields.get(key, self.child))
-                for key, val in value.items()
-            )
+            for key, val, field in ((six.text_type(key), val, fields.get(key, self.child)) for key, val in value.items())
             if not field.write_only
         }
 
@@ -147,61 +137,68 @@ class AuthenticationBackendsField(fields.StringListField):
 
     # Mapping of settings that must be set in order to enable each
     # authentication backend.
-    REQUIRED_BACKEND_SETTINGS = collections.OrderedDict([
-        ('awx.sso.backends.LDAPBackend', [
-            'AUTH_LDAP_SERVER_URI',
-        ]),
-        ('awx.sso.backends.LDAPBackend1', [
-            'AUTH_LDAP_1_SERVER_URI',
-        ]),
-        ('awx.sso.backends.LDAPBackend2', [
-            'AUTH_LDAP_2_SERVER_URI',
-        ]),
-        ('awx.sso.backends.LDAPBackend3', [
-            'AUTH_LDAP_3_SERVER_URI',
-        ]),
-        ('awx.sso.backends.LDAPBackend4', [
-            'AUTH_LDAP_4_SERVER_URI',
-        ]),
-        ('awx.sso.backends.LDAPBackend5', [
-            'AUTH_LDAP_5_SERVER_URI',
-        ]),
-        ('awx.sso.backends.RADIUSBackend', [
-            'RADIUS_SERVER',
-        ]),
-        ('social_core.backends.google.GoogleOAuth2', [
-            'SOCIAL_AUTH_GOOGLE_OAUTH2_KEY',
-            'SOCIAL_AUTH_GOOGLE_OAUTH2_SECRET',
-        ]),
-        ('social_core.backends.github.GithubOAuth2', [
-            'SOCIAL_AUTH_GITHUB_KEY',
-            'SOCIAL_AUTH_GITHUB_SECRET',
-        ]),
-        ('social_core.backends.github.GithubOrganizationOAuth2', [
-            'SOCIAL_AUTH_GITHUB_ORG_KEY',
-            'SOCIAL_AUTH_GITHUB_ORG_SECRET',
-            'SOCIAL_AUTH_GITHUB_ORG_NAME',
-        ]),
-        ('social_core.backends.github.GithubTeamOAuth2', [
-            'SOCIAL_AUTH_GITHUB_TEAM_KEY',
-            'SOCIAL_AUTH_GITHUB_TEAM_SECRET',
-            'SOCIAL_AUTH_GITHUB_TEAM_ID',
-        ]),
-        ('social_core.backends.azuread.AzureADOAuth2', [
-            'SOCIAL_AUTH_AZUREAD_OAUTH2_KEY',
-            'SOCIAL_AUTH_AZUREAD_OAUTH2_SECRET',
-        ]),
-        ('awx.sso.backends.SAMLAuth', [
-            'SOCIAL_AUTH_SAML_SP_ENTITY_ID',
-            'SOCIAL_AUTH_SAML_SP_PUBLIC_CERT',
-            'SOCIAL_AUTH_SAML_SP_PRIVATE_KEY',
-            'SOCIAL_AUTH_SAML_ORG_INFO',
-            'SOCIAL_AUTH_SAML_TECHNICAL_CONTACT',
-            'SOCIAL_AUTH_SAML_SUPPORT_CONTACT',
-            'SOCIAL_AUTH_SAML_ENABLED_IDPS',
-        ]),
-        ('django.contrib.auth.backends.ModelBackend', []),
-    ])
+    REQUIRED_BACKEND_SETTINGS = collections.OrderedDict(
+        [
+            ('awx.sso.backends.LDAPBackend', ['AUTH_LDAP_SERVER_URI']),
+            ('awx.sso.backends.LDAPBackend1', ['AUTH_LDAP_1_SERVER_URI']),
+            ('awx.sso.backends.LDAPBackend2', ['AUTH_LDAP_2_SERVER_URI']),
+            ('awx.sso.backends.LDAPBackend3', ['AUTH_LDAP_3_SERVER_URI']),
+            ('awx.sso.backends.LDAPBackend4', ['AUTH_LDAP_4_SERVER_URI']),
+            ('awx.sso.backends.LDAPBackend5', ['AUTH_LDAP_5_SERVER_URI']),
+            ('awx.sso.backends.RADIUSBackend', ['RADIUS_SERVER']),
+            ('social_core.backends.google.GoogleOAuth2', ['SOCIAL_AUTH_GOOGLE_OAUTH2_KEY', 'SOCIAL_AUTH_GOOGLE_OAUTH2_SECRET']),
+            ('social_core.backends.github.GithubOAuth2', ['SOCIAL_AUTH_GITHUB_KEY', 'SOCIAL_AUTH_GITHUB_SECRET']),
+            (
+                'social_core.backends.github.GithubOrganizationOAuth2',
+                ['SOCIAL_AUTH_GITHUB_ORG_KEY', 'SOCIAL_AUTH_GITHUB_ORG_SECRET', 'SOCIAL_AUTH_GITHUB_ORG_NAME'],
+            ),
+            ('social_core.backends.github.GithubTeamOAuth2', ['SOCIAL_AUTH_GITHUB_TEAM_KEY', 'SOCIAL_AUTH_GITHUB_TEAM_SECRET', 'SOCIAL_AUTH_GITHUB_TEAM_ID']),
+            (
+                'social_core.backends.github_enterprise.GithubEnterpriseOAuth2',
+                [
+                    'SOCIAL_AUTH_GITHUB_ENTERPRISE_URL',
+                    'SOCIAL_AUTH_GITHUB_ENTERPRISE_API_URL',
+                    'SOCIAL_AUTH_GITHUB_ENTERPRISE_KEY',
+                    'SOCIAL_AUTH_GITHUB_ENTERPRISE_SECRET',
+                ],
+            ),
+            (
+                'social_core.backends.github_enterprise.GithubEnterpriseOrganizationOAuth2',
+                [
+                    'SOCIAL_AUTH_GITHUB_ENTERPRISE_ORG_URL',
+                    'SOCIAL_AUTH_GITHUB_ENTERPRISE_ORG_API_URL',
+                    'SOCIAL_AUTH_GITHUB_ENTERPRISE_ORG_KEY',
+                    'SOCIAL_AUTH_GITHUB_ENTERPRISE_ORG_SECRET',
+                    'SOCIAL_AUTH_GITHUB_ENTERPRISE_ORG_NAME',
+                ],
+            ),
+            (
+                'social_core.backends.github_enterprise.GithubEnterpriseTeamOAuth2',
+                [
+                    'SOCIAL_AUTH_GITHUB_ENTERPRISE_TEAM_URL',
+                    'SOCIAL_AUTH_GITHUB_ENTERPRISE_TEAM_API_URL',
+                    'SOCIAL_AUTH_GITHUB_ENTERPRISE_TEAM_KEY',
+                    'SOCIAL_AUTH_GITHUB_ENTERPRISE_TEAM_SECRET',
+                    'SOCIAL_AUTH_GITHUB_ENTERPRISE_TEAM_ID',
+                ],
+            ),
+            ('social_core.backends.azuread.AzureADOAuth2', ['SOCIAL_AUTH_AZUREAD_OAUTH2_KEY', 'SOCIAL_AUTH_AZUREAD_OAUTH2_SECRET']),
+            (
+                'awx.sso.backends.SAMLAuth',
+                [
+                    'SOCIAL_AUTH_SAML_SP_ENTITY_ID',
+                    'SOCIAL_AUTH_SAML_SP_PUBLIC_CERT',
+                    'SOCIAL_AUTH_SAML_SP_PRIVATE_KEY',
+                    'SOCIAL_AUTH_SAML_ORG_INFO',
+                    'SOCIAL_AUTH_SAML_TECHNICAL_CONTACT',
+                    'SOCIAL_AUTH_SAML_SUPPORT_CONTACT',
+                    'SOCIAL_AUTH_SAML_ENABLED_IDPS',
+                ],
+            ),
+            ('django.contrib.auth.backends.ModelBackend', []),
+            ('awx.main.backends.AWXModelBackend', []),
+        ]
+    )
 
     @classmethod
     def get_all_required_settings(cls):
@@ -216,6 +213,7 @@ class AuthenticationBackendsField(fields.StringListField):
 
     def _default_from_required_settings(self):
         from django.conf import settings
+
         try:
             backends = settings._awx_conf_settings._get_default('AUTHENTICATION_BACKENDS')
         except AttributeError:
@@ -232,7 +230,6 @@ class AuthenticationBackendsField(fields.StringListField):
 
 
 class LDAPServerURIField(fields.URLField):
-
     def __init__(self, **kwargs):
         kwargs.setdefault('schemes', ('ldap', 'ldaps'))
         kwargs.setdefault('allow_plain_hostname', True)
@@ -246,9 +243,7 @@ class LDAPServerURIField(fields.URLField):
 
 class LDAPConnectionOptionsField(fields.DictField):
 
-    default_error_messages = {
-        'invalid_options': _('Invalid connection option(s): {invalid_options}.'),
-    }
+    default_error_messages = {'invalid_options': _('Invalid connection option(s): {invalid_options}.')}
 
     def to_representation(self, value):
         value = value or {}
@@ -276,7 +271,6 @@ class LDAPConnectionOptionsField(fields.DictField):
 
 
 class LDAPDNField(fields.CharField):
-
     def __init__(self, **kwargs):
         super(LDAPDNField, self).__init__(**kwargs)
         self.validators.append(validate_ldap_dn)
@@ -289,7 +283,6 @@ class LDAPDNField(fields.CharField):
 
 
 class LDAPDNListField(fields.StringListField):
-
     def __init__(self, **kwargs):
         super(LDAPDNListField, self).__init__(**kwargs)
         self.validators.append(lambda dn: list(map(validate_ldap_dn, dn)))
@@ -301,7 +294,6 @@ class LDAPDNListField(fields.StringListField):
 
 
 class LDAPDNWithUserField(fields.CharField):
-
     def __init__(self, **kwargs):
         super(LDAPDNWithUserField, self).__init__(**kwargs)
         self.validators.append(validate_ldap_dn_with_user)
@@ -314,27 +306,20 @@ class LDAPDNWithUserField(fields.CharField):
 
 
 class LDAPFilterField(fields.CharField):
-
     def __init__(self, **kwargs):
         super(LDAPFilterField, self).__init__(**kwargs)
         self.validators.append(validate_ldap_filter)
 
 
 class LDAPFilterWithUserField(fields.CharField):
-
     def __init__(self, **kwargs):
         super(LDAPFilterWithUserField, self).__init__(**kwargs)
         self.validators.append(validate_ldap_filter_with_user)
 
 
 class LDAPScopeField(fields.ChoiceField):
-
     def __init__(self, choices=None, **kwargs):
-        choices = choices or [
-            ('SCOPE_BASE', _('Base')),
-            ('SCOPE_ONELEVEL', _('One Level')),
-            ('SCOPE_SUBTREE', _('Subtree')),
-        ]
+        choices = choices or [('SCOPE_BASE', _('Base')), ('SCOPE_ONELEVEL', _('One Level')), ('SCOPE_SUBTREE', _('Subtree'))]
         super(LDAPScopeField, self).__init__(choices, **kwargs)
 
     def to_representation(self, value):
@@ -374,9 +359,7 @@ class LDAPSearchField(fields.ListField):
         if len(data) != 3:
             self.fail('invalid_length', length=len(data))
         return LDAPSearch(
-            LDAPDNField().run_validation(data[0]),
-            LDAPScopeField().run_validation(data[1]),
-            self.ldap_filter_field_class().run_validation(data[2]),
+            LDAPDNField().run_validation(data[0]), LDAPScopeField().run_validation(data[1]), self.ldap_filter_field_class().run_validation(data[2])
         )
 
 
@@ -387,9 +370,7 @@ class LDAPSearchWithUserField(LDAPSearchField):
 
 class LDAPSearchUnionField(fields.ListField):
 
-    default_error_messages = {
-        'type_error': _('Expected an instance of LDAPSearch or LDAPSearchUnion but got {input_type} instead.'),
-    }
+    default_error_messages = {'type_error': _('Expected an instance of LDAPSearch or LDAPSearchUnion but got {input_type} instead.')}
     ldap_search_field_class = LDAPSearchWithUserField
 
     def to_representation(self, value):
@@ -412,8 +393,7 @@ class LDAPSearchUnionField(fields.ListField):
             search_args = []
             for i in range(len(data)):
                 if not isinstance(data[i], list):
-                    raise ValidationError('In order to ultilize LDAP Union, input element No. %d'
-                                          ' should be a search query array.' % (i + 1))
+                    raise ValidationError('In order to ultilize LDAP Union, input element No. %d' ' should be a search query array.' % (i + 1))
                 try:
                     search_args.append(self.ldap_search_field_class().run_validation(data[i]))
                 except Exception as e:
@@ -425,15 +405,13 @@ class LDAPSearchUnionField(fields.ListField):
 
 class LDAPUserAttrMapField(fields.DictField):
 
-    default_error_messages = {
-        'invalid_attrs': _('Invalid user attribute(s): {invalid_attrs}.'),
-    }
+    default_error_messages = {'invalid_attrs': _('Invalid user attribute(s): {invalid_attrs}.')}
     valid_user_attrs = {'first_name', 'last_name', 'email'}
     child = fields.CharField()
 
     def to_internal_value(self, data):
         data = super(LDAPUserAttrMapField, self).to_internal_value(data)
-        invalid_attrs = (set(data.keys()) - self.valid_user_attrs)
+        invalid_attrs = set(data.keys()) - self.valid_user_attrs
         if invalid_attrs:
             invalid_attrs = sorted(list(invalid_attrs))
             attrs_display = json.dumps(invalid_attrs).lstrip('[').rstrip(']')
@@ -445,6 +423,8 @@ class LDAPGroupTypeField(fields.ChoiceField, DependsOnMixin):
 
     default_error_messages = {
         'type_error': _('Expected an instance of LDAPGroupType but got {input_type} instead.'),
+        'missing_parameters': _('Missing required parameters in {dependency}.'),
+        'invalid_parameters': _('Invalid group_type parameters. Expected instance of dict but got {parameters_type} instead.'),
     }
 
     def __init__(self, choices=None, **kwargs):
@@ -464,7 +444,6 @@ class LDAPGroupTypeField(fields.ChoiceField, DependsOnMixin):
         if not data:
             return None
 
-        params = self.get_depends_on() or {}
         cls = find_class_in_modules(data)
         if not cls:
             return None
@@ -474,18 +453,27 @@ class LDAPGroupTypeField(fields.ChoiceField, DependsOnMixin):
         # Backwords compatability. Before AUTH_LDAP_GROUP_TYPE_PARAMS existed
         # MemberDNGroupType was the only group type, of the underlying lib, that
         # took a parameter.
+        params = self.get_depends_on() or {}
         params_sanitized = dict()
-        for attr in inspect.getargspec(cls.__init__).args[1:]:
+
+        cls_args = inspect.getargspec(cls.__init__).args[1:]
+
+        if cls_args:
+            if not isinstance(params, dict):
+                self.fail('invalid_parameters', parameters_type=type(params))
+
+        for attr in cls_args:
             if attr in params:
                 params_sanitized[attr] = params[attr]
 
-        return cls(**params_sanitized)
+        try:
+            return cls(**params_sanitized)
+        except TypeError:
+            self.fail('missing_parameters', dependency=list(self.depends_on)[0])
 
 
 class LDAPGroupTypeParamsField(fields.DictField, DependsOnMixin):
-    default_error_messages = {
-        'invalid_keys': _('Invalid key(s): {invalid_keys}.'),
-    }
+    default_error_messages = {'invalid_keys': _('Invalid key(s): {invalid_keys}.')}
 
     def to_internal_value(self, value):
         value = super(LDAPGroupTypeParamsField, self).to_internal_value(value)
@@ -509,15 +497,13 @@ class LDAPGroupTypeParamsField(fields.DictField, DependsOnMixin):
 
 class LDAPUserFlagsField(fields.DictField):
 
-    default_error_messages = {
-        'invalid_flag': _('Invalid user flag: "{invalid_flag}".'),
-    }
+    default_error_messages = {'invalid_flag': _('Invalid user flag: "{invalid_flag}".')}
     valid_user_flags = {'is_superuser', 'is_system_auditor'}
     child = LDAPDNListField()
 
     def to_internal_value(self, data):
         data = super(LDAPUserFlagsField, self).to_internal_value(data)
-        invalid_flags = (set(data.keys()) - self.valid_user_flags)
+        invalid_flags = set(data.keys()) - self.valid_user_flags
         if invalid_flags:
             self.fail('invalid_flag', invalid_flag=list(invalid_flags)[0])
         return data
@@ -560,7 +546,6 @@ class LDAPTeamMapField(fields.DictField):
 
 
 class SocialMapStringRegexField(fields.CharField):
-
     def to_representation(self, value):
         if isinstance(value, type(re.compile(''))):
             flags = []
@@ -591,9 +576,7 @@ class SocialMapStringRegexField(fields.CharField):
 
 class SocialMapField(fields.ListField):
 
-    default_error_messages = {
-        'type_error': _('Expected None, True, False, a string or list of strings but got {input_type} instead.'),
-    }
+    default_error_messages = {'type_error': _('Expected None, True, False, a string or list of strings but got {input_type} instead.')}
     child = SocialMapStringRegexField()
 
     def to_representation(self, value):
@@ -663,9 +646,7 @@ class SAMLOrgInfoValueField(HybridDictField):
 
 class SAMLOrgInfoField(fields.DictField):
 
-    default_error_messages = {
-        'invalid_lang_code': _('Invalid language code(s) for org info: {invalid_lang_codes}.'),
-    }
+    default_error_messages = {'invalid_lang_code': _('Invalid language code(s) for org info: {invalid_lang_codes}.')}
     child = SAMLOrgInfoValueField()
 
     def to_internal_value(self, data):

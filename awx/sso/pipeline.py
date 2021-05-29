@@ -10,6 +10,7 @@ import logging
 from social_core.exceptions import AuthException
 
 # Django
+from django.core.exceptions import ObjectDoesNotExist
 from django.utils.translation import ugettext_lazy as _
 from django.db.models import Q
 
@@ -18,7 +19,6 @@ logger = logging.getLogger('awx.sso.pipeline')
 
 
 class AuthNotFound(AuthException):
-
     def __init__(self, backend, email_or_uid, *args, **kwargs):
         self.email_or_uid = email_or_uid
         super(AuthNotFound, self).__init__(backend, *args, **kwargs)
@@ -28,7 +28,6 @@ class AuthNotFound(AuthException):
 
 
 class AuthInactive(AuthException):
-
     def __str__(self):
         return _('Your account is inactive')
 
@@ -51,10 +50,10 @@ def prevent_inactive_login(backend, details, user=None, *args, **kwargs):
 
 
 def _update_m2m_from_expression(user, related, expr, remove=True):
-    '''
+    """
     Helper function to update m2m relationship based on user matching one or
     more expressions.
-    '''
+    """
     should_add = False
     if expr is None:
         return
@@ -80,40 +79,46 @@ def _update_m2m_from_expression(user, related, expr, remove=True):
 
 def _update_org_from_attr(user, related, attr, remove, remove_admins, remove_auditors):
     from awx.main.models import Organization
+    from django.conf import settings
 
     org_ids = []
 
     for org_name in attr:
-        org = Organization.objects.get_or_create(name=org_name)[0]
+        try:
+            if settings.SAML_AUTO_CREATE_OBJECTS:
+                org = Organization.objects.get_or_create(name=org_name)[0]
+                org.create_default_galaxy_credential()
+            else:
+                org = Organization.objects.get(name=org_name)
+        except ObjectDoesNotExist:
+            continue
 
         org_ids.append(org.id)
         getattr(org, related).members.add(user)
 
     if remove:
-        [o.member_role.members.remove(user) for o in
-            Organization.objects.filter(Q(member_role__members=user) & ~Q(id__in=org_ids))]
+        [o.member_role.members.remove(user) for o in Organization.objects.filter(Q(member_role__members=user) & ~Q(id__in=org_ids))]
 
     if remove_admins:
-        [o.admin_role.members.remove(user) for o in
-            Organization.objects.filter(Q(admin_role__members=user) & ~Q(id__in=org_ids))]
+        [o.admin_role.members.remove(user) for o in Organization.objects.filter(Q(admin_role__members=user) & ~Q(id__in=org_ids))]
 
     if remove_auditors:
-        [o.auditor_role.members.remove(user) for o in
-            Organization.objects.filter(Q(auditor_role__members=user) & ~Q(id__in=org_ids))]
+        [o.auditor_role.members.remove(user) for o in Organization.objects.filter(Q(auditor_role__members=user) & ~Q(id__in=org_ids))]
 
 
 def update_user_orgs(backend, details, user=None, *args, **kwargs):
-    '''
+    """
     Update organization memberships for the given user based on mapping rules
     defined in settings.
-    '''
+    """
     if not user:
         return
     from awx.main.models import Organization
+
     org_map = backend.setting('ORGANIZATION_MAP') or {}
     for org_name, org_opts in org_map.items():
         org = Organization.objects.get_or_create(name=org_name)[0]
-
+        org.create_default_galaxy_credential()
 
         # Update org admins from expression(s).
         remove = bool(org_opts.get('remove', True))
@@ -128,20 +133,21 @@ def update_user_orgs(backend, details, user=None, *args, **kwargs):
 
 
 def update_user_teams(backend, details, user=None, *args, **kwargs):
-    '''
+    """
     Update team memberships for the given user based on mapping rules defined
     in settings.
-    '''
+    """
     if not user:
         return
     from awx.main.models import Organization, Team
+
     team_map = backend.setting('TEAM_MAP') or {}
     for team_name, team_opts in team_map.items():
         # Get or create the org to update.
         if 'organization' not in team_opts:
             continue
         org = Organization.objects.get_or_create(name=team_opts['organization'])[0]
-
+        org.create_default_galaxy_credential()
 
         # Update team members from expression(s).
         team = Team.objects.get_or_create(name=team_name, organization=org)[0]
@@ -154,6 +160,7 @@ def update_user_orgs_by_saml_attr(backend, details, user=None, *args, **kwargs):
     if not user:
         return
     from django.conf import settings
+
     org_map = settings.SOCIAL_AUTH_SAML_ORGANIZATION_ATTR
     if org_map.get('saml_attr') is None and org_map.get('saml_admin_attr') is None and org_map.get('saml_auditor_attr') is None:
         return
@@ -176,14 +183,12 @@ def update_user_teams_by_saml_attr(backend, details, user=None, *args, **kwargs)
         return
     from awx.main.models import Organization, Team
     from django.conf import settings
+
     team_map = settings.SOCIAL_AUTH_SAML_TEAM_ATTR
     if team_map.get('saml_attr') is None:
         return
 
-    saml_team_names = set(kwargs
-                          .get('response', {})
-                          .get('attributes', {})
-                          .get(team_map['saml_attr'], []))
+    saml_team_names = set(kwargs.get('response', {}).get('attributes', {}).get(team_map['saml_attr'], []))
 
     team_ids = []
     for team_name_map in team_map.get('team_org_map', []):
@@ -199,15 +204,28 @@ def update_user_teams_by_saml_attr(backend, details, user=None, *args, **kwargs)
 
             if organization_alias:
                 organization_name = organization_alias
-            org = Organization.objects.get_or_create(name=organization_name)[0]
+
+            try:
+                if settings.SAML_AUTO_CREATE_OBJECTS:
+                    org = Organization.objects.get_or_create(name=organization_name)[0]
+                    org.create_default_galaxy_credential()
+                else:
+                    org = Organization.objects.get(name=organization_name)
+            except ObjectDoesNotExist:
+                continue
 
             if team_alias:
                 team_name = team_alias
-            team = Team.objects.get_or_create(name=team_name, organization=org)[0]
+            try:
+                if settings.SAML_AUTO_CREATE_OBJECTS:
+                    team = Team.objects.get_or_create(name=team_name, organization=org)[0]
+                else:
+                    team = Team.objects.get(name=team_name, organization=org)
+            except ObjectDoesNotExist:
+                continue
 
             team_ids.append(team.id)
             team.member_role.members.add(user)
 
     if team_map.get('remove', True):
-        [t.member_role.members.remove(user) for t in
-            Team.objects.filter(Q(member_role__members=user) & ~Q(id__in=team_ids))]
+        [t.member_role.members.remove(user) for t in Team.objects.filter(Q(member_role__members=user) & ~Q(id__in=team_ids))]

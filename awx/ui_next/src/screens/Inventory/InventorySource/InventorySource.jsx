@@ -1,5 +1,5 @@
 import React, { useEffect, useCallback } from 'react';
-import { withI18n } from '@lingui/react';
+
 import { t } from '@lingui/macro';
 import {
   Link,
@@ -10,7 +10,6 @@ import {
   useLocation,
 } from 'react-router-dom';
 import { CaretLeftIcon } from '@patternfly/react-icons';
-import { CardActions } from '@patternfly/react-core';
 import useRequest from '../../../util/useRequest';
 
 import {
@@ -18,8 +17,7 @@ import {
   InventorySourcesAPI,
   OrganizationsAPI,
 } from '../../../api';
-import { TabbedCardHeader } from '../../../components/Card';
-import CardCloseButton from '../../../components/CardCloseButton';
+import { Schedules } from '../../../components/Schedule';
 import ContentError from '../../../components/ContentError';
 import ContentLoading from '../../../components/ContentLoading';
 import RoutedTabs from '../../../components/RoutedTabs';
@@ -27,7 +25,7 @@ import InventorySourceDetail from '../InventorySourceDetail';
 import InventorySourceEdit from '../InventorySourceEdit';
 import NotificationList from '../../../components/NotificationList/NotificationList';
 
-function InventorySource({ i18n, inventory, setBreadcrumb, me }) {
+function InventorySource({ inventory, setBreadcrumb, me }) {
   const location = useLocation();
   const match = useRouteMatch('/inventories/inventory/:id/sources/:sourceId');
   const sourceListUrl = `/inventories/inventory/${inventory.id}/sources`;
@@ -64,24 +62,35 @@ function InventorySource({ i18n, inventory, setBreadcrumb, me }) {
     }
   }, [inventory, source, setBreadcrumb]);
 
+  const loadSchedules = useCallback(
+    params => {
+      return InventorySourcesAPI.readSchedules(source?.id, params);
+    },
+    [source]
+  );
+
+  const loadScheduleOptions = useCallback(() => {
+    return InventorySourcesAPI.readScheduleOptions(source?.id);
+  }, [source]);
+
   const tabsArray = [
     {
       name: (
         <>
           <CaretLeftIcon />
-          {i18n._(t`Back to Sources`)}
+          {t`Back to Sources`}
         </>
       ),
       link: `${sourceListUrl}`,
       id: 0,
     },
     {
-      name: i18n._(t`Details`),
+      name: t`Details`,
       link: `${match.url}/details`,
       id: 1,
     },
     {
-      name: i18n._(t`Schedules`),
+      name: t`Schedules`,
       link: `${match.url}/schedules`,
       id: 2,
     },
@@ -92,7 +101,7 @@ function InventorySource({ i18n, inventory, setBreadcrumb, me }) {
 
   if (canSeeNotificationsTab) {
     tabsArray.push({
-      name: i18n._(t`Notifications`),
+      name: t`Notifications`,
       link: `${match.url}/notifications`,
       id: 3,
     });
@@ -102,16 +111,15 @@ function InventorySource({ i18n, inventory, setBreadcrumb, me }) {
     return <ContentError error={error} />;
   }
 
+  let showCardHeader = true;
+
+  if (['edit', 'schedules/'].some(name => location.pathname.includes(name))) {
+    showCardHeader = false;
+  }
+
   return (
     <>
-      {['edit'].some(name => location.pathname.includes(name)) ? null : (
-        <TabbedCardHeader>
-          <RoutedTabs tabsArray={tabsArray} />
-          <CardActions>
-            <CardCloseButton linkTo={sourceListUrl} />
-          </CardActions>
-        </TabbedCardHeader>
-      )}
+      {showCardHeader && <RoutedTabs tabsArray={tabsArray} />}
 
       {isLoading && <ContentLoading />}
 
@@ -144,10 +152,24 @@ function InventorySource({ i18n, inventory, setBreadcrumb, me }) {
               apiModel={InventorySourcesAPI}
             />
           </Route>
+          <Route
+            key="schedules"
+            path="/inventories/inventory/:id/sources/:sourceId/schedules"
+          >
+            <Schedules
+              apiModel={InventorySourcesAPI}
+              setBreadcrumb={schedule =>
+                setBreadcrumb(inventory, source, schedule)
+              }
+              resource={source}
+              loadSchedules={loadSchedules}
+              loadScheduleOptions={loadScheduleOptions}
+            />
+          </Route>
           <Route key="not-found" path="*">
             <ContentError isNotFound>
               <Link to={`${match.url}/details`}>
-                {i18n._(`View inventory source details`)}
+                {t`View inventory source details`}
               </Link>
             </ContentError>
           </Route>
@@ -157,4 +179,4 @@ function InventorySource({ i18n, inventory, setBreadcrumb, me }) {
   );
 }
 
-export default withI18n()(InventorySource);
+export default InventorySource;

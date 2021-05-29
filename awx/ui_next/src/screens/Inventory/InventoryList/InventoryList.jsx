@@ -1,22 +1,22 @@
 import React, { useState, useCallback, useEffect } from 'react';
-import { useLocation, useRouteMatch } from 'react-router-dom';
-import { withI18n } from '@lingui/react';
-
-import { t } from '@lingui/macro';
-import { Card, PageSection } from '@patternfly/react-core';
-
+import { useLocation, useRouteMatch, Link } from 'react-router-dom';
+import { t, Plural } from '@lingui/macro';
+import { Card, PageSection, DropdownItem } from '@patternfly/react-core';
 import { InventoriesAPI } from '../../../api';
 import useRequest, { useDeleteItems } from '../../../util/useRequest';
 import AlertModal from '../../../components/AlertModal';
 import DatalistToolbar from '../../../components/DataListToolbar';
 import ErrorDetail from '../../../components/ErrorDetail';
-import PaginatedDataList, {
-  ToolbarDeleteButton,
-} from '../../../components/PaginatedDataList';
-
+import { ToolbarDeleteButton } from '../../../components/PaginatedDataList';
+import PaginatedTable, {
+  HeaderRow,
+  HeaderCell,
+} from '../../../components/PaginatedTable';
 import { getQSConfig, parseQueryString } from '../../../util/qs';
+import useWsInventories from './useWsInventories';
 import AddDropDownButton from '../../../components/AddDropDownButton';
 import InventoryListItem from './InventoryListItem';
+import { relatedResourceDeleteRequests } from '../../../util/getRelatedResourceDeleteDetails';
 
 const QS_CONFIG = getQSConfig('inventory', {
   page: 1,
@@ -24,13 +24,19 @@ const QS_CONFIG = getQSConfig('inventory', {
   order_by: 'name',
 });
 
-function InventoryList({ i18n }) {
+function InventoryList() {
   const location = useLocation();
   const match = useRouteMatch();
   const [selected, setSelected] = useState([]);
 
   const {
-    result: { inventories, itemCount, actions },
+    result: {
+      results,
+      itemCount,
+      actions,
+      relatedSearchableKeys,
+      searchableKeys,
+    },
     error: contentError,
     isLoading,
     request: fetchInventories,
@@ -42,15 +48,23 @@ function InventoryList({ i18n }) {
         InventoriesAPI.readOptions(),
       ]);
       return {
-        inventories: response.data.results,
+        results: response.data.results,
         itemCount: response.data.count,
         actions: actionsResponse.data.actions,
+        relatedSearchableKeys: (
+          actionsResponse?.data?.related_search_fields || []
+        ).map(val => val.slice(0, -8)),
+        searchableKeys: Object.keys(
+          actionsResponse.data.actions?.GET || {}
+        ).filter(key => actionsResponse.data.actions?.GET[key].filterable),
       };
     }, [location]),
     {
-      inventories: [],
+      results: [],
       itemCount: 0,
       actions: {},
+      relatedSearchableKeys: [],
+      searchableKeys: [],
     }
   );
 
@@ -58,26 +72,41 @@ function InventoryList({ i18n }) {
     fetchInventories();
   }, [fetchInventories]);
 
+  const fetchInventoriesById = useCallback(
+    async ids => {
+      const params = { ...parseQueryString(QS_CONFIG, location.search) };
+      params.id__in = ids.join(',');
+      const { data } = await InventoriesAPI.read(params);
+      return data.results;
+    },
+    [location.search] // eslint-disable-line react-hooks/exhaustive-deps
+  );
+
+  const inventories = useWsInventories(
+    results,
+    fetchInventories,
+    fetchInventoriesById,
+    QS_CONFIG
+  );
+
   const isAllSelected =
     selected.length === inventories.length && selected.length > 0;
   const {
     isLoading: isDeleteLoading,
-    deleteItems: deleteTeams,
+    deleteItems: deleteInventories,
     deletionError,
     clearDeletionError,
   } = useDeleteItems(
-    useCallback(async () => {
+    useCallback(() => {
       return Promise.all(selected.map(team => InventoriesAPI.destroy(team.id)));
     }, [selected]),
     {
-      qsConfig: QS_CONFIG,
       allItemsSelected: isAllSelected,
-      fetchItems: fetchInventories,
     }
   );
 
   const handleInventoryDelete = async () => {
-    await deleteTeams();
+    await deleteInventories();
     setSelected([]);
   };
 
@@ -89,65 +118,98 @@ function InventoryList({ i18n }) {
   };
 
   const handleSelect = row => {
-    if (selected.some(s => s.id === row.id)) {
-      setSelected(selected.filter(s => s.id !== row.id));
-    } else {
-      setSelected(selected.concat(row));
+    if (!row.pending_deletion) {
+      if (selected.some(s => s.id === row.id)) {
+        setSelected(selected.filter(s => s.id !== row.id));
+      } else {
+        setSelected(selected.concat(row));
+      }
     }
   };
 
+  const deleteDetailsRequests = relatedResourceDeleteRequests.inventory(
+    selected[0]
+  );
+
+  const addInventory = t`Add inventory`;
+  const addSmartInventory = t`Add smart inventory`;
   const addButton = (
     <AddDropDownButton
+      ouiaId="add-inventory-button"
       key="add"
       dropdownItems={[
-        {
-          label: i18n._(t`Inventory`),
-          url: `${match.url}/inventory/add/`,
-        },
-        {
-          label: i18n._(t`Smart Inventory`),
-          url: `${match.url}/smart_inventory/add/`,
-        },
+        <DropdownItem
+          ouiaId="add-inventory-item"
+          to={`${match.url}/inventory/add/`}
+          component={Link}
+          key={addInventory}
+          aria-label={addInventory}
+        >
+          {addInventory}
+        </DropdownItem>,
+        <DropdownItem
+          ouiaId="add-smart-inventory-item"
+          to={`${match.url}/smart_inventory/add/`}
+          component={Link}
+          key={addSmartInventory}
+          aria-label={addSmartInventory}
+        >
+          {addSmartInventory}
+        </DropdownItem>,
       ]}
     />
   );
+
   return (
     <PageSection>
       <Card>
-        <PaginatedDataList
+        <PaginatedTable
           contentError={contentError}
           hasContentLoading={hasContentLoading}
           items={inventories}
           itemCount={itemCount}
-          pluralizedItemName={i18n._(t`Inventories`)}
+          pluralizedItemName={t`Inventories`}
           qsConfig={QS_CONFIG}
-          onRowClick={handleSelect}
           toolbarSearchColumns={[
             {
-              name: i18n._(t`Name`),
-              key: 'name',
+              name: t`Name`,
+              key: 'name__icontains',
               isDefault: true,
             },
             {
-              name: i18n._(t`Created By (Username)`),
-              key: 'created_by__username',
+              name: t`Description`,
+              key: 'description__icontains',
             },
             {
-              name: i18n._(t`Modified By (Username)`),
-              key: 'modified_by__username',
+              name: t`Created By (Username)`,
+              key: 'created_by__username__icontains',
+            },
+            {
+              name: t`Modified By (Username)`,
+              key: 'modified_by__username__icontains',
             },
           ]}
           toolbarSortColumns={[
             {
-              name: i18n._(t`Name`),
+              name: t`Name`,
               key: 'name',
             },
           ]}
+          toolbarSearchableKeys={searchableKeys}
+          toolbarRelatedSearchableKeys={relatedSearchableKeys}
+          headerRow={
+            <HeaderRow qsConfig={QS_CONFIG}>
+              <HeaderCell sortKey="name">{t`Name`}</HeaderCell>
+              <HeaderCell>{t`Status`}</HeaderCell>
+              <HeaderCell>{t`Type`}</HeaderCell>
+              <HeaderCell>{t`Organization`}</HeaderCell>
+              <HeaderCell>{t`Actions`}</HeaderCell>
+            </HeaderRow>
+          }
           renderToolbar={props => (
             <DatalistToolbar
               {...props}
               showSelectAll
-              showExpandCollapse
               isAllSelected={isAllSelected}
               onSelectAll={handleSelectAll}
               qsConfig={QS_CONFIG}
@@ -157,16 +219,32 @@ function InventoryList({ i18n }) {
                   key="delete"
                   onDelete={handleInventoryDelete}
                   itemsToDelete={selected}
-                  pluralizedItemName={i18n._(t`Inventories`)}
+                  pluralizedItemName={t`Inventories`}
+                  deleteDetailsRequests={deleteDetailsRequests}
+                  deleteMessage={
+                    <Plural
+                      value={selected.length}
+                      one="This inventory is currently being used by some templates. Are you sure you want to delete it?"
+                      other="Deleting these inventories could impact some templates that rely on them. Are you sure you want to delete anyway?"
+                    />
+                  }
+                  warningMessage={
+                    <Plural
+                      value={selected.length}
+                      one="The inventory will be in a pending status until the final delete is processed."
+                      other="The inventories will be in a pending status until the final delete is processed."
+                    />
+                  }
                 />,
               ]}
             />
           )}
-          renderItem={inventory => (
+          renderRow={(inventory, index) => (
             <InventoryListItem
               key={inventory.id}
               value={inventory.name}
               inventory={inventory}
+              rowIndex={index}
               fetchInventories={fetchInventories}
               detailUrl={
                 inventory.kind === 'smart'
@@ -183,15 +261,15 @@ function InventoryList({ i18n }) {
       <AlertModal
         isOpen={deletionError}
         variant="error"
-        aria-label={i18n._(t`Deletion Error`)}
-        title={i18n._(t`Error!`)}
+        aria-label={t`Deletion Error`}
+        title={t`Error!`}
         onClose={clearDeletionError}
       >
-        {i18n._(t`Failed to delete one or more inventories.`)}
+        {t`Failed to delete one or more inventories.`}
         <ErrorDetail error={deletionError} />
       </AlertModal>
     </PageSection>
   );
 }
 
-export default withI18n()(InventoryList);
+export default InventoryList;

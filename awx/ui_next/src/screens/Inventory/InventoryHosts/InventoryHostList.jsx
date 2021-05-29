@@ -1,17 +1,21 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
 import { useParams, useLocation } from 'react-router-dom';
-import { withI18n } from '@lingui/react';
 import { t } from '@lingui/macro';
 import { getQSConfig, parseQueryString } from '../../../util/qs';
 import { InventoriesAPI, HostsAPI } from '../../../api';
-
+import useRequest, { useDeleteItems } from '../../../util/useRequest';
 import AlertModal from '../../../components/AlertModal';
 import DataListToolbar from '../../../components/DataListToolbar';
 import ErrorDetail from '../../../components/ErrorDetail';
-import PaginatedDataList, {
+import PaginatedTable, {
+  HeaderRow,
+  HeaderCell,
+} from '../../../components/PaginatedTable';
+import {
   ToolbarAddButton,
   ToolbarDeleteButton,
 } from '../../../components/PaginatedDataList';
+import AdHocCommands from '../../../components/AdHocCommands/AdHocCommands';
 import InventoryHostItem from './InventoryHostItem';
 
 const QS_CONFIG = getQSConfig('host', {
@@ -20,49 +24,55 @@ const QS_CONFIG = getQSConfig('host', {
   order_by: 'name',
 });
 
-function InventoryHostList({ i18n }) {
-  const [actions, setActions] = useState(null);
-  const [contentError, setContentError] = useState(null);
-  const [deletionError, setDeletionError] = useState(null);
-  const [hostCount, setHostCount] = useState(0);
-  const [hosts, setHosts] = useState([]);
-  const [isLoading, setIsLoading] = useState(true);
+function InventoryHostList() {
   const [selected, setSelected] = useState([]);
+  const [isAdHocLaunchLoading, setIsAdHocLaunchLoading] = useState(false);
   const { id } = useParams();
   const { search } = useLocation();
 
-  const fetchHosts = (hostId, queryString) => {
-    const params = parseQueryString(QS_CONFIG, queryString);
-    return InventoriesAPI.readHosts(hostId, params);
-  };
+  const {
+    result: {
+      hosts,
+      hostCount,
+      actions,
+      relatedSearchableKeys,
+      searchableKeys,
+    },
+    error: contentError,
+    isLoading,
+    request: fetchData,
+  } = useRequest(
+    useCallback(async () => {
+      const params = parseQueryString(QS_CONFIG, search);
+      const [response, hostOptions] = await Promise.all([
+        InventoriesAPI.readHosts(id, params),
+        InventoriesAPI.readHostsOptions(id),
+      ]);
+
+      return {
+        hosts: response.data.results,
+        hostCount: response.data.count,
+        actions: hostOptions.data.actions,
+        relatedSearchableKeys: (
+          hostOptions?.data?.related_search_fields || []
+        ).map(val => val.slice(0, -8)),
+        searchableKeys: Object.keys(hostOptions.data.actions?.GET || {}).filter(
+          key => hostOptions.data.actions?.GET[key].filterable
+        ),
+      };
+    }, [id, search]),
+    {
+      hosts: [],
+      hostCount: 0,
+      actions: {},
+      relatedSearchableKeys: [],
+      searchableKeys: [],
+    }
+  );
 
   useEffect(() => {
-    async function fetchData() {
-      try {
-        const [
-          {
-            data: { count, results },
-          },
-          {
-            data: { actions: optionActions },
-          },
-        ] = await Promise.all([
-          fetchHosts(id, search),
-          InventoriesAPI.readOptions(),
-        ]);
-
-        setHosts(results);
-        setHostCount(count);
-        setActions(optionActions);
-      } catch (error) {
-        setContentError(error);
-      } finally {
-        setIsLoading(false);
-      }
-    }
-
     fetchData();
-  }, [id, search]);
+  }, [fetchData]);
 
   const handleSelectAll = isSelected => {
     setSelected(isSelected ? [...hosts] : []);
@@ -75,29 +85,21 @@ function InventoryHostList({ i18n }) {
       setSelected(selected.concat(row));
     }
   };
+  const {
+    isLoading: isDeleteLoading,
+    deleteItems: deleteHosts,
+    deletionError,
+    clearDeletionError,
+  } = useDeleteItems(
+    useCallback(() => {
+      return Promise.all(selected.map(host => HostsAPI.destroy(host.id)));
+    }, [selected]),
+    { qsConfig: QS_CONFIG, fetchItems: fetchData }
+  );
 
-  const handleDelete = async () => {
-    setIsLoading(true);
-
-    try {
-      await Promise.all(selected.map(host => HostsAPI.destroy(host.id)));
-    } catch (error) {
-      setDeletionError(error);
-    } finally {
-      setSelected([]);
-      try {
-        const {
-          data: { count, results },
-        } = await fetchHosts(id, search);
-
-        setHosts(results);
-        setHostCount(count);
-      } catch (error) {
-        setContentError(error);
-      } finally {
-        setIsLoading(false);
-      }
-    }
+  const handleDeleteHosts = async () => {
+    await deleteHosts();
+    setSelected([]);
   };
 
   const canAdd =
@@ -106,33 +108,21 @@ function InventoryHostList({ i18n }) {
 
   return (
     <>
-      <PaginatedDataList
+      <PaginatedTable
         contentError={contentError}
-        hasContentLoading={isLoading}
+        hasContentLoading={isLoading || isDeleteLoading || isAdHocLaunchLoading}
         items={hosts}
         itemCount={hostCount}
-        pluralizedItemName={i18n._(t`Hosts`)}
+        pluralizedItemName={t`Hosts`}
         qsConfig={QS_CONFIG}
-        toolbarColumns={[
-          {
-            name: i18n._(t`Name`),
-            key: 'name',
-            isSortable: true,
-            isSearchable: true,
-          },
-          {
-            name: i18n._(t`Modified`),
-            key: 'modified',
-            isSortable: true,
-            isNumeric: true,
-          },
-          {
-            name: i18n._(t`Created`),
-            key: 'created',
-            isSortable: true,
-            isNumeric: true,
-          },
-        ]}
+        toolbarSearchableKeys={searchableKeys}
+        toolbarRelatedSearchableKeys={relatedSearchableKeys}
+        headerRow={
+          <HeaderRow qsConfig={QS_CONFIG}>
+            <HeaderCell sortKey="name">{t`Name`}</HeaderCell>
+            <HeaderCell>{t`Actions`}</HeaderCell>
+          </HeaderRow>
+        }
         renderToolbar={props => (
           <DataListToolbar
             {...props}
@@ -149,23 +139,29 @@ function InventoryHostList({ i18n }) {
                     />,
                   ]
                 : []),
+              <AdHocCommands
+                adHocItems={selected}
+                hasListItems={hostCount > 0}
+                onLaunchLoading={setIsAdHocLaunchLoading}
+              />,
               <ToolbarDeleteButton
                 key="delete"
-                onDelete={handleDelete}
+                onDelete={handleDeleteHosts}
                 itemsToDelete={selected}
-                pluralizedItemName={i18n._(t`Hosts`)}
+                pluralizedItemName={t`Hosts`}
               />,
             ]}
           />
         )}
-        renderItem={o => (
+        renderRow={(host, index) => (
           <InventoryHostItem
-            key={o.id}
-            host={o}
-            detailUrl={`/inventories/inventory/${id}/hosts/${o.id}/details`}
-            editUrl={`/inventories/inventory/${id}/hosts/${o.id}/edit`}
-            isSelected={selected.some(row => row.id === o.id)}
-            onSelect={() => handleSelect(o)}
+            key={host.id}
+            host={host}
+            detailUrl={`/inventories/inventory/${id}/hosts/${host.id}/details`}
+            editUrl={`/inventories/inventory/${id}/hosts/${host.id}/edit`}
+            isSelected={selected.some(row => row.id === host.id)}
+            onSelect={() => handleSelect(host)}
+            rowIndex={index}
           />
         )}
         emptyStateControls={
@@ -181,10 +177,10 @@ function InventoryHostList({ i18n }) {
         <AlertModal
           isOpen={deletionError}
           variant="error"
-          title={i18n._(t`Error!`)}
-          onClose={() => setDeletionError(null)}
+          title={t`Error!`}
+          onClose={clearDeletionError}
         >
-          {i18n._(t`Failed to delete one or more hosts.`)}
+          {t`Failed to delete one or more hosts.`}
           <ErrorDetail error={deletionError} />
         </AlertModal>
       )}
@@ -192,4 +188,4 @@ function InventoryHostList({ i18n }) {
   );
 }
 
-export default withI18n()(InventoryHostList);
+export default InventoryHostList;

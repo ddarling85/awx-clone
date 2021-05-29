@@ -2,8 +2,10 @@
 export const JOB_TYPE_URL_SEGMENTS = {
   job: 'playbook',
   project_update: 'project',
-  system_job: 'system',
+  system_job: 'management',
   inventory_update: 'inventory',
   ad_hoc_command: 'command',
   workflow_job: 'workflow',
 };
+
+export const SESSION_TIMEOUT_KEY = 'awx-session-timeout';

@@ -1,50 +1,85 @@
 import React from 'react';
 import { t } from '@lingui/macro';
+import { useField } from 'formik';
 import CredentialsStep from './CredentialsStep';
+import StepName from './StepName';
+import credentialsValidator from './credentialsValidator';
 
 const STEP_ID = 'credentials';
 
 export default function useCredentialsStep(
-  config,
+  launchConfig,
   resource,
-  visitedSteps,
-  i18n
-) {
-  const validate = () => {
-    return {};
-  };
+  resourceDefaultCredentials,
 
+  allowCredentialsWithPasswords = false
+) {
+  const [field, meta, helpers] = useField('credentials');
+  const formError =
+    !resource || resource?.type === 'workflow_job_template'
+      ? false
+      : meta.error;
   return {
-    step: getStep(config, i18n),
-    initialValues: getInitialValues(config, resource),
-    validate,
+    step: getStep(
+      launchConfig,
+
+      allowCredentialsWithPasswords,
+      formError,
+      resourceDefaultCredentials
+    ),
+    initialValues: getInitialValues(launchConfig, resourceDefaultCredentials),
     isReady: true,
     contentError: null,
-    formError: null,
-    setTouched: setFieldsTouched => {
-      setFieldsTouched({
-        credentials: true,
-      });
+    hasError: launchConfig.ask_credential_on_launch && formError,
+    setTouched: setFieldTouched => {
+      setFieldTouched('credentials', true, false);
+    },
+    validate: () => {
+      helpers.setError(
+        credentialsValidator(
+          resourceDefaultCredentials,
+          allowCredentialsWithPasswords,
+          field.value
+        )
+      );
     },
   };
 }
 
-function getStep(config, i18n) {
-  if (!config.ask_credential_on_launch) {
+function getStep(
+  launchConfig,
+
+  allowCredentialsWithPasswords,
+  formError,
+  resourceDefaultCredentials
+) {
+  if (!launchConfig.ask_credential_on_launch) {
     return null;
   }
   return {
     id: STEP_ID,
-    name: i18n._(t`Credentials`),
-    component: <CredentialsStep i18n={i18n} />,
+    key: 4,
+    name: (
+      <StepName hasErrors={formError} id="credentials-step">
+        {t`Credentials`}
+      </StepName>
+    ),
+    component: (
+      <CredentialsStep
+        allowCredentialsWithPasswords={allowCredentialsWithPasswords}
+        defaultCredentials={resourceDefaultCredentials}
+      />
+    ),
+    enableNext: true,
   };
 }
 
-function getInitialValues(config, resource) {
-  if (!config.ask_credential_on_launch) {
+function getInitialValues(launchConfig, resourceDefaultCredentials) {
+  if (!launchConfig.ask_credential_on_launch) {
     return {};
   }
+
   return {
-    credentials: resource?.summary_fields?.credentials || [],
+    credentials: resourceDefaultCredentials || [],
   };
 }

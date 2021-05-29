@@ -1,5 +1,6 @@
 import React from 'react';
 import { act } from 'react-dom/test-utils';
+import { createMemoryHistory } from 'history';
 import { mountWithContexts } from '../../../../testUtils/enzymeHelpers';
 import { sleep } from '../../../../testUtils/testUtils';
 import JobDetail from './JobDetail';
@@ -10,36 +11,56 @@ jest.mock('../../../api');
 
 describe('<JobDetail />', () => {
   let wrapper;
-  beforeEach(() => {
-    wrapper = mountWithContexts(<JobDetail job={mockJobData} />);
-  });
+  function assertDetail(label, value) {
+    expect(wrapper.find(`Detail[label="${label}"] dt`).text()).toBe(label);
+    expect(wrapper.find(`Detail[label="${label}"] dd`).text()).toBe(value);
+  }
   afterEach(() => {
     wrapper.unmount();
-  });
-  test('initially renders succesfully', () => {
-    wrapper = mountWithContexts(<JobDetail job={mockJobData} />);
-
-    expect(wrapper.length).toBe(1);
+    jest.clearAllMocks();
   });
 
   test('should display details', () => {
-    function assertDetail(label, value) {
-      expect(wrapper.find(`Detail[label="${label}"] dt`).text()).toBe(label);
-      expect(wrapper.find(`Detail[label="${label}"] dd`).text()).toBe(value);
-    }
+    wrapper = mountWithContexts(
+      <JobDetail
+        job={{
+          ...mockJobData,
+          summary_fields: {
+            ...mockJobData.summary_fields,
+            credential: {
+              id: 2,
+              name: 'Machine cred',
+              description: '',
+              kind: 'ssh',
+              cloud: false,
+              kubernetes: false,
+              credential_type_id: 1,
+            },
+            source_workflow_job: {
+              id: 1234,
+              name: 'Test Source Workflow',
+            },
+          },
+        }}
+      />
+    );
 
-    assertDetail('Status', 'Successful');
+    // StatusIcon adds visibly hidden accessibility text " successful "
+    assertDetail('Status', ' successful Successful');
     assertDetail('Started', '8/8/2019, 7:24:18 PM');
     assertDetail('Finished', '8/8/2019, 7:24:50 PM');
-    assertDetail('Template', mockJobData.summary_fields.job_template.name);
-    assertDetail('Job Type', 'Run');
+    assertDetail('Job Template', mockJobData.summary_fields.job_template.name);
+    assertDetail('Source Workflow Job', `1234 - Test Source Workflow`);
+    assertDetail('Job Type', 'Playbook Run');
     assertDetail('Launched By', mockJobData.summary_fields.created_by.username);
     assertDetail('Inventory', mockJobData.summary_fields.inventory.name);
-    assertDetail('Project', mockJobData.summary_fields.project.name);
+    assertDetail(
+      'Project',
+      ` successful ${mockJobData.summary_fields.project.name}`
+    );
     assertDetail('Revision', mockJobData.scm_revision);
     assertDetail('Playbook', mockJobData.playbook);
     assertDetail('Verbosity', '0 (Normal)');
-    assertDetail('Environment', mockJobData.custom_virtualenv);
     assertDetail('Execution Node', mockJobData.execution_node);
     assertDetail(
       'Instance Group',
@@ -47,35 +68,58 @@ describe('<JobDetail />', () => {
     );
     assertDetail('Job Slice', '0/1');
     assertDetail('Credentials', 'SSH: Demo Credential');
-  });
+    assertDetail('Machine Credential', 'SSH: Machine cred');
+    assertDetail('Source Control Branch', 'main');
 
-  test('should display credentials', () => {
-    const credentialChip = wrapper.find('CredentialChip');
+    const executionEnvironment = wrapper.find('ExecutionEnvironmentDetail');
+    expect(executionEnvironment).toHaveLength(1);
+    expect(executionEnvironment.find('dt').text()).toEqual(
+      'Execution Environment'
+    );
+    expect(executionEnvironment.find('dd').text()).toEqual(
+      mockJobData.summary_fields.execution_environment.name
+    );
 
+    const credentialChip = wrapper.find(
+      `Detail[label="Credentials"] CredentialChip`
+    );
     expect(credentialChip.prop('credential')).toEqual(
       mockJobData.summary_fields.credentials[0]
     );
-  });
 
-  test('should display successful job status icon', () => {
+    expect(
+      wrapper
+        .find('Detail[label="Job Tags"]')
+        .containsAnyMatchingElements([<span>a</span>, <span>b</span>])
+    ).toEqual(true);
+
+    expect(
+      wrapper
+        .find('Detail[label="Skip Tags"]')
+        .containsAnyMatchingElements([<span>c</span>, <span>d</span>])
+    ).toEqual(true);
+
     const statusDetail = wrapper.find('Detail[label="Status"]');
     expect(statusDetail.find('StatusIcon SuccessfulTop')).toHaveLength(1);
     expect(statusDetail.find('StatusIcon SuccessfulBottom')).toHaveLength(1);
-  });
 
-  test('should display successful project status icon', () => {
-    const statusDetail = wrapper.find('Detail[label="Project"]');
-    expect(statusDetail.find('StatusIcon SuccessfulTop')).toHaveLength(1);
-    expect(statusDetail.find('StatusIcon SuccessfulBottom')).toHaveLength(1);
+    const projectStatusDetail = wrapper.find('Detail[label="Project"]');
+    expect(projectStatusDetail.find('StatusIcon SuccessfulTop')).toHaveLength(
+      1
+    );
+    expect(
+      projectStatusDetail.find('StatusIcon SuccessfulBottom')
+    ).toHaveLength(1);
   });
 
   test('should properly delete job', async () => {
+    wrapper = mountWithContexts(<JobDetail job={mockJobData} />);
     wrapper.find('button[aria-label="Delete"]').simulate('click');
     await sleep(1);
     wrapper.update();
     const modal = wrapper.find('Modal');
     expect(modal.length).toBe(1);
-    modal.find('button[aria-label="Delete"]').simulate('click');
+    modal.find('button[aria-label="Confirm Delete"]').simulate('click');
     expect(JobsAPI.destroy).toHaveBeenCalledTimes(1);
   });
 
@@ -92,11 +136,12 @@ describe('<JobDetail />', () => {
         },
       })
     );
+    wrapper = mountWithContexts(<JobDetail job={mockJobData} />);
     wrapper.find('button[aria-label="Delete"]').simulate('click');
     const modal = wrapper.find('Modal');
     expect(modal.length).toBe(1);
     await act(async () => {
-      modal.find('button[aria-label="Delete"]').simulate('click');
+      modal.find('button[aria-label="Confirm Delete"]').simulate('click');
     });
     wrapper.update();
 
@@ -105,21 +150,158 @@ describe('<JobDetail />', () => {
   });
 
   test('DELETED is shown for required Job resources that have been deleted', () => {
-    const newMockJobData = { ...mockJobData };
-    newMockJobData.summary_fields.inventory = null;
-    newMockJobData.summary_fields.project = null;
-    const newWrapper = mountWithContexts(
-      <JobDetail job={newMockJobData} />
-    ).find('JobDetail');
+    const newMockData = {
+      ...mockJobData,
+      summary_fields: {
+        ...mockJobData.summary_fields,
+        inventory: null,
+        project: null,
+      },
+    };
+    wrapper = mountWithContexts(<JobDetail job={newMockData} />);
+    const detail = wrapper.find('JobDetail');
     async function assertMissingDetail(label) {
-      expect(newWrapper.length).toBe(1);
+      expect(detail.length).toBe(1);
       await sleep(0);
-      expect(newWrapper.find(`Detail[label="${label}"] dt`).text()).toBe(label);
-      expect(newWrapper.find(`Detail[label="${label}"] dd`).text()).toBe(
-        'DELETED'
-      );
+      expect(detail.find(`Detail[label="${label}"] dt`).text()).toBe(label);
+      expect(detail.find(`Detail[label="${label}"] dd`).text()).toBe('DELETED');
     }
     assertMissingDetail('Project');
     assertMissingDetail('Inventory');
+  });
+  test('should display Playbook Check detail', () => {
+    wrapper = mountWithContexts(
+      <JobDetail
+        job={{
+          ...mockJobData,
+          job_type: 'check',
+        }}
+      />
+    );
+    assertDetail('Job Type', 'Playbook Check');
+  });
+
+  test('should not show cancel job button, not super user', () => {
+    const history = createMemoryHistory({
+      initialEntries: ['/settings/miscellaneous_system/edit'],
+    });
+
+    wrapper = mountWithContexts(
+      <JobDetail
+        job={{
+          ...mockJobData,
+          status: 'pending',
+          type: 'system_job',
+        }}
+      />,
+      {
+        context: {
+          router: {
+            history,
+          },
+          config: {
+            me: {
+              is_superuser: false,
+            },
+          },
+        },
+      }
+    );
+    expect(
+      wrapper.find('Button[aria-label="Cancel Demo Job Template"]')
+    ).toHaveLength(0);
+  });
+
+  test('should not show cancel job button, job completed', async () => {
+    const history = createMemoryHistory({
+      initialEntries: ['/settings/miscellaneous_system/edit'],
+    });
+
+    wrapper = mountWithContexts(
+      <JobDetail
+        job={{
+          ...mockJobData,
+          status: 'success',
+          type: 'project_update',
+        }}
+      />,
+      {
+        context: {
+          router: {
+            history,
+          },
+          config: {
+            me: {
+              is_superuser: true,
+            },
+          },
+        },
+      }
+    );
+    expect(
+      wrapper.find('Button[aria-label="Cancel Demo Job Template"]')
+    ).toHaveLength(0);
+  });
+
+  test('should show cancel button, pending, super user', async () => {
+    const history = createMemoryHistory({
+      initialEntries: ['/settings/miscellaneous_system/edit'],
+    });
+
+    wrapper = mountWithContexts(
+      <JobDetail
+        job={{
+          ...mockJobData,
+          status: 'pending',
+          type: 'system_job',
+        }}
+      />,
+      {
+        context: {
+          router: {
+            history,
+          },
+          config: {
+            me: {
+              is_superuser: true,
+            },
+          },
+        },
+      }
+    );
+    expect(
+      wrapper.find('Button[aria-label="Cancel Demo Job Template"]')
+    ).toHaveLength(1);
+  });
+
+  test('should show cancel button, pending, super project update, not super user', async () => {
+    const history = createMemoryHistory({
+      initialEntries: ['/settings/miscellaneous_system/edit'],
+    });
+
+    wrapper = mountWithContexts(
+      <JobDetail
+        job={{
+          ...mockJobData,
+          status: 'pending',
+          type: 'project_update',
+        }}
+      />,
+      {
+        context: {
+          router: {
+            history,
+          },
+          config: {
+            me: {
+              is_superuser: false,
+            },
+          },
+        },
+      }
+    );
+    expect(
+      wrapper.find('Button[aria-label="Cancel Demo Job Template"]')
+    ).toHaveLength(1);
   });
 });

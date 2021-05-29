@@ -10,112 +10,167 @@ jest.mock('../../../api/models/Projects');
 describe('<ProjectsListItem />', () => {
   test('launch button shown to users with start capabilities', () => {
     const wrapper = mountWithContexts(
-      <ProjectsListItem
-        isSelected={false}
-        detailUrl="/project/1"
-        onSelect={() => {}}
-        project={{
-          id: 1,
-          name: 'Project 1',
-          url: '/api/v2/projects/1',
-          type: 'project',
-          scm_type: 'git',
-          scm_revision: '7788f7erga0jijodfgsjisiodf98sdga9hg9a98gaf',
-          summary_fields: {
-            last_job: {
-              id: 9000,
-              status: 'successful',
-            },
-            user_capabilities: {
-              start: true,
-            },
-          },
-        }}
-      />
+      <table>
+        <tbody>
+          <ProjectsListItem
+            isSelected={false}
+            detailUrl="/project/1"
+            onSelect={() => {}}
+            project={{
+              id: 1,
+              name: 'Project 1',
+              url: '/api/v2/projects/1',
+              type: 'project',
+              scm_type: 'git',
+              scm_revision: '7788f7erga0jijodfgsjisiodf98sdga9hg9a98gaf',
+              summary_fields: {
+                last_job: {
+                  id: 9000,
+                  status: 'successful',
+                },
+                user_capabilities: {
+                  start: true,
+                },
+              },
+            }}
+          />
+        </tbody>
+      </table>
     );
     expect(wrapper.find('ProjectSyncButton').exists()).toBeTruthy();
   });
 
+  test('should render warning about missing execution environment', () => {
+    const wrapper = mountWithContexts(
+      <table>
+        <tbody>
+          <ProjectsListItem
+            isSelected={false}
+            detailUrl="/project/1"
+            onSelect={() => {}}
+            project={{
+              id: 1,
+              name: 'Project 1',
+              url: '/api/v2/projects/1',
+              type: 'project',
+              scm_type: 'git',
+              scm_revision: '7788f7erga0jijodfgsjisiodf98sdga9hg9a98gaf',
+              summary_fields: {
+                last_job: {
+                  id: 9000,
+                  status: 'successful',
+                },
+                user_capabilities: {
+                  start: true,
+                },
+              },
+              custom_virtualenv: '/var/lib/awx/env',
+              default_environment: null,
+            }}
+          />
+        </tbody>
+      </table>
+    );
+
+    expect(
+      wrapper.find('.missing-execution-environment').prop('content')
+    ).toEqual(
+      'Custom virtual environment /var/lib/awx/env must be replaced by an execution environment.'
+    );
+  });
+
   test('launch button hidden from users without start capabilities', () => {
     const wrapper = mountWithContexts(
-      <ProjectsListItem
-        isSelected={false}
-        detailUrl="/project/1"
-        onSelect={() => {}}
-        project={{
-          id: 1,
-          name: 'Project 1',
-          url: '/api/v2/projects/1',
-          type: 'project',
-          scm_type: 'git',
-          scm_revision: '7788f7erga0jijodfgsjisiodf98sdga9hg9a98gaf',
-          summary_fields: {
-            last_job: {
-              id: 9000,
-              status: 'successful',
-            },
-            user_capabilities: {
-              start: false,
-            },
-          },
-        }}
-      />
+      <table>
+        <tbody>
+          <ProjectsListItem
+            isSelected={false}
+            detailUrl="/project/1"
+            onSelect={() => {}}
+            project={{
+              id: 1,
+              name: 'Project 1',
+              url: '/api/v2/projects/1',
+              type: 'project',
+              scm_type: 'git',
+              scm_revision: '7788f7erga0jijodfgsjisiodf98sdga9hg9a98gaf',
+              summary_fields: {
+                last_job: {
+                  id: 9000,
+                  status: 'successful',
+                },
+                user_capabilities: {
+                  start: false,
+                },
+              },
+            }}
+          />
+        </tbody>
+      </table>
     );
     expect(wrapper.find('ProjectSyncButton').exists()).toBeFalsy();
   });
 
   test('edit button shown to users with edit capabilities', () => {
     const wrapper = mountWithContexts(
-      <ProjectsListItem
-        isSelected={false}
-        detailUrl="/project/1"
-        onSelect={() => {}}
-        project={{
-          id: 1,
-          name: 'Project 1',
-          url: '/api/v2/projects/1',
-          type: 'project',
-          scm_type: 'git',
-          scm_revision: '7788f7erga0jijodfgsjisiodf98sdga9hg9a98gaf',
-          summary_fields: {
-            last_job: {
-              id: 9000,
-              status: 'successful',
-            },
-            user_capabilities: {
-              edit: true,
-            },
-          },
-        }}
-      />
+      <table>
+        <tbody>
+          <ProjectsListItem
+            isSelected={false}
+            detailUrl="/project/1"
+            onSelect={() => {}}
+            project={{
+              id: 1,
+              name: 'Project 1',
+              url: '/api/v2/projects/1',
+              type: 'project',
+              scm_type: 'git',
+              scm_revision: '7788f7erga0jijodfgsjisiodf98sdga9hg9a98gaf',
+              summary_fields: {
+                last_job: {
+                  id: 9000,
+                  status: 'successful',
+                },
+                user_capabilities: {
+                  edit: true,
+                },
+              },
+            }}
+          />
+        </tbody>
+      </table>
     );
     expect(wrapper.find('PencilAltIcon').exists()).toBeTruthy();
   });
 
   test('edit button hidden from users without edit capabilities', () => {
     const wrapper = mountWithContexts(
-      <ProjectsListItem
-        isSelected={false}
-        detailUrl="/project/1"
-        onSelect={() => {}}
-        project={{
-          id: 1,
-          name: 'Project 1',
-          url: '/api/v2/projects/1',
-          type: 'project',
-          scm_type: 'git',
-          scm_revision: '7788f7erga0jijodfgsjisiodf98sdga9hg9a98gaf',
-          summary_fields: {
-            last_job: {
-              id: 9000,
-              status: 'successful',
-            },
-            user_capabilities: {
-              edit: false,
-            },
-          },
-        }}
-      />
+      <table>
+        <tbody>
+          <ProjectsListItem
+            isSelected={false}
+            detailUrl="/project/1"
+            onSelect={() => {}}
+            project={{
+              id: 1,
+              name: 'Project 1',
+              url: '/api/v2/projects/1',
+              type: 'project',
+              scm_type: 'git',
+              scm_revision: '7788f7erga0jijodfgsjisiodf98sdga9hg9a98gaf',
+              summary_fields: {
+                last_job: {
+                  id: 9000,
+                  status: 'successful',
+                },
+                user_capabilities: {
+                  edit: false,
+                },
+              },
+            }}
+          />
+        </tbody>
+      </table>
     );
     expect(wrapper.find('PencilAltIcon').exists()).toBeFalsy();
   });
@@ -123,29 +178,33 @@ describe('<ProjectsListItem />', () => {
   test('should call api to copy project', async () => {
     ProjectsAPI.copy.mockResolvedValue();
     const wrapper = mountWithContexts(
-      <ProjectsListItem
-        isSelected={false}
-        detailUrl="/project/1"
-        onSelect={() => {}}
-        project={{
-          id: 1,
-          name: 'Project 1',
-          url: '/api/v2/projects/1',
-          type: 'project',
-          scm_type: 'git',
-          scm_revision: '7788f7erga0jijodfgsjisiodf98sdga9hg9a98gaf',
-          summary_fields: {
-            last_job: {
-              id: 9000,
-              status: 'successful',
-            },
-            user_capabilities: {
-              edit: false,
-              copy: true,
-            },
-          },
-        }}
-      />
+      <table>
+        <tbody>
+          <ProjectsListItem
+            isSelected={false}
+            detailUrl="/project/1"
+            onSelect={() => {}}
+            project={{
+              id: 1,
+              name: 'Project 1',
+              url: '/api/v2/projects/1',
+              type: 'project',
+              scm_type: 'git',
+              scm_revision: '7788f7erga0jijodfgsjisiodf98sdga9hg9a98gaf',
+              summary_fields: {
+                last_job: {
+                  id: 9000,
+                  status: 'successful',
+                },
+                user_capabilities: {
+                  edit: false,
+                  copy: true,
+                },
+              },
+            }}
+          />
+        </tbody>
+      </table>
     );
 
     await act(async () =>
@@ -159,29 +218,33 @@ describe('<ProjectsListItem />', () => {
     ProjectsAPI.copy.mockRejectedValue(new Error());
 
     const wrapper = mountWithContexts(
-      <ProjectsListItem
-        isSelected={false}
-        detailUrl="/project/1"
-        onSelect={() => {}}
-        project={{
-          id: 1,
-          name: 'Project 1',
-          url: '/api/v2/projects/1',
-          type: 'project',
-          scm_type: 'git',
-          scm_revision: '7788f7erga0jijodfgsjisiodf98sdga9hg9a98gaf',
-          summary_fields: {
-            last_job: {
-              id: 9000,
-              status: 'successful',
-            },
-            user_capabilities: {
-              edit: false,
-              copy: true,
-            },
-          },
-        }}
-      />
+      <table>
+        <tbody>
+          <ProjectsListItem
+            isSelected={false}
+            detailUrl="/project/1"
+            onSelect={() => {}}
+            project={{
+              id: 1,
+              name: 'Project 1',
+              url: '/api/v2/projects/1',
+              type: 'project',
+              scm_type: 'git',
+              scm_revision: '7788f7erga0jijodfgsjisiodf98sdga9hg9a98gaf',
+              summary_fields: {
+                last_job: {
+                  id: 9000,
+                  status: 'successful',
+                },
+                user_capabilities: {
+                  edit: false,
+                  copy: true,
+                },
+              },
+            }}
+          />
+        </tbody>
+      </table>
     );
     await act(async () =>
       wrapper.find('Button[aria-label="Copy"]').prop('onClick')()
@@ -192,60 +255,139 @@ describe('<ProjectsListItem />', () => {
   });
   test('should not render copy button', async () => {
     const wrapper = mountWithContexts(
-      <ProjectsListItem
-        isSelected={false}
-        detailUrl="/foo/bar"
-        onSelect={() => {}}
-        project={{
-          id: 1,
-          name: 'Project 1',
-          url: '/api/v2/projects/1',
-          type: 'project',
-          scm_type: 'git',
-          scm_revision: '7788f7erga0jijodfgsjisiodf98sdga9hg9a98gaf',
-          summary_fields: {
-            last_job: {
-              id: 9000,
-              status: 'successful',
-            },
-            user_capabilities: {
-              edit: false,
-              copy: false,
-            },
-          },
-        }}
-      />
+      <table>
+        <tbody>
+          <ProjectsListItem
+            isSelected={false}
+            detailUrl="/foo/bar"
+            onSelect={() => {}}
+            project={{
+              id: 1,
+              name: 'Project 1',
+              url: '/api/v2/projects/1',
+              type: 'project',
+              scm_type: 'git',
+              scm_revision: '7788f7erga0jijodfgsjisiodf98sdga9hg9a98gaf',
+              summary_fields: {
+                last_job: {
+                  id: 9000,
+                  status: 'successful',
+                },
+                user_capabilities: {
+                  edit: false,
+                  copy: false,
+                },
+              },
+            }}
+          />
+        </tbody>
+      </table>
     );
     expect(wrapper.find('CopyButton').length).toBe(0);
   });
   test('should render disabled copy to clipboard button', () => {
     const wrapper = mountWithContexts(
-      <ProjectsListItem
-        isSelected={false}
-        detailUrl="/project/1"
-        onSelect={() => {}}
-        project={{
-          id: 1,
-          name: 'Project 1',
-          url: '/api/v2/projects/1',
-          type: 'project',
-          scm_type: 'git',
-          scm_revision: '',
-          summary_fields: {
-            last_job: {
-              id: 9000,
-              status: 'successful',
-            },
-            user_capabilities: {
-              edit: true,
-            },
-          },
-        }}
-      />
+      <table>
+        <tbody>
+          <ProjectsListItem
+            isSelected={false}
+            detailUrl="/project/1"
+            onSelect={() => {}}
+            project={{
+              id: 1,
+              name: 'Project 1',
+              url: '/api/v2/projects/1',
+              type: 'project',
+              scm_type: 'git',
+              scm_revision: '',
+              summary_fields: {
+                last_job: {
+                  id: 9000,
+                  status: 'successful',
+                },
+                user_capabilities: {
+                  edit: true,
+                },
+              },
+            }}
+          />
+        </tbody>
+      </table>
     );
     expect(
       wrapper.find('span[aria-label="copy to clipboard disabled"]').text()
     ).toBe('Sync for revision');
     expect(wrapper.find('ClipboardCopyButton').prop('isDisabled')).toBe(true);
+  });
+  test('should render expected details in expanded section', async () => {
+    const wrapper = mountWithContexts(
+      <table>
+        <tbody>
+          <ProjectsListItem
+            rowIndex={1}
+            isSelected={false}
+            detailUrl="/project/1"
+            onSelect={() => {}}
+            project={{
+              id: 1,
+              name: 'Project 1',
+              description: 'Project 1 description',
+              url: '/api/v2/projects/1',
+              type: 'project',
+              scm_type: 'git',
+              scm_revision: '123456789',
+              summary_fields: {
+                organization: {
+                  id: 999,
+                  description: '',
+                  name: 'Mock org',
+                },
+                last_job: {
+                  id: 9000,
+                  status: 'successful',
+                },
+                user_capabilities: {
+                  start: true,
+                },
+                default_environment: {
+                  id: 123,
+                  name: 'Mock EE',
+                  image: 'mock.image',
+                },
+              },
+              custom_virtualenv: '/var/lib/awx/env',
+              default_environment: 123,
+              organization: 999,
+            }}
+          />
+        </tbody>
+      </table>
+    );
+    expect(
+      wrapper
+        .find('Tr')
+        .last()
+        .prop('isExpanded')
+    ).toBe(false);
+    await act(async () =>
+      wrapper.find('button[aria-label="Details"]').simulate('click')
+    );
+    wrapper.update();
+    expect(
+      wrapper
+        .find('Tr')
+        .last()
+        .prop('isExpanded')
+    ).toBe(true);
+
+    function assertDetail(label, value) {
+      expect(wrapper.find(`Detail[label="${label}"] dt`).text()).toBe(label);
+      expect(wrapper.find(`Detail[label="${label}"] dd`).text()).toBe(value);
+    }
+    assertDetail('Description', 'Project 1 description');
+    assertDetail('Organization', 'Mock org');
+    assertDetail('Default Execution Environment', 'Mock EE');
+    expect(wrapper.find('Detail[label="Last modified"]').length).toBe(1);
+    expect(wrapper.find('Detail[label="Last used"]').length).toBe(1);
   });
 });

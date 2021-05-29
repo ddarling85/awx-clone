@@ -5,6 +5,9 @@ import { act } from 'react-dom/test-utils';
 
 import { mountWithContexts } from '../../../../testUtils/enzymeHelpers';
 import WorkflowJobTemplateDetail from './WorkflowJobTemplateDetail';
+import { WorkflowJobTemplateNodesAPI } from '../../../api';
+
+jest.mock('../../../api');
 
 describe('<WorkflowJobTemplateDetail/>', () => {
   let wrapper;
@@ -22,6 +25,12 @@ describe('<WorkflowJobTemplateDetail/>', () => {
       created_by: { id: 1, username: 'Athena' },
       modified_by: { id: 1, username: 'Apollo' },
       organization: { id: 1, name: 'Org' },
+      execution_environment: {
+        id: 4,
+        name: 'Demo EE',
+        description: '',
+        image: 'quay.io/ansible/awx-ee',
+      },
       inventory: { kind: 'Foo', id: 1, name: 'Bar' },
       labels: {
         results: [
@@ -40,9 +49,13 @@ describe('<WorkflowJobTemplateDetail/>', () => {
     },
     webhook_service: 'Github',
     webhook_key: 'Foo webhook key',
+    execution_environment: 4,
+    scm_branch: 'main',
+    limit: 'servers',
   };
 
   beforeEach(async () => {
+    WorkflowJobTemplateNodesAPI.read.mockResolvedValue({ data: { count: 0 } });
     history = createMemoryHistory({
       initialEntries: ['/templates/workflow_job_template/1/details'],
     });
@@ -77,10 +90,6 @@ describe('<WorkflowJobTemplateDetail/>', () => {
     });
   });
 
-  afterEach(() => {
-    wrapper.unmount();
-  });
-
   test('renders successfully', () => {
     expect(wrapper.find(WorkflowJobTemplateDetail).length).toBe(1);
   });
@@ -101,6 +110,16 @@ describe('<WorkflowJobTemplateDetail/>', () => {
         element: 'Detail[label="Webhook URL"]',
         prop: 'value',
         value: 'http://localhost/api/v2/workflow_job_templates/45/github/',
+      },
+      {
+        element: 'Detail[label="Source Control Branch"]',
+        prop: 'value',
+        value: 'main',
+      },
+      {
+        element: 'Detail[label="Limit"]',
+        prop: 'value',
+        value: 'servers',
       },
       {
         element: "Detail[label='Webhook Service']",
@@ -131,11 +150,11 @@ describe('<WorkflowJobTemplateDetail/>', () => {
 
     const organization = wrapper
       .find('Detail[label="Organization"]')
-      .find('span');
+      .find('.pf-c-label__content');
     const inventory = wrapper.find('Detail[label="Inventory"]').find('a');
     const labels = wrapper
       .find('Detail[label="Labels"]')
-      .find('Chip[component="li"]');
+      .find('Chip[component="div"]');
     const sparkline = wrapper.find('Sparkline Link');
 
     expect(organization.text()).toBe('Org');
@@ -150,6 +169,16 @@ describe('<WorkflowJobTemplateDetail/>', () => {
     };
 
     renderedValues.map(value => assertValue(value));
+
+    expect(
+      wrapper.find(`Detail[label="Execution Environment"] dd`).text()
+    ).toBe('Demo EE');
+  });
+
+  test('should have proper number of delete detail requests', async () => {
+    expect(
+      wrapper.find('DeleteButton').prop('deleteDetailsRequests')
+    ).toHaveLength(1);
   });
 
   test('link out resource have the correct url', () => {

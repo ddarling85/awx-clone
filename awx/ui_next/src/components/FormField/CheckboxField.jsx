@@ -1,28 +1,28 @@
 import React from 'react';
 import { string, func, node } from 'prop-types';
 import { useField } from 'formik';
-import { Checkbox, Tooltip } from '@patternfly/react-core';
-import { QuestionCircleIcon as PFQuestionCircleIcon } from '@patternfly/react-icons';
-import styled from 'styled-components';
+import { Checkbox } from '@patternfly/react-core';
+import Popover from '../Popover';
 
-const QuestionCircleIcon = styled(PFQuestionCircleIcon)`
-  margin-left: 10px;
-`;
-
-function CheckboxField({ id, name, label, tooltip, validate, ...rest }) {
+function CheckboxField({
+  id,
+  name,
+  label,
+  tooltip,
+  validate,
+  isDisabled,
+  ...rest
+}) {
   const [field] = useField({ name, validate });
   return (
     <Checkbox
+      isDisabled={isDisabled}
       aria-label={label}
       label={
         <span>
           {label}
           &nbsp;
-          {tooltip && (
-            <Tooltip position="right" content={tooltip}>
-              <QuestionCircleIcon />
-            </Tooltip>
-          )}
+          {tooltip && <Popover ouiaId="checkbox-tooltip" content={tooltip} />}
         </span>
       }
       id={id}

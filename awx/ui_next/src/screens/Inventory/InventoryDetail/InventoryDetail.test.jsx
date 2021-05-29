@@ -47,27 +47,12 @@ const mockInventory = {
   pending_deletion: false,
 };
 
-CredentialTypesAPI.read.mockResolvedValue({
-  data: {
-    results: [
-      {
-        id: 14,
-        name: 'insights',
-      },
-    ],
-  },
-});
 const associatedInstanceGroups = [
   {
     id: 1,
     name: 'Foo',
   },
 ];
-InventoriesAPI.readInstanceGroups.mockResolvedValue({
-  data: {
-    results: associatedInstanceGroups,
-  },
-});
 
 function expectDetailToMatch(wrapper, label, value) {
   const detail = wrapper.find(`Detail[label="${label}"]`);
@@ -76,7 +61,25 @@ function expectDetailToMatch(wrapper, label, value) {
 }
 
 describe('<InventoryDetail />', () => {
+  beforeEach(async () => {
+    CredentialTypesAPI.read.mockResolvedValue({
+      data: {
+        results: [
+          {
+            id: 14,
+            name: 'insights',
+          },
+        ],
+      },
+    });
+  });
   test('should render details', async () => {
+    InventoriesAPI.readInstanceGroups.mockResolvedValue({
+      data: {
+        results: associatedInstanceGroups,
+      },
+    });
+
     let wrapper;
     await act(async () => {
       wrapper = mountWithContexts(
@@ -85,17 +88,15 @@ describe('<InventoryDetail />', () => {
     });
     wrapper.update();
     expectDetailToMatch(wrapper, 'Name', mockInventory.name);
-    expectDetailToMatch(wrapper, 'Activity', 'Coming soon');
     expectDetailToMatch(wrapper, 'Description', mockInventory.description);
     expectDetailToMatch(wrapper, 'Type', 'Inventory');
+    const link = wrapper.find('Detail[label="Organization"]').find('Link');
+
     const org = wrapper.find('Detail[label="Organization"]');
-    expect(org.prop('value')).toMatchInlineSnapshot(`
-      <ForwardRef
-        to="/organizations/1/details"
-      >
-        The Organization
-      </ForwardRef>
-    `);
+
+    expect(link.prop('to')).toEqual('/organizations/1/details');
+    expect(org.length).toBe(1);
+
     const vars = wrapper.find('VariablesDetail');
     expect(vars).toHaveLength(1);
     expect(vars.prop('value')).toEqual(mockInventory.variables);
@@ -105,7 +106,25 @@ describe('<InventoryDetail />', () => {
     expect(dates.at(1).prop('date')).toEqual(mockInventory.modified);
   });
 
+  test('should have proper number of delete detail requests', async () => {
+    let wrapper;
+    await act(async () => {
+      wrapper = mountWithContexts(
+        <InventoryDetail inventory={mockInventory} />
+      );
+    });
+    expect(
+      wrapper.find('DeleteButton').prop('deleteDetailsRequests')
+    ).toHaveLength(2);
+  });
+
   test('should load instance groups', async () => {
+    InventoriesAPI.readInstanceGroups.mockResolvedValue({
+      data: {
+        results: associatedInstanceGroups,
+      },
+    });
+
     let wrapper;
     await act(async () => {
       wrapper = mountWithContexts(
@@ -119,5 +138,25 @@ describe('<InventoryDetail />', () => {
     const chip = wrapper.find('Chip').at(0);
     expect(chip.prop('isReadOnly')).toEqual(true);
     expect(chip.prop('children')).toEqual('Foo');
+  });
+
+  test('should not load instance groups', async () => {
+    InventoriesAPI.readInstanceGroups.mockResolvedValue({
+      data: {
+        results: [],
+      },
+    });
+
+    let wrapper;
+    await act(async () => {
+      wrapper = mountWithContexts(
+        <InventoryDetail inventory={mockInventory} />
+      );
+    });
+    wrapper.update();
+    expect(InventoriesAPI.readInstanceGroups).toHaveBeenCalledWith(
+      mockInventory.id
+    );
+    expect(wrapper.find(`Detail[label="Instance Groups"]`)).toHaveLength(0);
   });
 });

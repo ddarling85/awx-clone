@@ -1,42 +1,41 @@
 import React, { useCallback, useEffect } from 'react';
-import { withI18n } from '@lingui/react';
+
 import { t } from '@lingui/macro';
 import { Host } from '../../../types';
 import { CardBody } from '../../../components/Card';
 import { DetailList } from '../../../components/DetailList';
-import { VariablesDetail } from '../../../components/CodeMirrorInput';
+import { VariablesDetail } from '../../../components/CodeEditor';
 import ContentError from '../../../components/ContentError';
 import ContentLoading from '../../../components/ContentLoading';
 import useRequest from '../../../util/useRequest';
 import { HostsAPI } from '../../../api';
 
-function InventoryHostFacts({ i18n, host }) {
-  const { result: facts, isLoading, error, request: fetchFacts } = useRequest(
+function InventoryHostFacts({ host }) {
+  const { request, isLoading, error, result } = useRequest(
     useCallback(async () => {
-      const [{ data: factsObj }] = await Promise.all([
-        HostsAPI.readFacts(host.id),
-      ]);
-      return JSON.stringify(factsObj, null, 4);
+      const { data } = await HostsAPI.readFacts(host.id);
+
+      return JSON.stringify(data, null, 4);
     }, [host]),
-    '{}'
+    null
   );
 
   useEffect(() => {
-    fetchFacts();
-  }, [fetchFacts]);
-
-  if (isLoading) {
-    return <ContentLoading />;
-  }
+    request();
+  }, [request]);
 
   if (error) {
     return <ContentError error={error} />;
   }
 
+  if (isLoading || result === null) {
+    return <ContentLoading />;
+  }
+
   return (
     <CardBody>
       <DetailList gutter="sm">
-        <VariablesDetail label={i18n._(t`Facts`)} fullHeight value={facts} />
+        <VariablesDetail label={t`Facts`} rows="auto" value={result} />
       </DetailList>
     </CardBody>
   );
@@ -46,4 +45,4 @@ InventoryHostFacts.propTypes = {
   host: Host.isRequired,
 };
 
-export default withI18n()(InventoryHostFacts);
+export default InventoryHostFacts;

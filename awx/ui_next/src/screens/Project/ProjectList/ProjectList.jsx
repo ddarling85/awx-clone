@@ -1,7 +1,6 @@
 import React, { Fragment, useState, useEffect, useCallback } from 'react';
 import { useLocation, useRouteMatch } from 'react-router-dom';
-import { withI18n } from '@lingui/react';
-import { t } from '@lingui/macro';
+import { t, Plural } from '@lingui/macro';
 import { Card, PageSection } from '@patternfly/react-core';
 
 import { ProjectsAPI } from '../../../api';
@@ -9,10 +8,16 @@ import useRequest, { useDeleteItems } from '../../../util/useRequest';
 import AlertModal from '../../../components/AlertModal';
 import DataListToolbar from '../../../components/DataListToolbar';
 import ErrorDetail from '../../../components/ErrorDetail';
-import PaginatedDataList, {
+import {
   ToolbarAddButton,
   ToolbarDeleteButton,
 } from '../../../components/PaginatedDataList';
+import PaginatedTable, {
+  HeaderRow,
+  HeaderCell,
+} from '../../../components/PaginatedTable';
+import useWsProjects from './useWsProjects';
+import { relatedResourceDeleteRequests } from '../../../util/getRelatedResourceDeleteDetails';
 import { getQSConfig, parseQueryString } from '../../../util/qs';
 
 import ProjectListItem from './ProjectListItem';
@@ -23,13 +28,19 @@ const QS_CONFIG = getQSConfig('project', {
   order_by: 'name',
 });
 
-function ProjectList({ i18n }) {
+function ProjectList() {
   const location = useLocation();
   const match = useRouteMatch();
   const [selected, setSelected] = useState([]);
 
   const {
-    result: { projects, itemCount, actions },
+    result: {
+      results,
+      itemCount,
+      actions,
+      relatedSearchableKeys,
+      searchableKeys,
+    },
     error: contentError,
     isLoading,
     request: fetchProjects,
@@ -41,21 +52,31 @@ function ProjectList({ i18n }) {
         ProjectsAPI.readOptions(),
       ]);
       return {
-        projects: response.data.results,
+        results: response.data.results,
         itemCount: response.data.count,
         actions: actionsResponse.data.actions,
+        relatedSearchableKeys: (
+          actionsResponse?.data?.related_search_fields || []
+        ).map(val => val.slice(0, -8)),
+        searchableKeys: Object.keys(
+          actionsResponse.data.actions?.GET || {}
+        ).filter(key => actionsResponse.data.actions?.GET[key].filterable),
       };
     }, [location]),
     {
-      projects: [],
+      results: [],
       itemCount: 0,
       actions: {},
+      relatedSearchableKeys: [],
+      searchableKeys: [],
     }
   );
 
   useEffect(() => {
     fetchProjects();
   }, [fetchProjects]);
+
+  const projects = useWsProjects(results);
 
   const isAllSelected =
     selected.length === projects.length && selected.length > 0;
@@ -65,7 +86,7 @@ function ProjectList({ i18n }) {
     deletionError,
     clearDeletionError,
   } = useDeleteItems(
-    useCallback(async () => {
+    useCallback(() => {
       return Promise.all(selected.map(({ id }) => ProjectsAPI.destroy(id)));
     }, [selected]),
     {
@@ -95,54 +116,67 @@ function ProjectList({ i18n }) {
     }
   };
 
+  const deleteDetailsRequests = relatedResourceDeleteRequests.project(
+    selected[0]
+  );
+
   return (
     <Fragment>
       <PageSection>
         <Card>
-          <PaginatedDataList
+          <PaginatedTable
             contentError={contentError}
             hasContentLoading={hasContentLoading}
             items={projects}
             itemCount={itemCount}
-            pluralizedItemName={i18n._(t`Projects`)}
+            pluralizedItemName={t`Projects`}
             qsConfig={QS_CONFIG}
             onRowClick={handleSelect}
             toolbarSearchColumns={[
               {
-                name: i18n._(t`Name`),
-                key: 'name',
+                name: t`Name`,
+                key: 'name__icontains',
                 isDefault: true,
               },
               {
-                name: i18n._(t`Type`),
-                key: 'scm_type',
+                name: t`Description`,
+                key: 'description__icontains',
+              },
+              {
+                name: t`Type`,
+                key: 'or__scm_type',
                 options: [
-                  [``, i18n._(t`Manual`)],
-                  [`git`, i18n._(t`Git`)],
-                  [`hg`, i18n._(t`Mercurial`)],
-                  [`svn`, i18n._(t`Subversion`)],
-                  [`insights`, i18n._(t`Red Hat Insights`)],
+                  [``, t`Manual`],
+                  [`git`, t`Git`],
+                  [`svn`, t`Subversion`],
+                  [`archive`, t`Remote Archive`],
+                  [`insights`, t`Red Hat Insights`],
                 ],
               },
               {
-                name: i18n._(t`Source Control URL`),
-                key: 'scm_url',
+                name: t`Source Control URL`,
+                key: 'scm_url__icontains',
               },
               {
-                name: i18n._(t`Modified By (Username)`),
-                key: 'modified_by__username',
+                name: t`Modified By (Username)`,
+                key: 'modified_by__username__icontains',
               },
               {
-                name: i18n._(t`Created By (Username)`),
-                key: 'created_by__username',
+                name: t`Created By (Username)`,
+                key: 'created_by__username__icontains',
               },
             ]}
-            toolbarSortColumns={[
-              {
-                name: i18n._(t`Name`),
-                key: 'name',
-              },
-            ]}
+            toolbarSearchableKeys={searchableKeys}
+            toolbarRelatedSearchableKeys={relatedSearchableKeys}
+            headerRow={
+              <HeaderRow qsConfig={QS_CONFIG} isExpandable>
+                <HeaderCell sortKey="name">{t`Name`}</HeaderCell>
+                <HeaderCell>{t`Status`}</HeaderCell>
+                <HeaderCell>{t`Type`}</HeaderCell>
+                <HeaderCell>{t`Revision`}</HeaderCell>
+                <HeaderCell>{t`Actions`}</HeaderCell>
+              </HeaderRow>
+            }
             renderToolbar={props => (
               <DataListToolbar
                 {...props}
@@ -163,19 +197,28 @@ function ProjectList({ i18n }) {
                     key="delete"
                     onDelete={handleProjectDelete}
                     itemsToDelete={selected}
-                    pluralizedItemName={i18n._(t`Projects`)}
+                    pluralizedItemName={t`Projects`}
+                    deleteDetailsRequests={deleteDetailsRequests}
+                    deleteMessage={
+                      <Plural
+                        value={selected.length}
+                        one="This project is currently being used by other resources. Are you sure you want to delete it?"
+                        other="Deleting these projects could impact other resources that rely on them. Are you sure you want to delete anyway?"
+                      />
+                    }
                   />,
                 ]}
               />
             )}
-            renderItem={o => (
+            renderRow={(project, index) => (
               <ProjectListItem
                 fetchProjects={fetchProjects}
-                key={o.id}
-                project={o}
-                detailUrl={`${match.url}/${o.id}`}
-                isSelected={selected.some(row => row.id === o.id)}
-                onSelect={() => handleSelect(o)}
+                key={project.id}
+                project={project}
+                detailUrl={`${match.url}/${project.id}`}
+                isSelected={selected.some(row => row.id === project.id)}
+                onSelect={() => handleSelect(project)}
+                rowIndex={index}
               />
             )}
             emptyStateControls={
@@ -189,15 +232,15 @@ function ProjectList({ i18n }) {
       <AlertModal
         isOpen={deletionError}
         variant="error"
-        aria-label={i18n._(t`Deletion Error`)}
-        title={i18n._(t`Error!`)}
+        aria-label={t`Deletion Error`}
+        title={t`Error!`}
         onClose={clearDeletionError}
       >
-        {i18n._(t`Failed to delete one or more projects.`)}
+        {t`Failed to delete one or more projects.`}
         <ErrorDetail error={deletionError} />
       </AlertModal>
     </Fragment>
   );
 }
 
-export default withI18n()(ProjectList);
+export default ProjectList;

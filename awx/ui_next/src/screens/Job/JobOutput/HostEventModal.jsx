@@ -1,59 +1,22 @@
 import React, { useEffect, useState } from 'react';
-import { Modal as PFModal, Tab, Tabs as PFTabs } from '@patternfly/react-core';
+import { Modal, Tab, Tabs, TabTitleText } from '@patternfly/react-core';
 import PropTypes from 'prop-types';
-import { withI18n } from '@lingui/react';
+
 import { t } from '@lingui/macro';
 import styled from 'styled-components';
 import { AllHtmlEntities } from 'html-entities';
 import StatusIcon from '../../../components/StatusIcon';
 import { DetailList, Detail } from '../../../components/DetailList';
 import ContentEmpty from '../../../components/ContentEmpty';
-import CodeMirrorInput from '../../../components/CodeMirrorInput';
+import CodeEditor from '../../../components/CodeEditor';
 
 const entities = new AllHtmlEntities();
-
-const Modal = styled(PFModal)`
-  --pf-c-modal-box__footer--MarginTop: 0;
-  align-self: flex-start;
-  margin-top: 200px;
-  .pf-c-modal-box__body {
-    overflow-y: hidden;
-  }
-  .pf-c-tab-content {
-    padding: 24px 0;
-  }
-`;
 
 const HostNameDetailValue = styled.div`
   align-items: center;
   display: inline-grid;
   grid-gap: 10px;
   grid-template-columns: auto auto;
-`;
-
-const Tabs = styled(PFTabs)`
-  --pf-c-tabs__button--PaddingLeft: 20px;
-  --pf-c-tabs__button--PaddingRight: 20px;
-
-  .pf-c-tabs__list {
-    li:first-of-type .pf-c-tabs__button {
-      &::after {
-        margin-left: 0;
-      }
-    }
-  }
-
-  &:not(.pf-c-tabs__item)::before {
-    position: absolute;
-    top: 0;
-    right: 0;
-    bottom: 0;
-    left: 0;
-    content: '';
-    border-bottom: solid var(--pf-c-tabs__item--BorderColor);
-    border-width: var(--pf-c-tabs__item--BorderWidth) 0
-      var(--pf-c-tabs__item--BorderWidth) 0;
-  }
 `;
 
 const processEventStatus = event => {
@@ -82,18 +45,18 @@ const processEventStatus = event => {
   return status;
 };
 
-const processCodeMirrorValue = value => {
-  let codeMirrorValue;
+const processCodeEditorValue = value => {
+  let codeEditorValue;
   if (value === undefined) {
-    codeMirrorValue = false;
+    codeEditorValue = false;
   } else if (value === '') {
-    codeMirrorValue = ' ';
+    codeEditorValue = ' ';
   } else if (typeof value === 'string') {
-    codeMirrorValue = entities.encode(value);
+    codeEditorValue = entities.encode(value);
   } else {
-    codeMirrorValue = value;
+    codeEditorValue = value;
   }
-  return codeMirrorValue;
+  return codeEditorValue;
 };
 
 const processStdOutValue = hostEvent => {
@@ -115,7 +78,7 @@ const processStdOutValue = hostEvent => {
   return stdOut;
 };
 
-function HostEventModal({ onClose, hostEvent = {}, isOpen = false, i18n }) {
+function HostEventModal({ onClose, hostEvent = {}, isOpen = false }) {
   const [hostStatus, setHostStatus] = useState(null);
   const [activeTabKey, setActiveTabKey] = useState(0);
 
@@ -127,31 +90,34 @@ function HostEventModal({ onClose, hostEvent = {}, isOpen = false, i18n }) {
     setActiveTabKey(tabIndex);
   };
 
-  const jsonObj = processCodeMirrorValue(hostEvent?.event_data?.res);
-  const stdErr = processCodeMirrorValue(hostEvent?.event_data?.res?.stderr);
-  const stdOut = processCodeMirrorValue(processStdOutValue(hostEvent));
+  const jsonObj = processCodeEditorValue(hostEvent?.event_data?.res);
+  const stdErr = processCodeEditorValue(hostEvent?.event_data?.res?.stderr);
+  const stdOut = processCodeEditorValue(processStdOutValue(hostEvent));
 
   return (
     <Modal
-      isFooterLeftAligned
-      isLarge
       isOpen={isOpen}
       onClose={onClose}
-      title={i18n._(t`Host Details`)}
+      title={t`Host Details`}
+      aria-label={t`Host details modal`}
+      width="75%"
     >
       <Tabs
-        aria-label={i18n._(t`Tabs`)}
+        aria-label={t`Tabs`}
         activeKey={activeTabKey}
         onSelect={handleTabClick}
       >
         <Tab
-          aria-label={i18n._(t`Details tab`)}
+          aria-label={t`Details tab`}
           eventKey={0}
-          title={i18n._(t`Details`)}
+          title={<TabTitleText>{t`Details`}</TabTitleText>}
         >
-          <DetailList style={{ alignItems: 'center' }} gutter="sm">
+          <DetailList
+            style={{ alignItems: 'center', marginTop: '20px' }}
+            gutter="sm"
+          >
             <Detail
-              label={i18n._(t`Host Name`)}
+              label={t`Host Name`}
               value={
                 <HostNameDetailValue>
                   {hostStatus ? <StatusIcon status={hostStatus} /> : null}
@@ -159,27 +125,25 @@ function HostEventModal({ onClose, hostEvent = {}, isOpen = false, i18n }) {
                 </HostNameDetailValue>
               }
             />
-            <Detail label={i18n._(t`Play`)} value={hostEvent.play} />
-            <Detail label={i18n._(t`Task`)} value={hostEvent.task} />
+            <Detail label={t`Play`} value={hostEvent.play} />
+            <Detail label={t`Task`} value={hostEvent.task} />
             <Detail
-              label={i18n._(t`Module`)}
-              value={
-                hostEvent.event_data.task_action || i18n._(t`No result found`)
-              }
+              label={t`Module`}
+              value={hostEvent.event_data.task_action || t`No result found`}
             />
             <Detail
-              label={i18n._(t`Command`)}
+              label={t`Command`}
               value={hostEvent?.event_data?.res?.cmd}
             />
           </DetailList>
         </Tab>
         <Tab
           eventKey={1}
-          title={i18n._(t`JSON`)}
-          aria-label={i18n._(t`JSON tab`)}
+          title={<TabTitleText>{t`JSON`}</TabTitleText>}
+          aria-label={t`JSON tab`}
         >
           {activeTabKey === 1 && jsonObj ? (
-            <CodeMirrorInput
+            <CodeEditor
               mode="javascript"
               readOnly
               value={JSON.stringify(jsonObj, null, 2)}
@@ -188,16 +152,16 @@ function HostEventModal({ onClose, hostEvent = {}, isOpen = false, i18n }) {
               hasErrors={false}
             />
           ) : (
-            <ContentEmpty title={i18n._(t`No JSON Available`)} />
+            <ContentEmpty title={t`No JSON Available`} />
           )}
         </Tab>
         <Tab
           eventKey={2}
-          title={i18n._(t`Standard Out`)}
-          aria-label={i18n._(t`Standard out tab`)}
+          title={<TabTitleText>{t`Standard Out`}</TabTitleText>}
+          aria-label={t`Standard out tab`}
         >
           {activeTabKey === 2 && stdOut ? (
-            <CodeMirrorInput
+            <CodeEditor
               mode="javascript"
               readOnly
               value={stdOut}
@@ -206,16 +170,16 @@ function HostEventModal({ onClose, hostEvent = {}, isOpen = false, i18n }) {
               hasErrors={false}
             />
           ) : (
-            <ContentEmpty title={i18n._(t`No Standard Out Available`)} />
+            <ContentEmpty title={t`No Standard Out Available`} />
           )}
         </Tab>
         <Tab
           eventKey={3}
-          title={i18n._(t`Standard Error`)}
-          aria-label={i18n._(t`Standard error tab`)}
+          title={<TabTitleText>{t`Standard Error`}</TabTitleText>}
+          aria-label={t`Standard error tab`}
         >
           {activeTabKey === 3 && stdErr ? (
-            <CodeMirrorInput
+            <CodeEditor
               mode="javascript"
               readOnly
               onChange={() => {}}
@@ -224,7 +188,7 @@ function HostEventModal({ onClose, hostEvent = {}, isOpen = false, i18n }) {
               rows={20}
             />
           ) : (
-            <ContentEmpty title={i18n._(t`No Standard Error Available`)} />
+            <ContentEmpty title={t`No Standard Error Available`} />
           )}
         </Tab>
       </Tabs>
@@ -232,7 +196,7 @@ function HostEventModal({ onClose, hostEvent = {}, isOpen = false, i18n }) {
   );
 }
 
-export default withI18n()(HostEventModal);
+export default HostEventModal;
 
 HostEventModal.propTypes = {
   onClose: PropTypes.func.isRequired,

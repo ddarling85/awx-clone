@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useParams, useLocation } from 'react-router-dom';
-import { withI18n } from '@lingui/react';
+
 import { t } from '@lingui/macro';
 import { getQSConfig, parseQueryString, mergeParams } from '../../../util/qs';
 import useRequest, {
@@ -12,11 +12,14 @@ import { HostsAPI, InventoriesAPI } from '../../../api';
 import DataListToolbar from '../../../components/DataListToolbar';
 import AlertModal from '../../../components/AlertModal';
 import ErrorDetail from '../../../components/ErrorDetail';
-import PaginatedDataList, {
-  ToolbarAddButton,
-} from '../../../components/PaginatedDataList';
+import PaginatedTable, {
+  HeaderRow,
+  HeaderCell,
+} from '../../../components/PaginatedTable';
+import { ToolbarAddButton } from '../../../components/PaginatedDataList';
 import AssociateModal from '../../../components/AssociateModal';
 import DisassociateButton from '../../../components/DisassociateButton';
+import AdHocCommands from '../../../components/AdHocCommands/AdHocCommands';
 import InventoryHostGroupItem from './InventoryHostGroupItem';
 
 const QS_CONFIG = getQSConfig('group', {
@@ -25,13 +28,20 @@ const QS_CONFIG = getQSConfig('group', {
   order_by: 'name',
 });
 
-function InventoryHostGroupsList({ i18n }) {
+function InventoryHostGroupsList() {
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [isAdHocLaunchLoading, setIsAdHocLaunchLoading] = useState(false);
   const { hostId, id: invId } = useParams();
   const { search } = useLocation();
 
   const {
-    result: { groups, itemCount, actions },
+    result: {
+      groups,
+      itemCount,
+      actions,
+      relatedSearchableKeys,
+      searchableKeys,
+    },
     error: contentError,
     isLoading,
     request: fetchGroups,
@@ -43,7 +53,7 @@ function InventoryHostGroupsList({ i18n }) {
         {
           data: { count, results },
         },
-        actionsResponse,
+        hostGroupOptions,
       ] = await Promise.all([
         HostsAPI.readAllGroups(hostId, params),
         HostsAPI.readGroupsOptions(hostId),
@@ -52,12 +62,21 @@ function InventoryHostGroupsList({ i18n }) {
       return {
         groups: results,
         itemCount: count,
-        actions: actionsResponse.data.actions,
+        actions: hostGroupOptions.data.actions,
+        relatedSearchableKeys: (
+          hostGroupOptions?.data?.related_search_fields || []
+        ).map(val => val.slice(0, -8)),
+        searchableKeys: Object.keys(
+          hostGroupOptions.data.actions?.GET || {}
+        ).filter(key => hostGroupOptions.data.actions?.GET[key].filterable),
       };
     }, [hostId, search]), // eslint-disable-line react-hooks/exhaustive-deps
     {
       groups: [],
       itemCount: 0,
+      actions: {},
+      relatedSearchableKeys: [],
+      searchableKeys: [],
     }
   );
 
@@ -74,7 +93,7 @@ function InventoryHostGroupsList({ i18n }) {
     deleteItems: disassociateHosts,
     deletionError: disassociateError,
   } = useDeleteItems(
-    useCallback(async () => {
+    useCallback(() => {
       return Promise.all(
         selected.map(group => HostsAPI.disassociateGroup(hostId, group))
       );
@@ -101,6 +120,11 @@ function InventoryHostGroupsList({ i18n }) {
     [invId, hostId]
   );
 
+  const fetchGroupsOptions = useCallback(
+    () => InventoriesAPI.readGroupsOptions(invId),
+    [invId]
+  );
+
   const { request: handleAssociate, error: associateError } = useRequest(
     useCallback(
       async groupsToAssociate => {
@@ -124,41 +148,46 @@ function InventoryHostGroupsList({ i18n }) {
 
   return (
     <>
-      <PaginatedDataList
+      <PaginatedTable
         contentError={contentError}
-        hasContentLoading={isLoading || isDisassociateLoading}
+        hasContentLoading={
+          isLoading || isDisassociateLoading || isAdHocLaunchLoading
+        }
         items={groups}
         itemCount={itemCount}
         qsConfig={QS_CONFIG}
         onRowClick={handleSelect}
         toolbarSearchColumns={[
           {
-            name: i18n._(t`Name`),
-            key: 'name',
+            name: t`Name`,
+            key: 'name__icontains',
             isDefault: true,
           },
           {
-            name: i18n._(t`Created By (Username)`),
-            key: 'created_by__username',
+            name: t`Created By (Username)`,
+            key: 'created_by__username__icontains',
           },
           {
-            name: i18n._(t`Modified By (Username)`),
-            key: 'modified_by__username',
+            name: t`Modified By (Username)`,
+            key: 'modified_by__username__icontains',
           },
         ]}
-        toolbarSortColumns={[
-          {
-            name: i18n._(t`Name`),
-            key: 'name',
-          },
-        ]}
-        renderItem={item => (
+        toolbarSearchableKeys={searchableKeys}
+        toolbarRelatedSearchableKeys={relatedSearchableKeys}
+        headerRow={
+          <HeaderRow qsConfig={QS_CONFIG}>
+            <HeaderCell sortKey="name">{t`Name`}</HeaderCell>
+            <HeaderCell>{t`Actions`}</HeaderCell>
+          </HeaderRow>
+        }
+        renderRow={(item, index) => (
           <InventoryHostGroupItem
             key={item.id}
             group={item}
             inventoryId={item.summary_fields.inventory.id}
             isSelected={selected.some(row => row.id === item.id)}
             onSelect={() => handleSelect(item)}
+            rowIndex={index}
           />
         )}
         renderToolbar={props => (
@@ -179,17 +208,22 @@ function InventoryHostGroupsList({ i18n }) {
                     />,
                   ]
                 : []),
+              <AdHocCommands
+                adHocItems={selected}
+                hasListItems={itemCount > 0}
+                onLaunchLoading={setIsAdHocLaunchLoading}
+              />,
               <DisassociateButton
                 key="disassociate"
                 onDisassociate={handleDisassociate}
                 itemsToDisassociate={selected}
-                modalTitle={i18n._(t`Disassociate group from host?`)}
-                modalNote={i18n._(t`
+                modalTitle={t`Disassociate group from host?`}
+                modalNote={t`
                   Note that you may still see the group in the list after
-                  disassociating if the host is also a member of that group’s 
-                  children.  This list shows all groups the host is associated 
+                  disassociating if the host is also a member of that group’s
+                  children.  This list shows all groups the host is associated
                   with directly and indirectly.
-                `)}
+                `}
               />,
             ]}
           />
@@ -202,28 +236,29 @@ function InventoryHostGroupsList({ i18n }) {
       />
       {isModalOpen && (
         <AssociateModal
-          header={i18n._(t`Groups`)}
+          header={t`Groups`}
           fetchRequest={fetchGroupsToAssociate}
+          optionsRequest={fetchGroupsOptions}
           isModalOpen={isModalOpen}
           onAssociate={handleAssociate}
           onClose={() => setIsModalOpen(false)}
-          title={i18n._(t`Select Groups`)}
+          title={t`Select Groups`}
         />
       )}
       {error && (
         <AlertModal
           isOpen={error}
           onClose={dismissError}
-          title={i18n._(t`Error!`)}
+          title={t`Error!`}
           variant="error"
         >
           {associateError
-            ? i18n._(t`Failed to associate.`)
-            : i18n._(t`Failed to disassociate one or more groups.`)}
+            ? t`Failed to associate.`
+            : t`Failed to disassociate one or more groups.`}
           <ErrorDetail error={error} />
         </AlertModal>
       )}
     </>
   );
 }
-export default withI18n()(InventoryHostGroupsList);
+export default InventoryHostGroupsList;

@@ -1,8 +1,12 @@
+import yaml
+import json
 import os
 
-from awxkit import api, config
+from awxkit import api, config, yaml_file
+from awxkit.exceptions import ImportExportError
 from awxkit.utils import to_str
 from awxkit.api.pages import Page
+from awxkit.api.pages.api import EXPORTABLE_RESOURCES
 from awxkit.cli.format import FORMATTERS, format_response, add_authentication_arguments
 from awxkit.cli.utils import CustomRegistryMeta, cprint
 
@@ -19,7 +23,6 @@ DEPRECATED_RESOURCES = {
     'instances': 'instance',
     'instance_groups': 'instance_group',
     'inventory': 'inventories',
-    'inventory_scripts': 'inventory_script',
     'inventory_sources': 'inventory_source',
     'inventory_updates': 'inventory_update',
     'jobs': 'job',
@@ -36,11 +39,9 @@ DEPRECATED_RESOURCES = {
     'teams': 'team',
     'workflow_job_templates': 'workflow',
     'workflow_jobs': 'workflow_job',
-    'users': 'user'
+    'users': 'user',
 }
-DEPRECATED_RESOURCES_REVERSE = dict(
-    (v, k) for k, v in DEPRECATED_RESOURCES.items()
-)
+DEPRECATED_RESOURCES_REVERSE = dict((v, k) for k, v in DEPRECATED_RESOURCES.items())
 
 
 class CustomCommand(metaclass=CustomRegistryMeta):
@@ -77,9 +78,7 @@ class Login(CustomCommand):
         auth.add_argument('--description', help='description of the generated OAuth2.0 token', metavar='TEXT')
         auth.add_argument('--conf.client_id', metavar='TEXT')
         auth.add_argument('--conf.client_secret', metavar='TEXT')
-        auth.add_argument(
-            '--conf.scope', choices=['read', 'write'], default='write'
-        )
+        auth.add_argument('--conf.scope', choices=['read', 'write'], default='write')
         if client.help:
             self.print_help(parser)
             raise SystemExit()
@@ -95,10 +94,7 @@ class Login(CustomCommand):
             token = api.Api().get_oauth2_token(**kwargs)
         except Exception as e:
             self.print_help(parser)
-            cprint(
-                'Error retrieving an OAuth2.0 token ({}).'.format(e.__class__),
-                'red'
-            )
+            cprint('Error retrieving an OAuth2.0 token ({}).'.format(e.__class__), 'red')
         else:
             fmt = client.get_config('format')
             if fmt == 'human':
@@ -123,6 +119,57 @@ class Config(CustomCommand):
         }
 
 
+class Import(CustomCommand):
+    name = 'import'
+    help_text = 'import resources into Tower'
+
+    def handle(self, client, parser):
+        if client.help:
+            parser.print_help()
+            raise SystemExit()
+
+        fmt = client.get_config('format')
+        if fmt == 'json':
+            data = json.load(client.stdin)
+        elif fmt == 'yaml':
+            data = yaml.load(client.stdin, Loader=yaml_file.Loader)
+        else:
+            raise ImportExportError("Unsupported format for Import: " + fmt)
+
+        client.authenticate()
+        client.v2.import_assets(data)
+
+        return {}
+
+
+class Export(CustomCommand):
+    name = 'export'
+    help_text = 'export resources from Tower'
+
+    def extend_parser(self, parser):
+        resources = parser.add_argument_group('resources')
+
+        for resource in EXPORTABLE_RESOURCES:
+            # This parsing pattern will result in 3 different possible outcomes:
+            # 1) the resource flag is not used at all, which will result in the attr being None
+            # 2) the resource flag is used with no argument, which will result in the attr being ''
+            # 3) the resource flag is used with an argument, and the attr will be that argument's value
+            resources.add_argument('--{}'.format(resource), nargs='?', const='')
+
+    def handle(self, client, parser):
+        self.extend_parser(parser)
+
+        if client.help:
+            parser.print_help()
+            raise SystemExit()
+
+        parsed = parser.parse_known_args()[0]
+        kwargs = {resource: getattr(parsed, resource, None) for resource in EXPORTABLE_RESOURCES}
+
+        client.authenticate()
+        return client.v2.export_assets(**kwargs)
+
+
 def parse_resource(client, skip_deprecated=False):
     subparsers = client.parser.add_subparsers(
         dest='resource',
@@ -131,9 +178,7 @@ def parse_resource(client, skip_deprecated=False):
 
     # check if the user is running a custom command
     for command in CustomCommand.__subclasses__():
-        client.subparsers[command.name] = subparsers.add_parser(
-            command.name, help=command.help_text
-        )
+        client.subparsers[command.name] = subparsers.add_parser(command.name, help=command.help_text)
 
     if hasattr(client, 'v2'):
         for k in client.v2.json.keys():
@@ -147,15 +192,11 @@ def parse_resource(client, skip_deprecated=False):
                 if k in DEPRECATED_RESOURCES:
                     kwargs['aliases'] = [DEPRECATED_RESOURCES[k]]
 
-            client.subparsers[k] = subparsers.add_parser(
-                k, help='', **kwargs
-            )
+            client.subparsers[k] = subparsers.add_parser(k, help='', **kwargs)
 
     resource = client.parser.parse_known_args()[0].resource
     if resource in DEPRECATED_RESOURCES.values():
-        client.argv[
-            client.argv.index(resource)
-        ] = DEPRECATED_RESOURCES_REVERSE[resource]
+        client.argv[client.argv.index(resource)] = DEPRECATED_RESOURCES_REVERSE[resource]
         resource = DEPRECATED_RESOURCES_REVERSE[resource]
 
     if resource in CustomCommand.registry:
@@ -164,27 +205,14 @@ def parse_resource(client, skip_deprecated=False):
         response = command.handle(client, parser)
         if response:
             _filter = client.get_config('filter')
-            if (
-                resource == 'config' and
-                client.get_config('format') == 'human'
-            ):
-                response = {
-                    'count': len(response),
-                    'results': [
-                        {'key': k, 'value': v}
-                        for k, v in response.items()
-                    ]
-                }
+            if resource == 'config' and client.get_config('format') == 'human':
+                response = {'count': len(response), 'results': [{'key': k, 'value': v} for k, v in response.items()]}
                 _filter = 'key, value'
             try:
                 connection = client.root.connection
             except AttributeError:
                 connection = None
-            formatted = format_response(
-                Page.from_json(response, connection=connection),
-                fmt=client.get_config('format'),
-                filter=_filter
-            )
+            formatted = format_response(Page.from_json(response, connection=connection), fmt=client.get_config('format'), filter=_filter)
             print(formatted)
         raise SystemExit()
     else:

@@ -1,6 +1,6 @@
 import 'styled-components/macro';
 import React, { useContext } from 'react';
-import { withI18n } from '@lingui/react';
+
 import { t } from '@lingui/macro';
 import { Button as PFButton } from '@patternfly/react-core';
 import styled from 'styled-components';
@@ -30,27 +30,34 @@ const StartPanelWrapper = styled.div`
   justify-content: center;
 `;
 
-function VisualizerStartScreen({ i18n }) {
+function VisualizerStartScreen({ readOnly }) {
   const dispatch = useContext(WorkflowDispatchContext);
   return (
     <div css="flex: 1">
       <StartPanelWrapper>
         <StartPanel>
-          <p>{i18n._(t`Please click the Start button to begin.`)}</p>
-          <Button
-            id="visualizer-start"
-            aria-label={i18n._(t`Start`)}
-            onClick={() =>
-              dispatch({ type: 'START_ADD_NODE', sourceNodeId: 1 })
-            }
-            variant="primary"
-          >
-            {i18n._(t`Start`)}
-          </Button>
+          {readOnly ? (
+            <p>{t`This workflow does not have any nodes configured.`}</p>
+          ) : (
+            <>
+              <p>{t`Please click the Start button to begin.`}</p>
+              <Button
+                ouiaId="visualizer-start-button"
+                id="visualizer-start"
+                aria-label={t`Start`}
+                onClick={() =>
+                  dispatch({ type: 'START_ADD_NODE', sourceNodeId: 1 })
+                }
+                variant="primary"
+              >
+                {t`Start`}
+              </Button>
+            </>
+          )}
         </StartPanel>
       </StartPanelWrapper>
     </div>
   );
 }
 
-export default withI18n()(VisualizerStartScreen);
+export default VisualizerStartScreen;

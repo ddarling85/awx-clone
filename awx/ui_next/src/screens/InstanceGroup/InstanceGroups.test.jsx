@@ -4,15 +4,17 @@ import { mountWithContexts } from '../../../testUtils/enzymeHelpers';
 
 import InstanceGroups from './InstanceGroups';
 
-describe('<InstanceGroups />', () => {
+jest.mock('react-router-dom', () => ({
+  ...jest.requireActual('react-router-dom'),
+}));
+
+describe('<InstanceGroups/>', () => {
   let pageWrapper;
   let pageSections;
-  let title;
 
   beforeEach(() => {
     pageWrapper = mountWithContexts(<InstanceGroups />);
     pageSections = pageWrapper.find('PageSection');
-    title = pageWrapper.find('Title');
   });
 
   afterEach(() => {
@@ -21,9 +23,7 @@ describe('<InstanceGroups />', () => {
 
   test('initially renders without crashing', () => {
     expect(pageWrapper.length).toBe(1);
-    expect(pageSections.length).toBe(2);
-    expect(title.length).toBe(1);
-    expect(title.props().size).toBe('2xl');
+    expect(pageSections.length).toBe(1);
     expect(pageSections.first().props().variant).toBe('light');
   });
 });

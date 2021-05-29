@@ -1,9 +1,9 @@
 import React from 'react';
 import { act } from 'react-dom/test-utils';
 
-import { shallow } from 'enzyme';
 import {
   mountWithContexts,
+  shallowWithContexts,
   waitForElement,
 } from '../../../testUtils/enzymeHelpers';
 import { sleep } from '../../../testUtils/testUtils';
@@ -13,7 +13,7 @@ describe('<SelectResourceStep />', () => {
   const searchColumns = [
     {
       name: 'Username',
-      key: 'username',
+      key: 'username__icontains',
       isDefault: true,
     },
   ];
@@ -27,16 +27,19 @@ describe('<SelectResourceStep />', () => {
   afterEach(() => {
     jest.restoreAllMocks();
   });
-  test('initially renders without crashing', () => {
-    shallow(
-      <SelectResourceStep
-        searchColumns={searchColumns}
-        sortColumns={sortColumns}
-        displayKey="username"
-        onRowClick={() => {}}
-        fetchItems={() => {}}
-      />
-    );
+  test('initially renders without crashing', async () => {
+    act(() => {
+      shallowWithContexts(
+        <SelectResourceStep
+          searchColumns={searchColumns}
+          sortColumns={sortColumns}
+          displayKey="username"
+          onRowClick={() => {}}
+          fetchItems={() => {}}
+          fetchOptions={() => {}}
+        />
+      );
+    });
   });
 
   test('fetches resources on mount and adds items to list', async () => {
@@ -49,6 +52,15 @@ describe('<SelectResourceStep />', () => {
         ],
       },
     });
+    const options = jest.fn().mockResolvedValue({
+      data: {
+        actions: {
+          GET: {},
+          POST: {},
+        },
+        related_search_fields: [],
+      },
+    });
     let wrapper;
     await act(async () => {
       wrapper = mountWithContexts(
@@ -58,6 +70,7 @@ describe('<SelectResourceStep />', () => {
           displayKey="username"
           onRowClick={() => {}}
           fetchItems={handleSearch}
+          fetchOptions={options}
         />
       );
     });
@@ -78,6 +91,15 @@ describe('<SelectResourceStep />', () => {
         { id: 2, username: 'bar', url: 'item/2' },
       ],
     };
+    const options = jest.fn().mockResolvedValue({
+      data: {
+        actions: {
+          GET: {},
+          POST: {},
+        },
+        related_search_fields: [],
+      },
+    });
     let wrapper;
     await act(async () => {
       wrapper = mountWithContexts(
@@ -87,6 +109,7 @@ describe('<SelectResourceStep />', () => {
           displayKey="username"
           onRowClick={handleRowClick}
           fetchItems={() => ({ data })}
+          fetchOptions={options}
           selectedResourceRows={[]}
         />
       );

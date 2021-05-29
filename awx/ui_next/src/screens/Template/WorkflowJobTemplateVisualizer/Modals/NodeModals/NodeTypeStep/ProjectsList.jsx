@@ -1,13 +1,17 @@
-import React, { useState, useEffect } from 'react';
+import React, { useEffect, useCallback } from 'react';
 import { useLocation } from 'react-router-dom';
-import { withI18n } from '@lingui/react';
+
 import { t } from '@lingui/macro';
 import { func, shape } from 'prop-types';
 import { ProjectsAPI } from '../../../../../../api';
 import { getQSConfig, parseQueryString } from '../../../../../../util/qs';
-import PaginatedDataList from '../../../../../../components/PaginatedDataList';
+import useRequest from '../../../../../../util/useRequest';
 import DataListToolbar from '../../../../../../components/DataListToolbar';
 import CheckboxListItem from '../../../../../../components/CheckboxListItem';
+import PaginatedTable, {
+  HeaderCell,
+  HeaderRow,
+} from '../../../../../../components/PaginatedTable';
 
 const QS_CONFIG = getQSConfig('projects', {
   page: 1,
@@ -15,42 +19,59 @@ const QS_CONFIG = getQSConfig('projects', {
   order_by: 'name',
 });
 
-function ProjectsList({ i18n, nodeResource, onUpdateNodeResource }) {
-  const [count, setCount] = useState(0);
-  const [error, setError] = useState(null);
-  const [isLoading, setIsLoading] = useState(true);
-  const [projects, setProjects] = useState([]);
-
+function ProjectsList({ nodeResource, onUpdateNodeResource }) {
   const location = useLocation();
 
-  useEffect(() => {
-    (async () => {
-      setIsLoading(true);
-      setProjects([]);
-      setCount(0);
+  const {
+    result: { projects, count, relatedSearchableKeys, searchableKeys },
+    error,
+    isLoading,
+    request: fetchProjects,
+  } = useRequest(
+    useCallback(async () => {
       const params = parseQueryString(QS_CONFIG, location.search);
-      try {
-        const { data } = await ProjectsAPI.read(params);
-        setProjects(data.results);
-        setCount(data.count);
-      } catch (err) {
-        setError(err);
-      } finally {
-        setIsLoading(false);
-      }
-    })();
-  }, [location]);
+      const [response, actionsResponse] = await Promise.all([
+        ProjectsAPI.read(params),
+        ProjectsAPI.readOptions(),
+      ]);
+      return {
+        projects: response.data.results,
+        count: response.data.count,
+        relatedSearchableKeys: (
+          actionsResponse?.data?.related_search_fields || []
+        ).map(val => val.slice(0, -8)),
+        searchableKeys: Object.keys(
+          actionsResponse.data.actions?.GET || {}
+        ).filter(key => actionsResponse.data.actions?.GET[key].filterable),
+      };
+    }, [location]),
+    {
+      projects: [],
+      count: 0,
+      relatedSearchableKeys: [],
+      searchableKeys: [],
+    }
+  );
+
+  useEffect(() => {
+    fetchProjects();
+  }, [fetchProjects]);
 
   return (
-    <PaginatedDataList
+    <PaginatedTable
       contentError={error}
       hasContentLoading={isLoading}
       itemCount={count}
       items={projects}
-      onRowClick={row => onUpdateNodeResource(row)}
       qsConfig={QS_CONFIG}
-      renderItem={item => (
+      headerRow={
+        <HeaderRow isExpandable={false} qsConfig={QS_CONFIG}>
+          <HeaderCell sortKey="name">{t`Name`}</HeaderCell>
+        </HeaderRow>
+      }
+      renderRow={(item, index) => (
         <CheckboxListItem
+          rowIndex={index}
           isSelected={!!(nodeResource && nodeResource.id === item.id)}
           itemId={item.id}
           key={item.id}
@@ -65,40 +86,36 @@ function ProjectsList({ i18n, nodeResource, onUpdateNodeResource }) {
       showPageSizeOptions={false}
       toolbarSearchColumns={[
         {
-          name: i18n._(t`Name`),
-          key: 'name',
+          name: t`Name`,
+          key: 'name__icontains',
           isDefault: true,
         },
         {
-          name: i18n._(t`Type`),
-          key: 'scm_type',
+          name: t`Type`,
+          key: 'or__scm_type',
           options: [
-            [``, i18n._(t`Manual`)],
-            [`git`, i18n._(t`Git`)],
-            [`hg`, i18n._(t`Mercurial`)],
-            [`svn`, i18n._(t`Subversion`)],
-            [`insights`, i18n._(t`Red Hat Insights`)],
+            [``, t`Manual`],
+            [`git`, t`Git`],
+            [`svn`, t`Subversion`],
+            [`archive`, t`Remote Archive`],
+            [`insights`, t`Red Hat Insights`],
           ],
         },
         {
-          name: i18n._(t`Source Control URL`),
-          key: 'scm_url',
+          name: t`Source Control URL`,
+          key: 'scm_url__icontains',
         },
         {
-          name: i18n._(t`Modified By (Username)`),
-          key: 'modified_by__username',
+          name: t`Modified By (Username)`,
+          key: 'modified_by__username__icontains',
         },
         {
-          name: i18n._(t`Created By (Username)`),
-          key: 'created_by__username',
+          name: t`Created By (Username)`,
+          key: 'created_by__username__icontains',
         },
       ]}
-      toolbarSortColumns={[
-        {
-          name: i18n._(t`Name`),
-          key: 'name',
-        },
-      ]}
+      toolbarSearchableKeys={searchableKeys}
+      toolbarRelatedSearchableKeys={relatedSearchableKeys}
     />
   );
 }
@@ -112,4 +129,4 @@ ProjectsList.defaultProps = {
   nodeResource: null,
 };
 
-export default withI18n()(ProjectsList);
+export default ProjectsList;

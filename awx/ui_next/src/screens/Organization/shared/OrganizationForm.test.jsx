@@ -4,7 +4,7 @@ import {
   mountWithContexts,
   waitForElement,
 } from '../../../../testUtils/enzymeHelpers';
-import { OrganizationsAPI } from '../../../api';
+import { OrganizationsAPI, ExecutionEnvironmentsAPI } from '../../../api';
 
 import OrganizationForm from './OrganizationForm';
 
@@ -22,7 +22,6 @@ describe('<OrganizationForm />', () => {
     name: 'Foo',
     description: 'Bar',
     max_hosts: 1,
-    custom_virtualenv: 'Fizz',
     related: {
       instance_groups: '/api/v2/organizations/1/instance_groups',
     },
@@ -31,6 +30,18 @@ describe('<OrganizationForm />', () => {
     { name: 'One', id: 1 },
     { name: 'Two', id: 2 },
   ];
+
+  const mockExecutionEnvironment = [
+    { id: 1, name: 'EE', image: 'quay.io/ansible/awx-ee' },
+  ];
+
+  beforeEach(() => {
+    OrganizationsAPI.readInstanceGroups.mockReturnValue({
+      data: {
+        results: mockInstanceGroups,
+      },
+    });
+  });
 
   afterEach(() => {
     jest.clearAllMocks();
@@ -56,11 +67,6 @@ describe('<OrganizationForm />', () => {
   });
 
   test('componentDidMount should set instanceGroups to state', async () => {
-    OrganizationsAPI.readInstanceGroups.mockReturnValue({
-      data: {
-        results: mockInstanceGroups,
-      },
-    });
     let wrapper;
     await act(async () => {
       wrapper = mountWithContexts(
@@ -132,6 +138,11 @@ describe('<OrganizationForm />', () => {
         results: mockInstanceGroups,
       },
     });
+    ExecutionEnvironmentsAPI.read.mockReturnValue({
+      data: {
+        results: mockExecutionEnvironment,
+      },
+    });
     let wrapper;
     const onSubmit = jest.fn();
     await act(async () => {
@@ -155,51 +166,23 @@ describe('<OrganizationForm />', () => {
       wrapper.find('input#org-max_hosts').simulate('change', {
         target: { value: 134, name: 'max_hosts' },
       });
+      wrapper.find('ExecutionEnvironmentLookup').invoke('onChange')({
+        id: 1,
+        name: 'Test EE',
+      });
     });
     await act(async () => {
       wrapper.find('button[aria-label="Save"]').simulate('click');
     });
+    wrapper.update();
     expect(onSubmit).toHaveBeenCalledTimes(1);
     expect(onSubmit.mock.calls[0][0]).toEqual({
       name: 'new foo',
       description: 'new bar',
-      custom_virtualenv: 'Fizz',
+      galaxy_credentials: [],
       max_hosts: 134,
+      default_environment: { id: 1, name: 'Test EE' },
     });
-  });
-
-  test('AnsibleSelect component renders if there are virtual environments', async () => {
-    const config = {
-      custom_virtualenvs: ['foo', 'bar'],
-    };
-    OrganizationsAPI.readInstanceGroups.mockReturnValue({
-      data: {
-        results: mockInstanceGroups,
-      },
-    });
-    let wrapper;
-    await act(async () => {
-      wrapper = mountWithContexts(
-        <OrganizationForm
-          organization={mockData}
-          onSubmit={jest.fn()}
-          onCancel={jest.fn()}
-          me={meConfig.me}
-        />,
-        {
-          context: { config },
-        }
-      );
-    });
-    await waitForElement(wrapper, 'ContentLoading', el => el.length === 0);
-    expect(wrapper.find('FormSelect')).toHaveLength(1);
-    expect(wrapper.find('FormSelectOption')).toHaveLength(3);
-    expect(
-      wrapper
-        .find('FormSelectOption')
-        .first()
-        .prop('value')
-    ).toEqual('/venv/ansible/');
   });
 
   test('onSubmit associates and disassociates instance groups', async () => {
@@ -208,11 +191,15 @@ describe('<OrganizationForm />', () => {
         results: mockInstanceGroups,
       },
     });
+    ExecutionEnvironmentsAPI.read.mockReturnValue({
+      data: { results: mockExecutionEnvironment },
+    });
     const mockDataForm = {
       name: 'Foo',
       description: 'Bar',
+      galaxy_credentials: [],
       max_hosts: 1,
-      custom_virtualenv: 'Fizz',
+      default_environment: null,
     };
     const onSubmit = jest.fn();
     OrganizationsAPI.update.mockResolvedValue(1, mockDataForm);
@@ -315,8 +302,9 @@ describe('<OrganizationForm />', () => {
       {
         name: 'Foo',
         description: 'Bar',
+        galaxy_credentials: [],
         max_hosts: 0,
-        custom_virtualenv: 'Fizz',
+        default_environment: null,
       },
       [],
       []

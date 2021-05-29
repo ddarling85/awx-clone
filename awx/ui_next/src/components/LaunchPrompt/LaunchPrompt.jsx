@@ -1,33 +1,41 @@
 import React from 'react';
 import { Wizard } from '@patternfly/react-core';
-import { withI18n } from '@lingui/react';
+
 import { t } from '@lingui/macro';
-import { Formik } from 'formik';
+import { Formik, useFormikContext } from 'formik';
 import ContentError from '../ContentError';
 import ContentLoading from '../ContentLoading';
-import mergeExtraVars from './mergeExtraVars';
-import useSteps from './useSteps';
-import getSurveyValues from './getSurveyValues';
+import { useDismissableError } from '../../util/useRequest';
+import mergeExtraVars from '../../util/prompt/mergeExtraVars';
+import getSurveyValues from '../../util/prompt/getSurveyValues';
+import useLaunchSteps from './useLaunchSteps';
+import AlertModal from '../AlertModal';
 
-function LaunchPrompt({ config, resource, onLaunch, onCancel, i18n }) {
+function PromptModalForm({
+  launchConfig,
+  onCancel,
+  onSubmit,
+  resource,
+  surveyConfig,
+  resourceDefaultCredentials,
+}) {
+  const { setFieldTouched, values } = useFormikContext();
+
   const {
     steps,
-    initialValues,
     isReady,
-    validate,
+    validateStep,
     visitStep,
     visitAllSteps,
     contentError,
-  } = useSteps(config, resource, i18n);
+  } = useLaunchSteps(
+    launchConfig,
+    surveyConfig,
+    resource,
+    resourceDefaultCredentials
+  );
 
-  if (contentError) {
-    return <ContentError error={contentError} />;
-  }
-  if (!isReady) {
-    return <ContentLoading />;
-  }
-
-  const submit = values => {
+  const handleSubmit = () => {
     const postValues = {};
     const setValue = (key, value) => {
       if (typeof value !== 'undefined' && value !== null) {
@@ -35,6 +43,7 @@ function LaunchPrompt({ config, resource, onLaunch, onCancel, i18n }) {
       }
     };
     const surveyValues = getSurveyValues(values);
+    setValue('credential_passwords', values.credential_passwords);
     setValue('inventory_id', values.inventory?.id);
     setValue(
       'credentials',
@@ -44,47 +53,94 @@ function LaunchPrompt({ config, resource, onLaunch, onCancel, i18n }) {
     setValue('limit', values.limit);
     setValue('job_tags', values.job_tags);
     setValue('skip_tags', values.skip_tags);
-    const extraVars = config.ask_variables_on_launch
+    const extraVars = launchConfig.ask_variables_on_launch
       ? values.extra_vars || '---'
       : resource.extra_vars;
     setValue('extra_vars', mergeExtraVars(extraVars, surveyValues));
     setValue('scm_branch', values.scm_branch);
-    onLaunch(postValues);
+
+    onSubmit(postValues);
   };
+  const { error, dismissError } = useDismissableError(contentError);
+
+  if (error) {
+    return (
+      <AlertModal
+        isOpen={error}
+        variant="error"
+        title={t`Error!`}
+        onClose={() => {
+          dismissError();
+        }}
+      >
+        <ContentError error={error} />
+      </AlertModal>
+    );
+  }
 
   return (
-    <Formik initialValues={initialValues} onSubmit={submit} validate={validate}>
-      {({ validateForm, setTouched, handleSubmit }) => (
-        <Wizard
-          isOpen
-          onClose={onCancel}
-          onSave={handleSubmit}
-          onNext={async (nextStep, prevStep) => {
-            if (nextStep.id === 'preview') {
-              visitAllSteps(setTouched);
-            } else {
-              visitStep(prevStep.prevId);
-            }
-            await validateForm();
-          }}
-          onGoToStep={async (newStep, prevStep) => {
-            if (newStep.id === 'preview') {
-              visitAllSteps(setTouched);
-            } else {
-              visitStep(prevStep.prevId);
-            }
-            await validateForm();
-          }}
-          title={i18n._(t`Prompts`)}
-          steps={steps}
-          backButtonText={i18n._(t`Back`)}
-          cancelButtonText={i18n._(t`Cancel`)}
-          nextButtonText={i18n._(t`Next`)}
-        />
-      )}
+    <Wizard
+      isOpen
+      onClose={onCancel}
+      onSave={handleSubmit}
+      onBack={async nextStep => {
+        validateStep(nextStep.id);
+      }}
+      onNext={async (nextStep, prevStep) => {
+        if (nextStep.id === 'preview') {
+          visitAllSteps(setFieldTouched);
+        } else {
+          visitStep(prevStep.prevId, setFieldTouched);
+          validateStep(nextStep.id);
+        }
+      }}
+      onGoToStep={async (nextStep, prevStep) => {
+        if (nextStep.id === 'preview') {
+          visitAllSteps(setFieldTouched);
+        } else {
+          visitStep(prevStep.prevId, setFieldTouched);
+          validateStep(nextStep.id);
+        }
+      }}
+      title={t`Prompts`}
+      steps={
+        isReady
+          ? steps
+          : [
+              {
+                name: t`Content Loading`,
+                component: <ContentLoading />,
+              },
+            ]
+      }
+      backButtonText={t`Back`}
+      cancelButtonText={t`Cancel`}
+      nextButtonText={t`Next`}
+    />
+  );
+}
+
+function LaunchPrompt({
+  launchConfig,
+  onCancel,
+  onLaunch,
+  resource = {},
+  surveyConfig,
+  resourceDefaultCredentials = [],
+}) {
+  return (
+    <Formik initialValues={{}} onSubmit={values => onLaunch(values)}>
+      <PromptModalForm
+        onSubmit={values => onLaunch(values)}
+        onCancel={onCancel}
+        launchConfig={launchConfig}
+        surveyConfig={surveyConfig}
+        resource={resource}
+        resourceDefaultCredentials={resourceDefaultCredentials}
+      />
     </Formik>
   );
 }
 
 export { LaunchPrompt as _LaunchPrompt };
-export default withI18n()(LaunchPrompt);
+export default LaunchPrompt;

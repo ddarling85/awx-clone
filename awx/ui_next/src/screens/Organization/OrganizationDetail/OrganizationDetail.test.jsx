@@ -1,7 +1,7 @@
 import React from 'react';
 import { act } from 'react-dom/test-utils';
 
-import { OrganizationsAPI } from '../../../api';
+import { OrganizationsAPI, CredentialsAPI } from '../../../api';
 import {
   mountWithContexts,
   waitForElement,
@@ -13,6 +13,7 @@ jest.mock('../../../api');
 
 describe('<OrganizationDetail />', () => {
   const mockOrganization = {
+    id: 12,
     name: 'Foo',
     description: 'Bar',
     custom_virtualenv: 'Fizz',
@@ -24,7 +25,14 @@ describe('<OrganizationDetail />', () => {
         edit: true,
         delete: true,
       },
+      default_environment: {
+        id: 1,
+        name: 'Default EE',
+        description: '',
+        image: 'quay.io/ansible/awx-ee',
+      },
     },
+    default_environment: 1,
   };
   const mockInstanceGroups = {
     data: {
@@ -36,6 +44,8 @@ describe('<OrganizationDetail />', () => {
   };
 
   beforeEach(() => {
+    CredentialsAPI.read.mockResolvedValue({ data: { count: 0 } });
+
     OrganizationsAPI.readInstanceGroups.mockResolvedValue(mockInstanceGroups);
   });
 
@@ -43,7 +53,7 @@ describe('<OrganizationDetail />', () => {
     jest.clearAllMocks();
   });
 
-  test('initially renders succesfully', async () => {
+  test('initially renders successfully', async () => {
     await act(async () => {
       mountWithContexts(<OrganizationDetail organization={mockOrganization} />);
     });
@@ -54,6 +64,20 @@ describe('<OrganizationDetail />', () => {
       mountWithContexts(<OrganizationDetail organization={mockOrganization} />);
     });
     expect(OrganizationsAPI.readInstanceGroups).toHaveBeenCalledTimes(1);
+  });
+
+  test('should have proper number of delete detail requests', async () => {
+    let component;
+    await act(async () => {
+      component = mountWithContexts(
+        <OrganizationDetail organization={mockOrganization} />
+      );
+    });
+    await waitForElement(component, 'ContentLoading', el => el.length === 0);
+
+    expect(
+      component.find('DeleteButton').prop('deleteDetailsRequests')
+    ).toHaveLength(7);
   });
 
   test('should render the expected instance group', async () => {
@@ -82,10 +106,10 @@ describe('<OrganizationDetail />', () => {
     const testParams = [
       { label: 'Name', value: 'Foo' },
       { label: 'Description', value: 'Bar' },
-      { label: 'Ansible Environment', value: 'Fizz' },
       { label: 'Created', value: '7/7/2015, 5:21:26 PM' },
       { label: 'Last Modified', value: '8/11/2019, 7:47:37 PM' },
       { label: 'Max Hosts', value: '0' },
+      { label: 'Default Execution Environment', value: 'Default EE' },
     ];
     for (let i = 0; i < testParams.length; i++) {
       const { label, value } = testParams[i];

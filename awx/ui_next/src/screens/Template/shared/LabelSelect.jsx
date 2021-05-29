@@ -1,10 +1,15 @@
 import React, { useState, useEffect } from 'react';
 import { func, arrayOf, number, shape, string, oneOfType } from 'prop-types';
 import { Select, SelectOption, SelectVariant } from '@patternfly/react-core';
+import { t } from '@lingui/macro';
 import { LabelsAPI } from '../../../api';
 import { useSyncedSelectValue } from '../../../components/MultiSelect';
+import useIsMounted from '../../../util/useIsMounted';
 
-async function loadLabelOptions(setLabels, onError) {
+async function loadLabelOptions(setLabels, onError, isMounted) {
+  if (!isMounted.current) {
+    return;
+  }
   let labels;
   try {
     const { data } = await LabelsAPI.read({
@@ -31,11 +36,12 @@ async function loadLabelOptions(setLabels, onError) {
 
 function LabelSelect({ value, placeholder, onChange, onError, createText }) {
   const [isLoading, setIsLoading] = useState(true);
+  const [isExpanded, setIsExpanded] = useState(false);
+  const isMounted = useIsMounted();
   const { selections, onSelect, options, setOptions } = useSyncedSelectValue(
     value,
     onChange
   );
-  const [isExpanded, setIsExpanded] = useState(false);
 
   const toggleExpanded = toggleValue => {
     setIsExpanded(toggleValue);
@@ -43,7 +49,10 @@ function LabelSelect({ value, placeholder, onChange, onError, createText }) {
 
   useEffect(() => {
     (async () => {
-      await loadLabelOptions(setOptions, onError);
+      await loadLabelOptions(setOptions, onError, isMounted);
+      if (!isMounted.current) {
+        return;
+      }
       setIsLoading(false);
     })();
     /* eslint-disable-next-line react-hooks/exhaustive-deps */
@@ -57,6 +66,14 @@ function LabelSelect({ value, placeholder, onChange, onError, createText }) {
     ));
   };
 
+  const onFilter = event => {
+    if (event) {
+      const str = event.target.value.toLowerCase();
+      const matches = options.filter(o => o.name.toLowerCase().includes(str));
+      return renderOptions(matches);
+    }
+    return null;
+  };
   return (
     <Select
       variant={SelectVariant.typeaheadMulti}
@@ -68,11 +85,7 @@ function LabelSelect({ value, placeholder, onChange, onError, createText }) {
         onSelect(e, item);
       }}
       onClear={() => onChange([])}
-      onFilter={event => {
-        const str = event.target.value.toLowerCase();
-        const matches = options.filter(o => o.name.toLowerCase().includes(str));
-        return renderOptions(matches);
-      }}
+      onFilter={onFilter}
       isCreatable
       onCreateOption={label => {
         label = label.trim();
@@ -83,8 +96,8 @@ function LabelSelect({ value, placeholder, onChange, onError, createText }) {
       }}
       isDisabled={isLoading}
       selections={selections}
-      isExpanded={isExpanded}
-      ariaLabelledBy="label-select"
+      isOpen={isExpanded}
+      typeAheadAriaLabel={t`Select Labels`}
       placeholderText={placeholder}
       createText={createText}
     >

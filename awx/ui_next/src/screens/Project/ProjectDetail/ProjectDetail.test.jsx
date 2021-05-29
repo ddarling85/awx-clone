@@ -5,11 +5,21 @@ import {
   mountWithContexts,
   waitForElement,
 } from '../../../../testUtils/enzymeHelpers';
-import { ProjectsAPI } from '../../../api';
+import {
+  ProjectsAPI,
+  JobTemplatesAPI,
+  WorkflowJobTemplatesAPI,
+  InventorySourcesAPI,
+} from '../../../api';
 import ProjectDetail from './ProjectDetail';
 
 jest.mock('../../../api');
-
+jest.mock('react-router-dom', () => ({
+  ...jest.requireActual('react-router-dom'),
+  useRouteMatch: () => ({
+    url: '/projects/1/details',
+  }),
+}));
 describe('<ProjectDetail />', () => {
   const mockProject = {
     id: 1,
@@ -19,6 +29,11 @@ describe('<ProjectDetail />', () => {
       organization: {
         id: 10,
         name: 'Foo',
+      },
+      default_environment: {
+        id: 12,
+        name: 'Bar',
+        image: 'quay.io/ansible/awx-ee',
       },
       credential: {
         id: 1000,
@@ -55,6 +70,7 @@ describe('<ProjectDetail />', () => {
     scm_refspec: 'refs/remotes/*',
     scm_clean: true,
     scm_delete_on_update: true,
+    scm_track_submodules: false,
     credential: 100,
     status: 'successful',
     organization: 10,
@@ -62,9 +78,10 @@ describe('<ProjectDetail />', () => {
     scm_update_cache_timeout: 5,
     allow_override: true,
     custom_virtualenv: '/custom-venv',
+    default_environment: 1,
   };
 
-  test('initially renders succesfully', () => {
+  test('initially renders successfully', () => {
     mountWithContexts(<ProjectDetail project={mockProject} />);
   });
 
@@ -89,7 +106,15 @@ describe('<ProjectDetail />', () => {
       'Cache Timeout',
       `${mockProject.scm_update_cache_timeout} Seconds`
     );
-    assertDetail('Ansible Environment', mockProject.custom_virtualenv);
+    const executionEnvironment = wrapper.find('ExecutionEnvironmentDetail');
+    expect(executionEnvironment).toHaveLength(1);
+    expect(executionEnvironment.find('dt').text()).toEqual(
+      'Default Execution Environment'
+    );
+    expect(executionEnvironment.find('dd').text()).toEqual(
+      mockProject.summary_fields.default_environment.name
+    );
+
     const dateDetails = wrapper.find('UserDateDetail');
     expect(dateDetails).toHaveLength(2);
     expect(dateDetails.at(0).prop('label')).toEqual('Created');
@@ -117,6 +142,7 @@ describe('<ProjectDetail />', () => {
       scm_type: '',
       scm_clean: false,
       scm_delete_on_update: false,
+      scm_track_submodules: false,
       scm_update_on_launch: false,
       allow_override: false,
       created: '',
@@ -126,6 +152,27 @@ describe('<ProjectDetail />', () => {
       <ProjectDetail project={{ ...mockProject, ...mockOptions }} />
     );
     expect(wrapper.find('Detail[label="Options"]').length).toBe(0);
+  });
+
+  test('should have proper number of delete detail requests', () => {
+    JobTemplatesAPI.read.mockResolvedValue({ data: { count: 0 } });
+    WorkflowJobTemplatesAPI.read.mockResolvedValue({ data: { count: 0 } });
+    InventorySourcesAPI.read.mockResolvedValue({ data: { count: 0 } });
+    const mockOptions = {
+      scm_type: '',
+      scm_clean: false,
+      scm_delete_on_update: false,
+      scm_update_on_launch: false,
+      allow_override: false,
+      created: '',
+      modified: '',
+    };
+    const wrapper = mountWithContexts(
+      <ProjectDetail project={{ ...mockProject, ...mockOptions }} />
+    );
+    expect(
+      wrapper.find('DeleteButton').prop('deleteDetailsRequests')
+    ).toHaveLength(3);
   });
 
   test('should render with missing summary fields', async () => {
@@ -139,13 +186,19 @@ describe('<ProjectDetail />', () => {
     );
   });
 
-  test('should show edit button for users with edit permission', async () => {
+  test('should show edit and sync button for users with edit permission', async () => {
     const wrapper = mountWithContexts(<ProjectDetail project={mockProject} />);
     const editButton = await waitForElement(
       wrapper,
       'ProjectDetail Button[aria-label="edit"]'
     );
+
+    const syncButton = await waitForElement(
+      wrapper,
+      'ProjectDetail Button[aria-label="Sync Project"]'
+    );
     expect(editButton.text()).toEqual('Edit');
+    expect(syncButton.text()).toEqual('Sync');
     expect(editButton.prop('to')).toBe(`/projects/${mockProject.id}/edit`);
   });
 
@@ -166,6 +219,9 @@ describe('<ProjectDetail />', () => {
     expect(wrapper.find('ProjectDetail Button[aria-label="edit"]').length).toBe(
       0
     );
+    expect(wrapper.find('ProjectDetail Button[aria-label="sync"]').length).toBe(
+      0
+    );
   });
 
   test('edit button should navigate to project edit', () => {
@@ -178,6 +234,17 @@ describe('<ProjectDetail />', () => {
       .find('Button[aria-label="edit"] Link')
       .simulate('click', { button: 0 });
     expect(history.location.pathname).toEqual('/projects/1/edit');
+  });
+
+  test('sync button should call api to syn project', async () => {
+    ProjectsAPI.readSync.mockResolvedValue({ data: { can_update: true } });
+    const wrapper = mountWithContexts(<ProjectDetail project={mockProject} />);
+    await act(() =>
+      wrapper
+        .find('ProjectDetail Button[aria-label="Sync Project"]')
+        .prop('onClick')(1)
+    );
+    expect(ProjectsAPI.sync).toHaveBeenCalledTimes(1);
   });
 
   test('expected api calls are made for delete', async () => {

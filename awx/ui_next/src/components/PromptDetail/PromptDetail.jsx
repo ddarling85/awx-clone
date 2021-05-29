@@ -1,26 +1,36 @@
 import 'styled-components/macro';
 import React from 'react';
 import { shape } from 'prop-types';
-import { withI18n } from '@lingui/react';
+
 import { t, Trans } from '@lingui/macro';
 import { Link } from 'react-router-dom';
 import styled from 'styled-components';
-import { Chip, Divider } from '@patternfly/react-core';
+import { Chip, Divider, Title } from '@patternfly/react-core';
 import { toTitleCase } from '../../util/strings';
 
 import CredentialChip from '../CredentialChip';
 import ChipGroup from '../ChipGroup';
 import { DetailList, Detail, UserDateDetail } from '../DetailList';
-import { VariablesDetail } from '../CodeMirrorInput';
+import { VariablesDetail } from '../CodeEditor';
 
 import PromptProjectDetail from './PromptProjectDetail';
 import PromptInventorySourceDetail from './PromptInventorySourceDetail';
 import PromptJobTemplateDetail from './PromptJobTemplateDetail';
 import PromptWFJobTemplateDetail from './PromptWFJobTemplateDetail';
 
-const PromptHeader = styled.h2`
-  font-weight: bold;
-  margin: var(--pf-global--spacer--lg) 0;
+const PromptTitle = styled(Title)`
+  margin-top: var(--pf-global--spacer--xl);
+  --pf-c-title--m-md--FontWeight: 700;
+  grid-column: 1 / -1;
+`;
+
+const PromptDivider = styled(Divider)`
+  margin-top: var(--pf-global--spacer--lg);
+  margin-bottom: var(--pf-global--spacer--lg);
+`;
+
+const PromptDetailList = styled(DetailList)`
+  padding: 0px var(--pf-global--spacer--lg);
 `;
 
 function formatTimeout(timeout) {
@@ -53,6 +63,7 @@ function buildResourceLink(resource) {
 
 function hasPromptData(launchData) {
   return (
+    launchData.survey_enabled ||
     launchData.ask_credential_on_launch ||
     launchData.ask_diff_mode_on_launch ||
     launchData.ask_inventory_on_launch ||
@@ -66,43 +77,42 @@ function hasPromptData(launchData) {
   );
 }
 
-function omitOverrides(resource, overrides) {
+function omitOverrides(resource, overrides, defaultConfig) {
   const clonedResource = {
     ...resource,
     summary_fields: { ...resource.summary_fields },
+    ...defaultConfig,
   };
   Object.keys(overrides).forEach(keyToOmit => {
     delete clonedResource[keyToOmit];
-    delete clonedResource.summary_fields[keyToOmit];
+    delete clonedResource?.summary_fields[keyToOmit];
   });
   return clonedResource;
 }
 
-function PromptDetail({ i18n, resource, launchConfig = {}, overrides = {} }) {
+function PromptDetail({ resource, launchConfig = {}, overrides = {} }) {
   const VERBOSITY = {
-    0: i18n._(t`0 (Normal)`),
-    1: i18n._(t`1 (Verbose)`),
-    2: i18n._(t`2 (More Verbose)`),
-    3: i18n._(t`3 (Debug)`),
-    4: i18n._(t`4 (Connection Debug)`),
+    0: t`0 (Normal)`,
+    1: t`1 (Verbose)`,
+    2: t`2 (More Verbose)`,
+    3: t`3 (Debug)`,
+    4: t`4 (Connection Debug)`,
   };
 
-  const details = omitOverrides(resource, overrides);
+  const details = omitOverrides(resource, overrides, launchConfig.defaults);
+  details.type = overrides?.nodeType || details.type;
   const hasOverrides = Object.keys(overrides).length > 0;
 
   return (
     <>
       <DetailList gutter="sm">
-        <Detail label={i18n._(t`Name`)} value={buildResourceLink(resource)} />
-        <Detail label={i18n._(t`Description`)} value={details.description} />
+        <Detail label={t`Name`} value={buildResourceLink(resource)} />
+        <Detail label={t`Description`} value={details.description} />
         <Detail
-          label={i18n._(t`Type`)}
+          label={t`Type`}
           value={toTitleCase(details.unified_job_type || details.type)}
         />
-        <Detail
-          label={i18n._(t`Timeout`)}
-          value={formatTimeout(details?.timeout)}
-        />
+        <Detail label={t`Timeout`} value={formatTimeout(details?.timeout)} />
         {details?.type === 'project' && (
           <PromptProjectDetail resource={details} />
         )}
@@ -117,14 +127,14 @@ function PromptDetail({ i18n, resource, launchConfig = {}, overrides = {} }) {
         )}
         {details?.created && (
           <UserDateDetail
-            label={i18n._(t`Created`)}
+            label={t`Created`}
             date={details.created}
             user={details?.summary_fields?.created_by}
           />
         )}
         {details?.modified && (
           <UserDateDetail
-            label={i18n._(t`Last Modified`)}
+            label={t`Last Modified`}
             date={details?.modified}
             user={details?.summary_fields?.modified_by}
           />
@@ -133,19 +143,19 @@ function PromptDetail({ i18n, resource, launchConfig = {}, overrides = {} }) {
 
       {hasPromptData(launchConfig) && hasOverrides && (
         <>
-          <Divider css="margin-top: var(--pf-global--spacer--lg)" />
-          <PromptHeader>{i18n._(t`Prompted Values`)}</PromptHeader>
-          <DetailList aria-label="Prompt Overrides">
-            {overrides?.job_type && (
+          <PromptTitle headingLevel="h2">{t`Prompted Values`}</PromptTitle>
+          <PromptDivider />
+          <PromptDetailList aria-label={t`Prompt Overrides`}>
+            {launchConfig.ask_job_type_on_launch && (
               <Detail
-                label={i18n._(t`Job Type`)}
+                label={t`Job Type`}
                 value={toTitleCase(overrides.job_type)}
               />
             )}
-            {overrides?.credentials && (
+            {launchConfig.ask_credential_on_launch && (
               <Detail
                 fullWidth
-                label={i18n._(t`Credentials`)}
+                label={t`Credentials`}
                 rows={4}
                 value={
                   <ChipGroup
@@ -163,79 +173,86 @@ function PromptDetail({ i18n, resource, launchConfig = {}, overrides = {} }) {
                 }
               />
             )}
-            {overrides?.inventory && (
-              <Detail
-                label={i18n._(t`Inventory`)}
-                value={overrides.inventory?.name}
-              />
+            {launchConfig.ask_inventory_on_launch && (
+              <Detail label={t`Inventory`} value={overrides.inventory?.name} />
             )}
-            {overrides?.scm_branch && (
+            {launchConfig.ask_scm_branch_on_launch && (
               <Detail
-                label={i18n._(t`Source Control Branch`)}
+                label={t`Source Control Branch`}
                 value={overrides.scm_branch}
               />
             )}
-            {overrides?.limit && (
-              <Detail label={i18n._(t`Limit`)} value={overrides.limit} />
+            {launchConfig.ask_limit_on_launch && (
+              <Detail label={t`Limit`} value={overrides.limit} />
             )}
-            {overrides?.verbosity && (
+            {Object.prototype.hasOwnProperty.call(overrides, 'verbosity') &&
+            launchConfig.ask_verbosity_on_launch ? (
               <Detail
-                label={i18n._(t`Verbosity`)}
+                label={t`Verbosity`}
                 value={VERBOSITY[overrides.verbosity]}
               />
-            )}
-            {overrides?.job_tags && (
+            ) : null}
+            {launchConfig.ask_tags_on_launch && (
               <Detail
                 fullWidth
-                label={i18n._(t`Job Tags`)}
+                label={t`Job Tags`}
                 value={
                   <ChipGroup
                     numChips={5}
-                    totalChips={overrides.job_tags.split(',').length}
+                    totalChips={
+                      !overrides.job_tags || overrides.job_tags === ''
+                        ? 0
+                        : overrides.job_tags.split(',').length
+                    }
                   >
-                    {overrides.job_tags.split(',').map(jobTag => (
-                      <Chip key={jobTag} isReadOnly>
-                        {jobTag}
-                      </Chip>
-                    ))}
+                    {overrides.job_tags.length > 0 &&
+                      overrides.job_tags.split(',').map(jobTag => (
+                        <Chip key={jobTag} isReadOnly>
+                          {jobTag}
+                        </Chip>
+                      ))}
                   </ChipGroup>
                 }
               />
             )}
-            {overrides?.skip_tags && (
+            {launchConfig.ask_skip_tags_on_launch && (
               <Detail
                 fullWidth
-                label={i18n._(t`Skip Tags`)}
+                label={t`Skip Tags`}
                 value={
                   <ChipGroup
                     numChips={5}
-                    totalChips={overrides.skip_tags.split(',').length}
+                    totalChips={
+                      !overrides.skip_tags || overrides.skip_tags === ''
+                        ? 0
+                        : overrides.skip_tags.split(',').length
+                    }
                   >
-                    {overrides.skip_tags.split(',').map(skipTag => (
-                      <Chip key={skipTag} isReadOnly>
-                        {skipTag}
-                      </Chip>
-                    ))}
+                    {overrides.skip_tags.length > 0 &&
+                      overrides.skip_tags.split(',').map(skipTag => (
+                        <Chip key={skipTag} isReadOnly>
+                          {skipTag}
+                        </Chip>
+                      ))}
                   </ChipGroup>
                 }
               />
             )}
-            {overrides?.diff_mode && (
+            {launchConfig.ask_diff_mode_on_launch && (
               <Detail
-                label={i18n._(t`Show Changes`)}
-                value={
-                  overrides.diff_mode === true ? i18n._(t`On`) : i18n._(t`Off`)
-                }
+                label={t`Show Changes`}
+                value={overrides.diff_mode === true ? t`On` : t`Off`}
               />
             )}
-            {overrides?.extra_vars && (
+            {(launchConfig.survey_enabled ||
+              launchConfig.ask_variables_on_launch) && (
               <VariablesDetail
-                label={i18n._(t`Variables`)}
+                label={t`Variables`}
                 rows={4}
                 value={overrides.extra_vars}
               />
             )}
-          </DetailList>
+          </PromptDetailList>
         </>
       )}
     </>
@@ -251,4 +268,4 @@ PromptDetail.propTypes = {
   launchConfig: shape({}),
 };
 
-export default withI18n()(PromptDetail);
+export default PromptDetail;

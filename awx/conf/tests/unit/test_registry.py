@@ -29,33 +29,22 @@ def reg(request):
     # as "defined in a settings file".  This is analogous to manually
     # specifying a setting on the filesystem (e.g., in a local_settings.py in
     # development, or in /etc/tower/conf.d/<something>.py)
-    defaults = request.node.get_marker('defined_in_file')
-    if defaults:
-        settings.configure(**defaults.kwargs)
-    settings._wrapped = SettingsWrapper(settings._wrapped,
-                                        cache,
-                                        registry)
+    for marker in request.node.own_markers:
+        if marker.name == 'defined_in_file':
+            settings.configure(**marker.kwargs)
+
+    settings._wrapped = SettingsWrapper(settings._wrapped, cache, registry)
     return registry
 
 
 def test_simple_setting_registration(reg):
     assert reg.get_registered_settings() == []
-    reg.register(
-        'AWX_SOME_SETTING_ENABLED',
-        field_class=fields.BooleanField,
-        category=_('System'),
-        category_slug='system',
-    )
+    reg.register('AWX_SOME_SETTING_ENABLED', field_class=fields.BooleanField, category=_('System'), category_slug='system')
     assert reg.get_registered_settings() == ['AWX_SOME_SETTING_ENABLED']
 
 
 def test_simple_setting_unregistration(reg):
-    reg.register(
-        'AWX_SOME_SETTING_ENABLED',
-        field_class=fields.BooleanField,
-        category=_('System'),
-        category_slug='system',
-    )
+    reg.register('AWX_SOME_SETTING_ENABLED', field_class=fields.BooleanField, category=_('System'), category_slug='system')
     assert reg.get_registered_settings() == ['AWX_SOME_SETTING_ENABLED']
 
     reg.unregister('AWX_SOME_SETTING_ENABLED')
@@ -66,12 +55,7 @@ def test_duplicate_setting_registration(reg):
     "ensure that settings cannot be registered twice."
     with pytest.raises(ImproperlyConfigured):
         for i in range(2):
-            reg.register(
-                'AWX_SOME_SETTING_ENABLED',
-                field_class=fields.BooleanField,
-                category=_('System'),
-                category_slug='system',
-            )
+            reg.register('AWX_SOME_SETTING_ENABLED', field_class=fields.BooleanField, category=_('System'), category_slug='system')
 
 
 def test_field_class_required_for_registration(reg):
@@ -81,110 +65,42 @@ def test_field_class_required_for_registration(reg):
 
 
 def test_get_registered_settings_by_slug(reg):
-    reg.register(
-        'AWX_SOME_SETTING_ENABLED',
-        field_class=fields.BooleanField,
-        category=_('System'),
-        category_slug='system',
-    )
-    assert reg.get_registered_settings(category_slug='system') == [
-        'AWX_SOME_SETTING_ENABLED'
-    ]
+    reg.register('AWX_SOME_SETTING_ENABLED', field_class=fields.BooleanField, category=_('System'), category_slug='system')
+    assert reg.get_registered_settings(category_slug='system') == ['AWX_SOME_SETTING_ENABLED']
     assert reg.get_registered_settings(category_slug='other') == []
 
 
 def test_get_registered_read_only_settings(reg):
-    reg.register(
-        'AWX_SOME_SETTING_ENABLED',
-        field_class=fields.BooleanField,
-        category=_('System'),
-        category_slug='system'
-    )
-    reg.register(
-        'AWX_SOME_READ_ONLY',
-        field_class=fields.BooleanField,
-        category=_('System'),
-        category_slug='system',
-        read_only=True
-    )
-    assert reg.get_registered_settings(read_only=True) ==[
-        'AWX_SOME_READ_ONLY'
-    ]
-    assert reg.get_registered_settings(read_only=False) == [
-        'AWX_SOME_SETTING_ENABLED'
-    ]
-    assert reg.get_registered_settings() == [
-        'AWX_SOME_SETTING_ENABLED',
-        'AWX_SOME_READ_ONLY'
-    ]
+    reg.register('AWX_SOME_SETTING_ENABLED', field_class=fields.BooleanField, category=_('System'), category_slug='system')
+    reg.register('AWX_SOME_READ_ONLY', field_class=fields.BooleanField, category=_('System'), category_slug='system', read_only=True)
+    assert reg.get_registered_settings(read_only=True) == ['AWX_SOME_READ_ONLY']
+    assert reg.get_registered_settings(read_only=False) == ['AWX_SOME_SETTING_ENABLED']
+    assert reg.get_registered_settings() == ['AWX_SOME_SETTING_ENABLED', 'AWX_SOME_READ_ONLY']
 
 
 def test_get_dependent_settings(reg):
+    reg.register('AWX_SOME_SETTING_ENABLED', field_class=fields.BooleanField, category=_('System'), category_slug='system')
     reg.register(
-        'AWX_SOME_SETTING_ENABLED',
-        field_class=fields.BooleanField,
-        category=_('System'),
-        category_slug='system'
+        'AWX_SOME_DEPENDENT_SETTING', field_class=fields.BooleanField, category=_('System'), category_slug='system', depends_on=['AWX_SOME_SETTING_ENABLED']
     )
-    reg.register(
-        'AWX_SOME_DEPENDENT_SETTING',
-        field_class=fields.BooleanField,
-        category=_('System'),
-        category_slug='system',
-        depends_on=['AWX_SOME_SETTING_ENABLED']
-    )
-    assert reg.get_dependent_settings('AWX_SOME_SETTING_ENABLED') == set([
-        'AWX_SOME_DEPENDENT_SETTING'
-    ])
+    assert reg.get_dependent_settings('AWX_SOME_SETTING_ENABLED') == set(['AWX_SOME_DEPENDENT_SETTING'])
 
 
 def test_get_registered_categories(reg):
-    reg.register(
-        'AWX_SOME_SETTING_ENABLED',
-        field_class=fields.BooleanField,
-        category=_('System'),
-        category_slug='system'
-    )
-    reg.register(
-        'AWX_SOME_OTHER_SETTING_ENABLED',
-        field_class=fields.BooleanField,
-        category=_('OtherSystem'),
-        category_slug='other-system'
-    )
-    assert reg.get_registered_categories() == {
-        'all': _('All'),
-        'changed': _('Changed'),
-        'system': _('System'),
-        'other-system': _('OtherSystem'),
-    }
+    reg.register('AWX_SOME_SETTING_ENABLED', field_class=fields.BooleanField, category=_('System'), category_slug='system')
+    reg.register('AWX_SOME_OTHER_SETTING_ENABLED', field_class=fields.BooleanField, category=_('OtherSystem'), category_slug='other-system')
+    assert reg.get_registered_categories() == {'all': _('All'), 'changed': _('Changed'), 'system': _('System'), 'other-system': _('OtherSystem')}
 
 
 def test_is_setting_encrypted(reg):
-    reg.register(
-        'AWX_SOME_SETTING_ENABLED',
-        field_class=fields.CharField,
-        category=_('System'),
-        category_slug='system'
-    )
-    reg.register(
-        'AWX_SOME_ENCRYPTED_SETTING',
-        field_class=fields.CharField,
-        category=_('System'),
-        category_slug='system',
-        encrypted=True
-    )
+    reg.register('AWX_SOME_SETTING_ENABLED', field_class=fields.CharField, category=_('System'), category_slug='system')
+    reg.register('AWX_SOME_ENCRYPTED_SETTING', field_class=fields.CharField, category=_('System'), category_slug='system', encrypted=True)
     assert reg.is_setting_encrypted('AWX_SOME_SETTING_ENABLED') is False
     assert reg.is_setting_encrypted('AWX_SOME_ENCRYPTED_SETTING') is True
 
 
 def test_simple_field(reg):
-    reg.register(
-        'AWX_SOME_SETTING',
-        field_class=fields.CharField,
-        category=_('System'),
-        category_slug='system',
-        placeholder='Example Value',
-    )
+    reg.register('AWX_SOME_SETTING', field_class=fields.CharField, category=_('System'), category_slug='system', placeholder='Example Value')
 
     field = reg.get_setting_field('AWX_SOME_SETTING')
     assert isinstance(field, fields.CharField)
@@ -195,31 +111,20 @@ def test_simple_field(reg):
 
 
 def test_field_with_custom_attribute(reg):
-    reg.register(
-        'AWX_SOME_SETTING_ENABLED',
-        field_class=fields.BooleanField,
-        category_slug='system',
-    )
+    reg.register('AWX_SOME_SETTING_ENABLED', field_class=fields.BooleanField, category_slug='system')
 
-    field = reg.get_setting_field('AWX_SOME_SETTING_ENABLED',
-                                  category_slug='other-system')
+    field = reg.get_setting_field('AWX_SOME_SETTING_ENABLED', category_slug='other-system')
     assert field.category_slug == 'other-system'
 
 
 def test_field_with_custom_mixin(reg):
     class GreatMixin(object):
-
         def is_great(self):
             return True
 
-    reg.register(
-        'AWX_SOME_SETTING_ENABLED',
-        field_class=fields.BooleanField,
-        category_slug='system',
-    )
+    reg.register('AWX_SOME_SETTING_ENABLED', field_class=fields.BooleanField, category_slug='system')
 
-    field = reg.get_setting_field('AWX_SOME_SETTING_ENABLED',
-                                  mixin_class=GreatMixin)
+    field = reg.get_setting_field('AWX_SOME_SETTING_ENABLED', mixin_class=GreatMixin)
     assert isinstance(field, fields.BooleanField)
     assert isinstance(field, GreatMixin)
     assert field.is_great() is True
@@ -227,12 +132,7 @@ def test_field_with_custom_mixin(reg):
 
 @pytest.mark.defined_in_file(AWX_SOME_SETTING='DEFAULT')
 def test_default_value_from_settings(reg):
-    reg.register(
-        'AWX_SOME_SETTING',
-        field_class=fields.CharField,
-        category=_('System'),
-        category_slug='system',
-    )
+    reg.register('AWX_SOME_SETTING', field_class=fields.CharField, category=_('System'), category_slug='system')
 
     field = reg.get_setting_field('AWX_SOME_SETTING')
     assert field.default == 'DEFAULT'
@@ -241,16 +141,10 @@ def test_default_value_from_settings(reg):
 @pytest.mark.defined_in_file(AWX_SOME_SETTING='DEFAULT')
 def test_default_value_from_settings_with_custom_representation(reg):
     class LowercaseCharField(fields.CharField):
-
         def to_representation(self, value):
             return value.lower()
 
-    reg.register(
-        'AWX_SOME_SETTING',
-        field_class=LowercaseCharField,
-        category=_('System'),
-        category_slug='system',
-    )
+    reg.register('AWX_SOME_SETTING', field_class=LowercaseCharField, category=_('System'), category_slug='system')
 
     field = reg.get_setting_field('AWX_SOME_SETTING')
     assert field.default == 'default'

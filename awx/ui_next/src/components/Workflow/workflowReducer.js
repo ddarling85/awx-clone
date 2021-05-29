@@ -49,31 +49,66 @@ export default function visualizerReducer(state, action) {
     case 'DELETE_NODE':
       return deleteNode(state);
     case 'GENERATE_NODES_AND_LINKS':
-      return generateNodesAndLinks(state, action.nodes, action.i18n);
+      return generateNodesAndLinks(state, action.nodes);
     case 'RESET':
       return initReducer();
     case 'SELECT_SOURCE_FOR_LINKING':
       return selectSourceForLinking(state, action.node);
     case 'SET_ADD_LINK_TARGET_NODE':
-      return { ...state, addLinkTargetNode: action.value };
+      return {
+        ...state,
+        addLinkTargetNode: action.value,
+      };
     case 'SET_CONTENT_ERROR':
-      return { ...state, contentError: action.value };
+      return {
+        ...state,
+        contentError: action.value,
+      };
     case 'SET_IS_LOADING':
-      return { ...state, isLoading: action.value };
+      return {
+        ...state,
+        isLoading: action.value,
+      };
     case 'SET_LINK_TO_DELETE':
-      return { ...state, linkToDelete: action.value };
+      return {
+        ...state,
+        linkToDelete: action.value,
+      };
     case 'SET_LINK_TO_EDIT':
-      return { ...state, linkToEdit: action.value };
+      return {
+        ...state,
+        linkToEdit: action.value,
+      };
+    case 'SET_NODES':
+      return {
+        ...state,
+        nodes: action.value,
+      };
     case 'SET_NODE_POSITIONS':
-      return { ...state, nodePositions: action.value };
+      return {
+        ...state,
+        nodePositions: action.value,
+      };
     case 'SET_NODE_TO_DELETE':
-      return { ...state, nodeToDelete: action.value };
+      return {
+        ...state,
+        nodeToDelete: action.value,
+      };
     case 'SET_NODE_TO_EDIT':
-      return { ...state, nodeToEdit: action.value };
+      return {
+        ...state,
+        nodeToEdit: action.value,
+      };
     case 'SET_NODE_TO_VIEW':
-      return { ...state, nodeToView: action.value };
+      return {
+        ...state,
+        nodeToView: action.value,
+      };
     case 'SET_SHOW_DELETE_ALL_NODES_MODAL':
-      return { ...state, showDeleteAllNodesModal: action.value };
+      return {
+        ...state,
+        showDeleteAllNodesModal: action.value,
+      };
     case 'START_ADD_NODE':
       return {
         ...state,
@@ -111,8 +146,12 @@ function createLink(state, linkType) {
   });
 
   newLinks.push({
-    source: { id: addLinkSourceNode.id },
-    target: { id: addLinkTargetNode.id },
+    source: {
+      id: addLinkSourceNode.id,
+    },
+    target: {
+      id: addLinkTargetNode.id,
+    },
     linkType,
   });
 
@@ -141,8 +180,10 @@ function createNode(state, node) {
 
   newNodes.push({
     id: nextNodeId,
-    unifiedJobTemplate: node.nodeResource,
+    fullUnifiedJobTemplate: node.nodeResource,
     isInvalidLinkTarget: false,
+    promptValues: node.promptValues,
+    all_parents_must_converge: node.all_parents_must_converge,
   });
 
   // Ensures that root nodes appear to always run
@@ -152,8 +193,12 @@ function createNode(state, node) {
   }
 
   newLinks.push({
-    source: { id: addNodeSource },
-    target: { id: nextNodeId },
+    source: {
+      id: addNodeSource,
+    },
+    target: {
+      id: nextNodeId,
+    },
     linkType: node.linkType,
   });
 
@@ -163,7 +208,9 @@ function createNode(state, node) {
         linkToCompare.source.id === addNodeSource &&
         linkToCompare.target.id === addNodeTarget
       ) {
-        linkToCompare.source = { id: nextNodeId };
+        linkToCompare.source = {
+          id: nextNodeId,
+        };
       }
     });
   }
@@ -266,15 +313,23 @@ function addLinksFromParentsToChildren(
         // doesn't have any other parents
         if (linkParentMapping[child.id].length === 1) {
           newLinks.push({
-            source: { id: parentId },
-            target: { id: child.id },
+            source: {
+              id: parentId,
+            },
+            target: {
+              id: child.id,
+            },
             linkType: 'always',
           });
         }
       } else if (!linkParentMapping[child.id].includes(parentId)) {
         newLinks.push({
-          source: { id: parentId },
-          target: { id: child.id },
+          source: {
+            id: parentId,
+          },
+          target: {
+            id: child.id,
+          },
           linkType: child.linkType,
         });
       }
@@ -300,7 +355,10 @@ function removeLinksFromDeletedNode(
 
     if (link.source.id === nodeId || link.target.id === nodeId) {
       if (link.source.id === nodeId) {
-        children.push({ id: link.target.id, linkType: link.linkType });
+        children.push({
+          id: link.target.id,
+          linkType: link.linkType,
+        });
       } else if (link.target.id === nodeId) {
         parents.push(link.source.id);
       }
@@ -342,7 +400,7 @@ function deleteNode(state) {
   };
 }
 
-function generateNodes(workflowNodes, i18n) {
+function generateNodes(workflowNodes) {
   const allNodeIds = [];
   const chartNodeIdToIndexMapping = {};
   const nodeIdToChartNodeIdMapping = {};
@@ -350,8 +408,8 @@ function generateNodes(workflowNodes, i18n) {
   const arrayOfNodesForChart = [
     {
       id: 1,
-      unifiedJobTemplate: {
-        name: i18n._(t`START`),
+      fullUnifiedJobTemplate: {
+        name: t`START`,
       },
     },
   ];
@@ -363,11 +421,14 @@ function generateNodes(workflowNodes, i18n) {
       originalNodeObject: node,
     };
 
-    if (node.summary_fields.job) {
-      nodeObj.job = node.summary_fields.job;
-    }
-    if (node.summary_fields.unified_job_template) {
-      nodeObj.unifiedJobTemplate = node.summary_fields.unified_job_template;
+    if (
+      node.summary_fields?.unified_job_template?.unified_job_type ===
+      'workflow_approval'
+    ) {
+      nodeObj.fullUnifiedJobTemplate = {
+        ...node.summary_fields.unified_job_template,
+        type: 'workflow_approval_template',
+      };
     }
 
     arrayOfNodesForChart.push(nodeObj);
@@ -431,17 +492,14 @@ function generateLinks(
   return [arrayOfLinksForChart, nonRootNodeIds];
 }
 
-// TODO: check to make sure passing i18n into this reducer
-// actually works the way we want it to.  If not we may
-// have to explore other options
-function generateNodesAndLinks(state, workflowNodes, i18n) {
+function generateNodesAndLinks(state, workflowNodes) {
   const [
     arrayOfNodesForChart,
     allNodeIds,
     nodeIdToChartNodeIdMapping,
     chartNodeIdToIndexMapping,
     nodeIdCounter,
-  ] = generateNodes(workflowNodes, i18n);
+  ] = generateNodes(workflowNodes);
   const [arrayOfLinksForChart, nonRootNodeIds] = generateLinks(
     workflowNodes,
     chartNodeIdToIndexMapping,
@@ -597,11 +655,28 @@ function updateLink(state, linkType) {
 
 function updateNode(state, editedNode) {
   const { nodeToEdit, nodes } = state;
+  const {
+    nodeResource,
+    launchConfig,
+    promptValues,
+    all_parents_must_converge,
+  } = editedNode;
   const newNodes = [...nodes];
 
   const matchingNode = newNodes.find(node => node.id === nodeToEdit.id);
-  matchingNode.unifiedJobTemplate = editedNode.nodeResource;
+  matchingNode.all_parents_must_converge = all_parents_must_converge;
+  if (matchingNode.originalNodeObject) {
+    delete matchingNode.originalNodeObject.all_parents_must_converge;
+  }
+  matchingNode.fullUnifiedJobTemplate = nodeResource;
   matchingNode.isEdited = true;
+  matchingNode.launchConfig = launchConfig;
+
+  if (promptValues) {
+    matchingNode.promptValues = promptValues;
+  } else {
+    delete matchingNode.promptValues;
+  }
 
   return {
     ...state,
@@ -616,7 +691,15 @@ function refreshNode(state, refreshedNode) {
   const newNodes = [...nodes];
 
   const matchingNode = newNodes.find(node => node.id === nodeToView.id);
-  matchingNode.unifiedJobTemplate = refreshedNode.nodeResource;
+
+  if (refreshedNode.fullUnifiedJobTemplate) {
+    matchingNode.fullUnifiedJobTemplate = refreshedNode.fullUnifiedJobTemplate;
+  }
+
+  if (refreshedNode.originalNodeCredentials) {
+    matchingNode.originalNodeCredentials =
+      refreshedNode.originalNodeCredentials;
+  }
 
   return {
     ...state,

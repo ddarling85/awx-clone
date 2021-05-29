@@ -1,14 +1,14 @@
 import React, { useCallback, useEffect } from 'react';
-import { useHistory, useParams } from 'react-router-dom';
+import { useHistory } from 'react-router-dom';
 import { Card } from '@patternfly/react-core';
 import { InventorySourcesAPI } from '../../../api';
 import useRequest from '../../../util/useRequest';
 import { CardBody } from '../../../components/Card';
 import InventorySourceForm from '../shared/InventorySourceForm';
 
-function InventorySourceAdd() {
+function InventorySourceAdd({ inventory }) {
   const history = useHistory();
-  const { id } = useParams();
+  const { id, organization } = inventory;
 
   const { error, request, result } = useRequest(
     useCallback(async values => {
@@ -26,7 +26,14 @@ function InventorySourceAdd() {
   }, [result, history]);
 
   const handleSubmit = async form => {
-    const { credential, source_path, source_project, ...remainingForm } = form;
+    const {
+      credential,
+      source_path,
+      source_project,
+      source_script,
+      execution_environment,
+      ...remainingForm
+    } = form;
 
     const sourcePath = {};
     const sourceProject = {};
@@ -39,6 +46,8 @@ function InventorySourceAdd() {
     await request({
       credential: credential?.id || null,
       inventory: id,
+      source_script: source_script?.id || null,
+      execution_environment: execution_environment?.id || null,
       ...sourcePath,
       ...sourceProject,
       ...remainingForm,
@@ -56,6 +65,7 @@ function InventorySourceAdd() {
           onCancel={handleCancel}
           onSubmit={handleSubmit}
           submitError={error}
+          organizationId={organization}
         />
       </CardBody>
     </Card>

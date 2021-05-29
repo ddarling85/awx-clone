@@ -1,8 +1,8 @@
-import React, { useState } from 'react';
+import React, { useCallback, useState } from 'react';
 import PropTypes from 'prop-types';
-import { withI18n } from '@lingui/react';
+
 import { t } from '@lingui/macro';
-import { Formik, useField } from 'formik';
+import { Formik, useField, useFormikContext } from 'formik';
 import { Form } from '@patternfly/react-core';
 import FormActionGroup from '../../../components/FormActionGroup/FormActionGroup';
 import FormField, { FormSubmitError } from '../../../components/FormField';
@@ -10,31 +10,37 @@ import OrganizationLookup from '../../../components/Lookup/OrganizationLookup';
 import { required } from '../../../util/validators';
 import { FormColumnLayout } from '../../../components/FormLayout';
 
-function TeamFormFields(props) {
-  const { team, i18n } = props;
+function TeamFormFields({ team }) {
+  const { setFieldValue } = useFormikContext();
   const [organization, setOrganization] = useState(
     team.summary_fields ? team.summary_fields.organization : null
   );
-  const orgFieldArr = useField({
+  const [, orgMeta, orgHelpers] = useField({
     name: 'organization',
-    validate: required(i18n._(t`Select a value for this field`), i18n),
+    validate: required(t`Select a value for this field`),
   });
-  const orgMeta = orgFieldArr[1];
-  const orgHelpers = orgFieldArr[2];
+
+  const onOrganizationChange = useCallback(
+    value => {
+      setFieldValue('organization', value.id);
+      setOrganization(value);
+    },
+    [setFieldValue]
+  );
 
   return (
     <>
       <FormField
         id="team-name"
-        label={i18n._(t`Name`)}
+        label={t`Name`}
         name="name"
         type="text"
-        validate={required(null, i18n)}
+        validate={required(null)}
         isRequired
       />
       <FormField
         id="team-description"
-        label={i18n._(t`Description`)}
+        label={t`Description`}
         name="description"
         type="text"
       />
@@ -42,12 +48,10 @@ function TeamFormFields(props) {
         helperTextInvalid={orgMeta.error}
         isValid={!orgMeta.touched || !orgMeta.error}
         onBlur={() => orgHelpers.setTouched('organization')}
-        onChange={value => {
-          orgHelpers.setValue(value.id);
-          setOrganization(value);
-        }}
+        onChange={onOrganizationChange}
         value={organization}
         required
+        autoPopulate={!team?.id}
       />
     </>
   );
@@ -93,4 +97,4 @@ TeamForm.defaultProps = {
   submitError: null,
 };
 
-export default withI18n()(TeamForm);
+export default TeamForm;

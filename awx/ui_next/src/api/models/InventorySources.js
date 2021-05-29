@@ -1,12 +1,16 @@
 import Base from '../Base';
 import NotificationsMixin from '../mixins/Notifications.mixin';
 import LaunchUpdateMixin from '../mixins/LaunchUpdate.mixin';
+import SchedulesMixin from '../mixins/Schedules.mixin';
 
-class InventorySources extends LaunchUpdateMixin(NotificationsMixin(Base)) {
+class InventorySources extends LaunchUpdateMixin(
+  NotificationsMixin(SchedulesMixin(Base))
+) {
   constructor(http) {
     super(http);
     this.baseUrl = '/api/v2/inventory_sources/';
 
+    this.createSchedule = this.createSchedule.bind(this);
     this.createSyncStart = this.createSyncStart.bind(this);
     this.destroyGroups = this.destroyGroups.bind(this);
     this.destroyHosts = this.destroyHosts.bind(this);
@@ -16,6 +20,14 @@ class InventorySources extends LaunchUpdateMixin(NotificationsMixin(Base)) {
     return this.http.post(`${this.baseUrl}${sourceId}/update/`, {
       extra_vars: extraVars,
     });
+  }
+
+  readGroups(id) {
+    return this.http.get(`${this.baseUrl}${id}/groups/`);
+  }
+
+  readHosts(id) {
+    return this.http.get(`${this.baseUrl}${id}/hosts/`);
   }
 
   destroyGroups(id) {

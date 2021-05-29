@@ -1,6 +1,10 @@
 import React from 'react';
+import { act } from 'react-dom/test-utils';
 
-import { mountWithContexts } from '../../../testUtils/enzymeHelpers';
+import {
+  mountWithContexts,
+  waitForElement,
+} from '../../../testUtils/enzymeHelpers';
 
 import ResourceAccessListItem from './ResourceAccessListItem';
 
@@ -29,13 +33,22 @@ const accessRecord = {
 };
 
 describe('<ResourceAccessListItem />', () => {
-  test('initially renders succesfully', () => {
-    const wrapper = mountWithContexts(
-      <ResourceAccessListItem
-        accessRecord={accessRecord}
-        onRoleDelete={() => {}}
-      />
-    );
-    expect(wrapper.find('ResourceAccessListItem')).toMatchSnapshot();
+  test('initially renders successfully', async () => {
+    let wrapper;
+
+    await act(async () => {
+      wrapper = mountWithContexts(
+        <table>
+          <tbody>
+            <ResourceAccessListItem
+              accessRecord={accessRecord}
+              onRoleDelete={() => {}}
+            />
+          </tbody>
+        </table>
+      );
+    });
+
+    waitForElement(wrapper, 'ResourceAccessListItem', el => el.length > 0);
   });
 });

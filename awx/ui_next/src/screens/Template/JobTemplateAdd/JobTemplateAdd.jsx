@@ -16,6 +16,8 @@ function JobTemplateAdd() {
       initialInstanceGroups,
       credentials,
       webhook_credential,
+      webhook_key,
+      webhook_url,
       ...remainingValues
     } = values;
 
@@ -25,7 +27,10 @@ function JobTemplateAdd() {
     try {
       const {
         data: { id, type },
-      } = await JobTemplatesAPI.create(remainingValues);
+      } = await JobTemplatesAPI.create({
+        ...remainingValues,
+        execution_environment: values.execution_environment?.id,
+      });
       await Promise.all([
         submitLabels(id, labels, values.project.summary_fields.organization.id),
         submitInstanceGroups(id, instanceGroups),
@@ -81,6 +86,7 @@ function JobTemplateAdd() {
             handleCancel={handleCancel}
             handleSubmit={handleSubmit}
             submitError={formSubmitError}
+            isOverrideDisabledLookup
           />
         </CardBody>
       </Card>

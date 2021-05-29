@@ -1,34 +1,69 @@
 import React from 'react';
 import { string, func } from 'prop-types';
 import { Link } from 'react-router-dom';
-import { Button, Tooltip } from '@patternfly/react-core';
-import { withI18n } from '@lingui/react';
-import { t } from '@lingui/macro';
+import { Button, DropdownItem, Tooltip } from '@patternfly/react-core';
+import CaretDownIcon from '@patternfly/react-icons/dist/js/icons/caret-down-icon';
 
-function ToolbarAddButton({ linkTo, onClick, i18n, isDisabled }) {
+import { t } from '@lingui/macro';
+import { useKebabifiedMenu } from '../../contexts/Kebabified';
+
+function ToolbarAddButton({
+  linkTo,
+  onClick,
+
+  isDisabled,
+  defaultLabel = t`Add`,
+  showToggleIndicator,
+  ouiaId,
+}) {
+  const { isKebabified } = useKebabifiedMenu();
+
   if (!linkTo && !onClick) {
     throw new Error(
       'ToolbarAddButton requires either `linkTo` or `onClick` prop'
     );
   }
+
+  if (isKebabified) {
+    return (
+      <DropdownItem
+        ouiaId={ouiaId}
+        key="add"
+        isDisabled={isDisabled}
+        component={linkTo ? Link : 'button'}
+        to={linkTo}
+        onClick={!onClick ? undefined : onClick}
+      >
+        {defaultLabel}
+      </DropdownItem>
+    );
+  }
   if (linkTo) {
     return (
-      <Tooltip content={i18n._(t`Add`)} position="top">
+      <Tooltip content={defaultLabel} position="top">
         <Button
+          ouiaId={ouiaId}
           isDisabled={isDisabled}
           component={Link}
           to={linkTo}
           variant="primary"
-          aria-label={i18n._(t`Add`)}
+          aria-label={defaultLabel}
         >
-          {i18n._(t`Add`)}
+          {defaultLabel}
         </Button>
       </Tooltip>
     );
   }
   return (
-    <Button variant="primary" aria-label={i18n._(t`Add`)} onClick={onClick}>
-      {i18n._(t`Add`)}
+    <Button
+      ouiaId={ouiaId}
+      icon={showToggleIndicator ? <CaretDownIcon /> : null}
+      iconPosition={showToggleIndicator ? 'right' : null}
+      variant="primary"
+      aria-label={defaultLabel}
+      onClick={onClick}
+    >
+      {defaultLabel}
     </Button>
   );
 }
@@ -41,4 +76,4 @@ ToolbarAddButton.defaultProps = {
   onClick: null,
 };
 
-export default withI18n()(ToolbarAddButton);
+export default ToolbarAddButton;

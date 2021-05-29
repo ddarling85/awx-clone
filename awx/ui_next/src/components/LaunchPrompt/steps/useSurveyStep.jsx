@@ -1,120 +1,147 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React from 'react';
 import { t } from '@lingui/macro';
-import useRequest from '../../../util/useRequest';
-import { JobTemplatesAPI, WorkflowJobTemplatesAPI } from '../../../api';
+import { useFormikContext } from 'formik';
 import SurveyStep from './SurveyStep';
 import StepName from './StepName';
 
 const STEP_ID = 'survey';
 
-export default function useSurveyStep(config, resource, visitedSteps, i18n) {
-  const [stepErrors, setStepErrors] = useState({});
+export default function useSurveyStep(
+  launchConfig,
+  surveyConfig,
+  resource,
 
-  const { result: survey, request: fetchSurvey, isLoading, error } = useRequest(
-    useCallback(async () => {
-      if (!config.survey_enabled) {
-        return {};
-      }
-      const { data } =
-        resource.type === 'workflow_job_template'
-          ? await WorkflowJobTemplatesAPI.readSurvey(resource.id)
-          : await JobTemplatesAPI.readSurvey(resource.id);
-      return data;
-    }, [config.survey_enabled, resource])
-  );
-
-  useEffect(() => {
-    fetchSurvey();
-  }, [fetchSurvey]);
-
-  const validate = values => {
-    if (!config.survey_enabled || !survey || !survey.spec) {
-      return {};
-    }
-    const errors = {};
-    survey.spec.forEach(question => {
-      const errMessage = validateField(
-        question,
-        values[`survey_${question.variable}`],
-        i18n
-      );
-      if (errMessage) {
-        errors[`survey_${question.variable}`] = errMessage;
-      }
-    });
-    setStepErrors(errors);
-    return errors;
-  };
-
-  const hasErrors = visitedSteps[STEP_ID] && Object.keys(stepErrors).length > 0;
+  visitedSteps
+) {
+  const { setFieldError, values } = useFormikContext();
+  const hasError =
+    Object.keys(visitedSteps).includes(STEP_ID) &&
+    checkForError(launchConfig, surveyConfig, values);
 
   return {
-    step: getStep(config, survey, hasErrors, i18n),
-    initialValues: getInitialValues(config, survey),
-    validate,
-    survey,
-    isReady: !isLoading && !!survey,
-    contentError: error,
-    formError: stepErrors,
-    setTouched: setFieldsTouched => {
-      if (!survey || !survey.spec) {
+    step: launchConfig.survey_enabled
+      ? {
+          id: STEP_ID,
+          name: (
+            <StepName hasErrors={hasError} id="survey-step">
+              {t`Survey`}
+            </StepName>
+          ),
+          component: <SurveyStep surveyConfig={surveyConfig} />,
+          enableNext: true,
+        }
+      : null,
+    initialValues: getInitialValues(launchConfig, surveyConfig, resource),
+    surveyConfig,
+    isReady: true,
+    contentError: null,
+    hasError,
+    setTouched: setFieldTouched => {
+      if (!surveyConfig?.spec) {
         return;
       }
-      const fields = {};
-      survey.spec.forEach(question => {
-        fields[`survey_${question.variable}`] = true;
+      surveyConfig.spec.forEach(question => {
+        setFieldTouched(`survey_${question.variable}`, true, false);
       });
-      setFieldsTouched(fields);
+    },
+    validate: () => {
+      if (launchConfig.survey_enabled && surveyConfig.spec) {
+        surveyConfig.spec.forEach(question => {
+          const errMessage = validateSurveyField(
+            question,
+            values[`survey_${question.variable}`]
+          );
+          if (errMessage) {
+            setFieldError(`survey_${question.variable}`, errMessage);
+          }
+        });
+      }
     },
   };
 }
 
-function validateField(question, value, i18n) {
+function getInitialValues(launchConfig, surveyConfig, resource) {
+  if (!launchConfig.survey_enabled || !surveyConfig) {
+    return {};
+  }
+
+  const values = {};
+  if (surveyConfig?.spec) {
+    surveyConfig.spec.forEach(question => {
+      if (question.type === 'multiselect') {
+        values[`survey_${question.variable}`] = question.default
+          ? question.default.split('\n')
+          : [];
+      } else if (question.type === 'multiplechoice') {
+        values[`survey_${question.variable}`] =
+          question.default || question.choices.split('\n')[0];
+      } else {
+        values[`survey_${question.variable}`] = question.default || '';
+      }
+      if (resource?.extra_data) {
+        Object.entries(resource.extra_data).forEach(([key, value]) => {
+          if (key === question.variable) {
+            if (question.type === 'multiselect') {
+              values[`survey_${question.variable}`] = value;
+            } else {
+              values[`survey_${question.variable}`] = value;
+            }
+          }
+        });
+      }
+    });
+  }
+
+  return values;
+}
+
+function validateSurveyField(question, value) {
   const isTextField = ['text', 'textarea'].includes(question.type);
   const isNumeric = ['integer', 'float'].includes(question.type);
   if (isTextField && (value || value === 0)) {
     if (question.min && value.length < question.min) {
-      return i18n._(t`This field must be at least ${question.min} characters`);
+      return t`This field must be at least ${question.min} characters`;
     }
     if (question.max && value.length > question.max) {
-      return i18n._(t`This field must not exceed ${question.max} characters`);
+      return t`This field must not exceed ${question.max} characters`;
     }
   }
   if (isNumeric && (value || value === 0)) {
     if (value < question.min || value > question.max) {
-      return i18n._(
-        t`This field must be a number and have a value between ${question.min} and ${question.max}`
-      );
+      return t`This field must be a number and have a value between ${question.min} and ${question.max}`;
     }
   }
   if (question.required && !value && value !== 0) {
-    return i18n._(t`This field must not be blank`);
+    return t`This field must not be blank`;
   }
   return null;
 }
 
-function getStep(config, survey, hasErrors, i18n) {
-  if (!config.survey_enabled) {
-    return null;
+function checkForError(launchConfig, surveyConfig, values) {
+  let hasError = false;
+  if (launchConfig.survey_enabled && surveyConfig.spec) {
+    surveyConfig.spec.forEach(question => {
+      const value = values[`survey_${question.variable}`];
+      const isTextField = ['text', 'textarea'].includes(question.type);
+      const isNumeric = ['integer', 'float'].includes(question.type);
+      if (isTextField && (value || value === 0)) {
+        if (
+          (question.min && value.length < question.min) ||
+          (question.max && value.length > question.max)
+        ) {
+          hasError = true;
+        }
+      }
+      if (isNumeric && (value || value === 0)) {
+        if (value < question.min || value > question.max) {
+          hasError = true;
+        }
+      }
+      if (question.required && !value && value !== 0) {
+        hasError = true;
+      }
+    });
   }
-  return {
-    id: STEP_ID,
-    name: <StepName hasErrors={hasErrors}>{i18n._(t`Survey`)}</StepName>,
-    component: <SurveyStep survey={survey} i18n={i18n} />,
-  };
-}
 
-function getInitialValues(config, survey) {
-  if (!config.survey_enabled || !survey) {
-    return {};
-  }
-  const values = {};
-  survey.spec.forEach(question => {
-    if (question.type === 'multiselect') {
-      values[`survey_${question.variable}`] = question.default.split('\n');
-    } else {
-      values[`survey_${question.variable}`] = question.default;
-    }
-  });
-  return values;
+  return hasError;
 }

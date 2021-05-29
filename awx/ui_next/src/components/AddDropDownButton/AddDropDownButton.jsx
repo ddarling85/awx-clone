@@ -1,25 +1,31 @@
-import React, { useState, useRef, useEffect } from 'react';
-import { Link } from 'react-router-dom';
+import React, { useState, useRef, useEffect, Fragment } from 'react';
+import { t } from '@lingui/macro';
 import PropTypes from 'prop-types';
 import { Dropdown, DropdownPosition } from '@patternfly/react-core';
 import { ToolbarAddButton } from '../PaginatedDataList';
+import { useKebabifiedMenu } from '../../contexts/Kebabified';
 
-function AddDropDownButton({ dropdownItems }) {
+function AddDropDownButton({ dropdownItems, ouiaId }) {
+  const { isKebabified } = useKebabifiedMenu();
   const [isOpen, setIsOpen] = useState(false);
   const element = useRef(null);
 
-  const toggle = e => {
-    if (!element || !element.current.contains(e.target)) {
-      setIsOpen(false);
-    }
-  };
-
   useEffect(() => {
+    const toggle = e => {
+      if (!isKebabified && (!element || !element.current.contains(e.target))) {
+        setIsOpen(false);
+      }
+    };
+
     document.addEventListener('click', toggle, false);
     return () => {
       document.removeEventListener('click', toggle);
     };
-  }, []);
+  }, [isKebabified]);
+
+  if (isKebabified) {
+    return <Fragment>{dropdownItems}</Fragment>;
+  }
 
   return (
     <div ref={element} key="add">
@@ -27,28 +33,22 @@ function AddDropDownButton({ dropdownItems }) {
         isPlain
         isOpen={isOpen}
         position={DropdownPosition.right}
-        toggle={<ToolbarAddButton onClick={() => setIsOpen(!isOpen)} />}
-        dropdownItems={dropdownItems.map(item => (
-          <Link
-            className="pf-c-dropdown__menu-item"
-            key={item.url}
-            to={item.url}
-          >
-            {item.label}
-          </Link>
-        ))}
+        toggle={
+          <ToolbarAddButton
+            ouiaId={ouiaId}
+            aria-label={t`Add`}
+            showToggleIndicator
+            onClick={() => setIsOpen(!isOpen)}
+          />
+        }
+        dropdownItems={dropdownItems}
       />
     </div>
   );
 }
 
 AddDropDownButton.propTypes = {
-  dropdownItems: PropTypes.arrayOf(
-    PropTypes.shape({
-      label: PropTypes.string.isRequired,
-      url: PropTypes.string.isRequired,
-    })
-  ).isRequired,
+  dropdownItems: PropTypes.arrayOf(PropTypes.element.isRequired).isRequired,
 };
 
 export { AddDropDownButton as _AddDropDownButton };

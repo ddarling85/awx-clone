@@ -6,12 +6,11 @@
 # (see COPYING or https://www.gnu.org/licenses/gpl-3.0.txt)
 
 from __future__ import absolute_import, division, print_function
+
 __metaclass__ = type
 
 
-ANSIBLE_METADATA = {'status': ['preview'],
-                    'supported_by': 'community',
-                    'metadata_version': '1.1'}
+ANSIBLE_METADATA = {'status': ['preview'], 'supported_by': 'community', 'metadata_version': '1.1'}
 
 
 DOCUMENTATION = '''
@@ -81,16 +80,9 @@ EXAMPLES = '''
 RETURN = ''' # '''
 
 
-from ..module_utils.tower_api import TowerModule
+from ..module_utils.tower_api import TowerAPIModule
 
-KIND_CHOICES = {
-    'ssh': 'Machine',
-    'vault': 'Ansible Vault',
-    'net': 'Network',
-    'scm': 'Source Control',
-    'cloud': 'Lots of others',
-    'insights': 'Insights'
-}
+KIND_CHOICES = {'ssh': 'Machine', 'vault': 'Ansible Vault', 'net': 'Network', 'scm': 'Source Control', 'cloud': 'Lots of others', 'insights': 'Insights'}
 
 
 def main():
@@ -105,7 +97,7 @@ def main():
     )
 
     # Create a module for ourselves
-    module = TowerModule(argument_spec=argument_spec)
+    module = TowerAPIModule(argument_spec=argument_spec)
 
     # Extract our parameters
     name = module.params.get('name')
@@ -115,7 +107,6 @@ def main():
 
     # These will be passed into the create/updates
     credential_type_params = {
-        'name': new_name if new_name else name,
         'managed_by_tower': False,
     }
     if kind:
@@ -128,15 +119,13 @@ def main():
         credential_type_params['injectors'] = module.params.get('injectors')
 
     # Attempt to look up credential_type based on the provided name
-    credential_type = module.get_one('credential_types', **{
-        'data': {
-            'name': name,
-        }
-    })
+    credential_type = module.get_one('credential_types', name_or_id=name)
 
     if state == 'absent':
         # If the state was absent we can let the module delete it if needed, the module will handle exiting from this
         module.delete_if_needed(credential_type)
+
+    credential_type_params['name'] = new_name if new_name else (module.get_item_name(credential_type) if credential_type else name)
 
     # If the state was present and we can let the module build or update the existing credential type, this will return on its own
     module.create_or_update_if_needed(credential_type, credential_type_params, endpoint='credential_types', item_type='credential type')

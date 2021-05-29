@@ -77,7 +77,6 @@ describe('<InventoryForm />', () => {
   });
 
   afterAll(() => {
-    wrapper.unmount();
     jest.clearAllMocks();
   });
 
@@ -94,10 +93,11 @@ describe('<InventoryForm />', () => {
       1
     );
     expect(wrapper.find('VariablesField[label="Variables"]').length).toBe(1);
+    expect(wrapper.find('CodeEditor').prop('value')).toEqual('---');
   });
 
-  test('should update form values', () => {
-    act(() => {
+  test('should update form values', async () => {
+    await act(async () => {
       wrapper.find('OrganizationLookup').invoke('onBlur')();
       wrapper.find('OrganizationLookup').invoke('onChange')({
         id: 3,

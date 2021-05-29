@@ -4,26 +4,26 @@ import { mountWithContexts } from '../../../testUtils/enzymeHelpers';
 
 import ManagementJobs from './ManagementJobs';
 
+jest.mock('react-router-dom', () => ({
+  ...jest.requireActual('react-router-dom'),
+}));
+
 describe('<ManagementJobs />', () => {
   let pageWrapper;
   let pageSections;
-  let title;
 
   beforeEach(() => {
     pageWrapper = mountWithContexts(<ManagementJobs />);
     pageSections = pageWrapper.find('PageSection');
-    title = pageWrapper.find('Title');
   });
 
   afterEach(() => {
     pageWrapper.unmount();
   });
 
-  test('initially renders without crashing', () => {
+  test('renders ok', () => {
     expect(pageWrapper.length).toBe(1);
-    expect(pageSections.length).toBe(2);
-    expect(title.length).toBe(1);
-    expect(title.props().size).toBe('2xl');
-    expect(pageSections.first().props().variant).toBe('light');
+    expect(pageWrapper.find('ScreenHeader').length).toBe(1);
+    expect(pageSections.length).toBe(1);
   });
 });

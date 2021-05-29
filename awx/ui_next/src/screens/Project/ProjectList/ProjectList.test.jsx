@@ -1,7 +1,15 @@
 import React from 'react';
 import { act } from 'react-dom/test-utils';
-import { ProjectsAPI } from '../../../api';
-import { mountWithContexts } from '../../../../testUtils/enzymeHelpers';
+import {
+  ProjectsAPI,
+  JobTemplatesAPI,
+  WorkflowJobTemplatesAPI,
+  InventorySourcesAPI,
+} from '../../../api';
+import {
+  mountWithContexts,
+  waitForElement,
+} from '../../../../testUtils/enzymeHelpers';
 import ProjectList from './ProjectList';
 
 jest.mock('../../../api');
@@ -61,10 +69,31 @@ const mockProjects = [
       },
     },
   },
+  {
+    id: 4,
+    name: 'Project 4',
+    url: '/api/v2/projects/4',
+    type: 'project',
+    scm_type: 'archive',
+    scm_revision: 'odsd9ajf8aagjisooajfij34ikdj3fs994s4daiaos7',
+    summary_fields: {
+      last_job: {
+        id: 9004,
+        status: 'successful',
+      },
+      user_capabilities: {
+        delete: false,
+        update: false,
+      },
+    },
+  },
 ];
 
 describe('<ProjectList />', () => {
   beforeEach(() => {
+    JobTemplatesAPI.read.mockResolvedValue({ data: { count: 0 } });
+    WorkflowJobTemplatesAPI.read.mockResolvedValue({ data: { count: 0 } });
+    InventorySourcesAPI.read.mockResolvedValue({ data: { count: 0 } });
     ProjectsAPI.read.mockResolvedValue({
       data: {
         count: mockProjects.length,
@@ -78,6 +107,7 @@ describe('<ProjectList />', () => {
           GET: {},
           POST: {},
         },
+        related_search_fields: [],
       },
     });
   });
@@ -93,7 +123,7 @@ describe('<ProjectList />', () => {
     });
     wrapper.update();
 
-    expect(wrapper.find('ProjectListItem')).toHaveLength(3);
+    expect(wrapper.find('ProjectListItem')).toHaveLength(4);
   });
 
   test('should select project when checked', async () => {
@@ -119,6 +149,17 @@ describe('<ProjectList />', () => {
     ).toEqual(true);
   });
 
+  test('should have proper number of delete detail requests', async () => {
+    let wrapper;
+    await act(async () => {
+      wrapper = mountWithContexts(<ProjectList />);
+    });
+    wrapper.update();
+    expect(
+      wrapper.find('ToolbarDeleteButton').prop('deleteDetailsRequests')
+    ).toHaveLength(3);
+  });
+
   test('should select all', async () => {
     let wrapper;
     await act(async () => {
@@ -132,7 +173,7 @@ describe('<ProjectList />', () => {
     wrapper.update();
 
     const items = wrapper.find('ProjectListItem');
-    expect(items).toHaveLength(3);
+    expect(items).toHaveLength(4);
     items.forEach(item => {
       expect(item.prop('isSelected')).toEqual(true);
     });
@@ -158,10 +199,11 @@ describe('<ProjectList />', () => {
         .at(2)
         .invoke('onSelect')();
     });
-    wrapper.update();
 
-    expect(wrapper.find('ToolbarDeleteButton button').prop('disabled')).toEqual(
-      true
+    waitForElement(
+      wrapper,
+      'ToolbarDeleteButton button',
+      el => el.prop('disabled') === true
     );
   });
 

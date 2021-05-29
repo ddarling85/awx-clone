@@ -20,8 +20,19 @@ def test_label_get_queryset_su(label, user):
 
 
 @pytest.mark.django_db
-def test_label_access(label, user):
+def test_label_read_access(label, user):
     access = LabelAccess(user('user', False))
+    assert not access.can_read(label)
+    label.organization.member_role.members.add(user('user', False))
+    assert access.can_read(label)
+
+
+@pytest.mark.django_db
+def test_label_jt_read_access(label, user, job_template):
+    access = LabelAccess(user('user', False))
+    assert not access.can_read(label)
+    job_template.read_role.members.add(user('user', False))
+    job_template.labels.add(label)
     assert access.can_read(label)
 
 
@@ -38,9 +49,7 @@ def test_label_access_superuser(label, user):
 def test_label_access_admin(organization_factory):
     '''can_change because I am an admin of that org'''
     no_members = organization_factory("no_members")
-    members = organization_factory("has_members",
-                                   users=['admin'],
-                                   labels=['test'])
+    members = organization_factory("has_members", users=['admin'], labels=['test'])
 
     label = members.labels.test
     admin = members.users.admin
