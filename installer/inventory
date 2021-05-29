@@ -7,7 +7,7 @@ localhost ansible_connection=local ansible_python_interpreter="/usr/bin/env pyth
 # be selected based on: latest, 1, 1.0, 1.0.0, 1.0.0.123
 # by default the base will be used to search for ansible/awx
 dockerhub_base=ansible
-dockerhub_version=9.1.1
+dockerhub_version=12.0.0
 
 # Openshift Install
 # Will need to set -e openshift_password=developer -e docker_registry_password=$(oc whoami -t)
@@ -66,15 +66,11 @@ awx_task_hostname=hv-centos2
 awx_web_hostname=hv-centos2
 postgres_data_dir="/srv/awx/pgdocker"
 host_port=8080
-#host_port_ssl=443
-#ssl_certificate=
-<<<<<<< HEAD
+host_port_ssl=8443
+ssl_certificate=/srv/awx/certs/hv-ubuntu5.paraklesys-inc.com.crt
 docker_compose_dir="/srv/awx/awxcompose"
-=======
 # Optional key file
-#ssl_certificate_key=
-docker_compose_dir="~/.awx/awxcompose"
->>>>>>> af90dcdab011b57977cbcd0e8ac5dbdeef628bf5
+ssl_certificate_key=/srv/awx/certs/hv-ubuntu5.paraklesys-inc.com.key
 
 # Required for Openshift when building the image on your own
 # Optional for Openshift if using Dockerhub or another prebuilt registry
@@ -101,13 +97,10 @@ pg_port=5432
 # containerized postgres deployment on OpenShift
 # pg_admin_password=postgrespass
 
-<<<<<<< HEAD
 # RabbitMQ Configuration
 rabbitmq_password=rabbitmqUserpass
 rabbitmq_erlang_cookie=CookieRabbitMQ
 
-=======
->>>>>>> 442d539ff89ecfdd6cf7fb706d4e86f25aa96a8e
 # Use a local distribution build container image for building the AWX package
 # This is helpful if you don't want to bother installing the build-time dependencies as
 # it is taken care of already.
@@ -122,7 +115,7 @@ rabbitmq_erlang_cookie=CookieRabbitMQ
 # This will create or update a default admin (superuser) account in AWX, if not provided
 # then these default values are used
 admin_user=admin
-admin_password=password
+admin_password=xdr56tfc
 
 # Whether or not to create preload data for demonstration purposes
 create_preload_data=True
