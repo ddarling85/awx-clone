@@ -1,6 +1,4 @@
-
 class Common(Exception):
-
     def __init__(self, status_string='', message=''):
         if isinstance(status_string, Exception):
             self.status_string = ''
@@ -99,5 +97,10 @@ class UnexpectedAWXState(Common):
 
 
 class IsMigrating(Common):
+
+    pass
+
+
+class ImportExportError(Exception):
 
     pass

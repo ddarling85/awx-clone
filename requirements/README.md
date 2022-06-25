@@ -1,12 +1,10 @@
 # Dependency Management
 
-The `requirements.txt` and `requirements_ansible.txt` files are generated from `requirements.in` and `requirements_ansible.in`, respectively, using `pip-tools` `pip-compile`.
+The `requirements.txt` file is generated from `requirements.in`, using `pip-tools` `pip-compile`.
 
 ## How To Use
 
 Commands should be run from inside the `./requirements` directory of the awx repository.
-
-Make sure you have `patch, awk, python3, python2, python3-venv, python2-virtualenv, pip2, pip3` installed. The development container image should have all these.
 
 ### Upgrading or Adding Select Libraries
 
@@ -14,6 +12,9 @@ If you need to add or upgrade one targeted library, then modify `requirements.in
 then run the script:
 
 `./updater.sh`
+
+NOTE: `./updater.sh` uses /usr/bin/python3.6, to match the current python version
+(3.6) used to build releases.
 
 #### Upgrading Unpinned Dependency
 
@@ -30,14 +31,6 @@ can be removed, because `*.txt` files are upgraded to latest.
 You can upgrade (`pip-compile --upgrade`) the dependencies by running
 
 `./updater.sh upgrade`.
-
-## What The Script Does
-
-This script will:
-
-  - Update `requirements.txt` based on `requirements.in`
-  - Update/generate `requirements_ansible.txt` based on `requirements_ansible.in`
-    - including an automated patch that adds `python_version < "3"` for Python 2 backward compatibility
 
 ## Licenses and Source Files
 
@@ -59,7 +52,7 @@ Make sure to delete the old tarball if it is an upgrade.
 Anything pinned in `*.in` files involves additional manual work in
 order to upgrade. Some information related to that work is outlined here.
 
-### django
+### Django
 
 For any upgrade of Django, it must be confirmed that
 we don't regress on FIPS support before merging.
@@ -84,21 +77,17 @@ based on the value of `settings.AUTHENTICATION_BACKENDS` *at import time*:
 https://github.com/python-social-auth/social-app-django/blob/c1e2795b00b753d58a81fa6a0261d8dae1d9c73d/social_django/utils.py#L13
 
 Our `settings.AUTHENTICATION_BACKENDS` can *change*
-dynamically as Tower settings are changed (i.e., if somebody
+dynamically as settings are changed (i.e., if somebody
 configures Github OAuth2 integration), so we need to
 _overwrite_ this in-memory value at the top of every request so
 that we have the latest version
-see: https://github.com/ansible/tower/issues/1979
 
 ### django-oauth-toolkit
 
-Version 1.2.0 of this project has a bug that error when revoking tokens.
-This is fixed in the master branch but is not yet released.
-
-When upgrading past 1.2.0 in the future, the `0025` migration needs to be
-edited, just like the old migration was edited in the project:
-https://github.com/jazzband/django-oauth-toolkit/commit/96538876d0d7ea0319ba5286f9bde842a906e1c5
-The field can simply have the validator method `validate_uris` removed.
+Versions later than 1.4.1 throw an error about id_token_id, due to the
+OpenID Connect work that was done in
+https://github.com/jazzband/django-oauth-toolkit/pull/915.  This may
+be fixable by creating a migration on our end?
 
 ### azure-keyvault
 
@@ -110,33 +99,15 @@ Upgrading to 4.0.0 causes error because imports changed.
 ImportError: cannot import name 'KeyVaultClient'
 ```
 
-### slackclient
-
-Imports as used in `awx/main/notifications/slack_backend.py` changed
-in version 2.0. This plugin code will need to change and be re-tested
-as the upgrade takes place.
-
-### django-jsonfield
-
-Instead of calling a `loads()` operation, the returned value is casted into
-a string in some cases, introduced in the change:
-
-https://github.com/adamchainz/django-jsonfield/pull/14
-
-This breaks a very large amount of AWX code that assumes these fields
-are returned as dicts. Upgrading this library will require a refactor
-to accomidate this change.
-
-### wheel
-
-azure-cli-core requires a version of wheel that is incompatible with
-certain packages building with later versions of pip, so we override it.
-
-### pip and setuptools
+### pip, setuptools and setuptools_scm
 
 The offline installer needs to have functionality confirmed before upgrading these.
 Versions need to match the versions used in the pip bootstrapping step
 in the top-level Makefile.
+
+### cryptography
+
+The offline installer needs to have functionality confirmed before upgrading these.
 
 ## Library Notes
 

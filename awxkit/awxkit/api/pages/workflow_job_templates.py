@@ -1,8 +1,9 @@
+from contextlib import suppress
 import json
 
 from awxkit.api.mixins import HasCreate, HasNotifications, HasSurvey, HasCopy, DSAdapter
 from awxkit.api.pages import Organization, UnifiedJobTemplate
-from awxkit.utils import filter_by_class, not_provided, update_payload, random_title, suppress, PseudoNamespace
+from awxkit.utils import filter_by_class, not_provided, update_payload, random_title, PseudoNamespace
 from awxkit.api.resources import resources
 import awxkit.exceptions as exc
 
@@ -13,6 +14,7 @@ from . import page
 class WorkflowJobTemplate(HasCopy, HasCreate, HasNotifications, HasSurvey, UnifiedJobTemplate):
 
     optional_dependencies = [Organization]
+    NATURAL_KEY = ('organization', 'name')
 
     def launch(self, payload={}):
         """Launch using related->launch endpoint."""
@@ -25,15 +27,14 @@ class WorkflowJobTemplate(HasCopy, HasCreate, HasNotifications, HasSurvey, Unifi
         # return job
         jobs_pg = self.related.workflow_jobs.get(id=result.workflow_job)
         if jobs_pg.count != 1:
-            msg = "workflow_job_template launched (id:{}) but job not found in response at {}/workflow_jobs/".format(
-                result.json['workflow_job'], self.url
-            )
+            msg = "workflow_job_template launched (id:{}) but job not found in response at {}/workflow_jobs/".format(result.json['workflow_job'], self.url)
             raise exc.UnexpectedAWXState(msg)
         return jobs_pg.results[0]
 
     def payload(self, **kwargs):
-        payload = PseudoNamespace(name=kwargs.get('name') or 'WorkflowJobTemplate - {}'.format(random_title()),
-                                  description=kwargs.get('description') or random_title(10))
+        payload = PseudoNamespace(
+            name=kwargs.get('name') or 'WorkflowJobTemplate - {}'.format(random_title()), description=kwargs.get('description') or random_title(10)
+        )
 
         optional_fields = (
             "allow_simultaneous",
@@ -90,9 +91,9 @@ class WorkflowJobTemplate(HasCopy, HasCreate, HasNotifications, HasSurvey, Unifi
             self.related.labels.post(label)
 
 
-page.register_page([resources.workflow_job_template,
-                    (resources.workflow_job_templates, 'post'),
-                    (resources.workflow_job_template_copy, 'post')], WorkflowJobTemplate)
+page.register_page(
+    [resources.workflow_job_template, (resources.workflow_job_templates, 'post'), (resources.workflow_job_template_copy, 'post')], WorkflowJobTemplate
+)
 
 
 class WorkflowJobTemplates(page.PageList, WorkflowJobTemplate):
@@ -100,8 +101,7 @@ class WorkflowJobTemplates(page.PageList, WorkflowJobTemplate):
     pass
 
 
-page.register_page([resources.workflow_job_templates,
-                    resources.related_workflow_job_templates], WorkflowJobTemplates)
+page.register_page([resources.workflow_job_templates, resources.related_workflow_job_templates], WorkflowJobTemplates)
 
 
 class WorkflowJobTemplateLaunch(base.Base):

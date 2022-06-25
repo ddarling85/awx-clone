@@ -4,7 +4,7 @@ import logging
 import urllib.parse
 
 from django.utils.encoding import force_bytes
-from django.utils.translation import ugettext_lazy as _
+from django.utils.translation import gettext_lazy as _
 from django.views.decorators.csrf import csrf_exempt
 
 from rest_framework import status
@@ -16,7 +16,7 @@ from awx.api import serializers
 from awx.api.generics import APIView, GenericAPIView
 from awx.api.permissions import WebhookKeyPermission
 from awx.main.models import Job, JobTemplate, WorkflowJob, WorkflowJobTemplate
-
+from awx.main.constants import JOB_VARIABLE_PREFIXES
 
 logger = logging.getLogger('awx.api.views.webhooks')
 
@@ -26,10 +26,7 @@ class WebhookKeyView(GenericAPIView):
     permission_classes = (WebhookKeyPermission,)
 
     def get_queryset(self):
-        qs_models = {
-            'job_templates': JobTemplate,
-            'workflow_job_templates': WorkflowJobTemplate,
-        }
+        qs_models = {'job_templates': JobTemplate, 'workflow_job_templates': WorkflowJobTemplate}
         self.model = qs_models.get(self.kwargs['model_kwarg'])
 
         return super().get_queryset()
@@ -57,10 +54,7 @@ class WebhookReceiverBase(APIView):
     ref_keys = {}
 
     def get_queryset(self):
-        qs_models = {
-            'job_templates': JobTemplate,
-            'workflow_job_templates': WorkflowJobTemplate,
-        }
+        qs_models = {'job_templates': JobTemplate, 'workflow_job_templates': WorkflowJobTemplate}
         model = qs_models.get(self.kwargs['model_kwarg'])
         if model is None:
             raise PermissionDenied
@@ -120,10 +114,7 @@ class WebhookReceiverBase(APIView):
         # Ensure that the full contents of the request are captured for multiple uses.
         request.body
 
-        logger.debug(
-            "headers: {}\n"
-            "data: {}\n".format(request.headers, request.data)
-        )
+        logger.debug("headers: {}\n" "data: {}\n".format(request.headers, request.data))
         obj = self.get_object()
         self.check_signature(obj)
 
@@ -132,16 +123,11 @@ class WebhookReceiverBase(APIView):
         event_ref = self.get_event_ref()
         status_api = self.get_event_status_api()
 
-        kwargs = {
-            'unified_job_template_id': obj.id,
-            'webhook_service': obj.webhook_service,
-            'webhook_guid': event_guid,
-        }
+        kwargs = {'unified_job_template_id': obj.id, 'webhook_service': obj.webhook_service, 'webhook_guid': event_guid}
         if WorkflowJob.objects.filter(**kwargs).exists() or Job.objects.filter(**kwargs).exists():
             # Short circuit if this webhook has already been received and acted upon.
             logger.debug("Webhook previously received, returning without action.")
-            return Response({'message': _("Webhook previously received, aborting.")},
-                            status=status.HTTP_202_ACCEPTED)
+            return Response({'message': _("Webhook previously received, aborting.")}, status=status.HTTP_202_ACCEPTED)
 
         kwargs = {
             '_eager_fields': {
@@ -150,14 +136,15 @@ class WebhookReceiverBase(APIView):
                 'webhook_credential': obj.webhook_credential,
                 'webhook_guid': event_guid,
             },
-            'extra_vars': {
-                'tower_webhook_event_type': event_type,
-                'tower_webhook_event_guid': event_guid,
-                'tower_webhook_event_ref': event_ref,
-                'tower_webhook_status_api': status_api,
-                'tower_webhook_payload': request.data,
-            }
+            'extra_vars': {},
         }
+
+        for name in JOB_VARIABLE_PREFIXES:
+            kwargs['extra_vars']['{}_webhook_event_type'.format(name)] = event_type
+            kwargs['extra_vars']['{}_webhook_event_guid'.format(name)] = event_guid
+            kwargs['extra_vars']['{}_webhook_event_ref'.format(name)] = event_ref
+            kwargs['extra_vars']['{}_webhook_status_api'.format(name)] = status_api
+            kwargs['extra_vars']['{}_webhook_payload'.format(name)] = request.data
 
         new_job = obj.create_unified_job(**kwargs)
         new_job.signal_start()
@@ -205,11 +192,7 @@ class GithubWebhookReceiver(WebhookReceiverBase):
 class GitlabWebhookReceiver(WebhookReceiverBase):
     service = 'gitlab'
 
-    ref_keys = {
-        'Push Hook': 'checkout_sha',
-        'Tag Push Hook': 'checkout_sha',
-        'Merge Request Hook': 'object_attributes.last_commit.id',
-    }
+    ref_keys = {'Push Hook': 'checkout_sha', 'Tag Push Hook': 'checkout_sha', 'Merge Request Hook': 'object_attributes.last_commit.id'}
 
     def get_event_type(self):
         return self.request.META.get('HTTP_X_GITLAB_EVENT')
@@ -221,7 +204,7 @@ class GitlabWebhookReceiver(WebhookReceiverBase):
         return h.hexdigest()
 
     def get_event_status_api(self):
-        if self.get_event_type() != 'Merge Request Hook':
+        if self.get_event_type() not in self.ref_keys.keys():
             return
         project = self.request.data.get('project', {})
         repo_url = project.get('web_url')
@@ -229,8 +212,7 @@ class GitlabWebhookReceiver(WebhookReceiverBase):
             return
         parsed = urllib.parse.urlparse(repo_url)
 
-        return "{}://{}/api/v4/projects/{}/statuses/{}".format(
-            parsed.scheme, parsed.netloc, project['id'], self.get_event_ref())
+        return "{}://{}/api/v4/projects/{}/statuses/{}".format(parsed.scheme, parsed.netloc, project['id'], self.get_event_ref())
 
     def get_signature(self):
         return force_bytes(self.request.META.get('HTTP_X_GITLAB_TOKEN') or '')

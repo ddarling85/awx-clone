@@ -8,53 +8,43 @@ from crum import impersonate
 from django.contrib.contenttypes.models import ContentType
 
 # AWX
-from awx.main.models import (
-    UnifiedJobTemplate, Job, JobTemplate, WorkflowJobTemplate,
-    WorkflowApprovalTemplate, Project, WorkflowJob, Schedule,
-    Credential
-)
+from awx.main.models import UnifiedJobTemplate, Job, JobTemplate, WorkflowJobTemplate, WorkflowApprovalTemplate, Project, WorkflowJob, Schedule, Credential
 from awx.api.versioning import reverse
+from awx.main.constants import JOB_VARIABLE_PREFIXES
 
 
 @pytest.mark.django_db
 def test_subclass_types(rando):
-    assert set(UnifiedJobTemplate._submodels_with_roles()) == set([
-        ContentType.objects.get_for_model(JobTemplate).id,
-        ContentType.objects.get_for_model(Project).id,
-        ContentType.objects.get_for_model(WorkflowJobTemplate).id,
-        ContentType.objects.get_for_model(WorkflowApprovalTemplate).id
-
-    ])
+    assert set(UnifiedJobTemplate._submodels_with_roles()) == set(
+        [
+            ContentType.objects.get_for_model(JobTemplate).id,
+            ContentType.objects.get_for_model(Project).id,
+            ContentType.objects.get_for_model(WorkflowJobTemplate).id,
+            ContentType.objects.get_for_model(WorkflowApprovalTemplate).id,
+        ]
+    )
 
 
 @pytest.mark.django_db
 def test_soft_unique_together(post, project, admin_user):
-    """This tests that SOFT_UNIQUE_TOGETHER restrictions are applied correctly.
-    """
-    jt1 = JobTemplate.objects.create(
-        name='foo_jt',
-        project=project
-    )
+    """This tests that SOFT_UNIQUE_TOGETHER restrictions are applied correctly."""
+    jt1 = JobTemplate.objects.create(name='foo_jt', project=project)
     assert jt1.organization == project.organization
     r = post(
         url=reverse('api:job_template_list'),
-        data=dict(
-            name='foo_jt',  # same as first
-            project=project.id,
-            ask_inventory_on_launch=True,
-            playbook='helloworld.yml'
-        ),
+        data=dict(name='foo_jt', project=project.id, ask_inventory_on_launch=True, playbook='helloworld.yml'),  # same as first
         user=admin_user,
-        expect=400
+        expect=400,
     )
     assert 'combination already exists' in str(r.data)
 
 
 @pytest.mark.django_db
 class TestCreateUnifiedJob:
-    '''
+    """
     Ensure that copying a job template to a job handles many to many field copy
-    '''
+    """
+
     def test_many_to_many(self, mocker, job_template_labels):
         jt = job_template_labels
         _get_unified_job_field_names = mocker.patch('awx.main.models.jobs.JobTemplate._get_unified_job_field_names', return_value=['labels'])
@@ -68,6 +58,7 @@ class TestCreateUnifiedJob:
     '''
     Ensure that data is looked for in parameter list before looking at the object
     '''
+
     def test_many_to_many_kwargs(self, mocker, job_template_labels):
         jt = job_template_labels
         _get_unified_job_field_names = mocker.patch('awx.main.models.jobs.JobTemplate._get_unified_job_field_names', return_value=['labels'])
@@ -78,8 +69,8 @@ class TestCreateUnifiedJob:
     '''
     Ensure that credentials m2m field is copied to new relaunched job
     '''
-    def test_job_relaunch_copy_vars(self, machine_credential, inventory,
-                                    deploy_jobtemplate, post, mocker, net_credential):
+
+    def test_job_relaunch_copy_vars(self, machine_credential, inventory, deploy_jobtemplate, post, mocker, net_credential):
         job_with_links = Job(name='existing-job', inventory=inventory)
         job_with_links.job_template = deploy_jobtemplate
         job_with_links.limit = "my_server"
@@ -89,10 +80,7 @@ class TestCreateUnifiedJob:
         second_job = job_with_links.copy_unified_job()
 
         # Check that job data matches the original variables
-        assert [c.pk for c in second_job.credentials.all()] == [
-            machine_credential.pk,
-            net_credential.pk
-        ]
+        assert [c.pk for c in second_job.credentials.all()] == [machine_credential.pk, net_credential.pk]
         assert second_job.inventory == job_with_links.inventory
         assert second_job.limit == 'my_server'
         assert net_credential in second_job.credentials.all()
@@ -101,11 +89,7 @@ class TestCreateUnifiedJob:
         # Replace all credentials with a new one of same type
         new_creds = []
         for cred in jt_linked.credentials.all():
-            new_creds.append(Credential.objects.create(
-                name=str(cred.name) + '_new',
-                credential_type=cred.credential_type,
-                inputs=cred.inputs
-            ))
+            new_creds.append(Credential.objects.create(name=str(cred.name) + '_new', credential_type=cred.credential_type, inputs=cred.inputs))
         job = jt_linked.create_unified_job()
         jt_linked.credentials.clear()
         jt_linked.credentials.add(*new_creds)
@@ -115,21 +99,15 @@ class TestCreateUnifiedJob:
 
 @pytest.mark.django_db
 class TestMetaVars:
-    '''
+    """
     Extension of unit tests with same class name
-    '''
+    """
 
     def test_deleted_user(self, admin_user):
-        job = Job.objects.create(
-            name='job',
-            created_by=admin_user
-        )
+        job = Job.objects.create(name='job', created_by=admin_user)
         job.save()
 
-        user_vars = ['_'.join(x) for x in itertools.product(
-            ['tower', 'awx'],
-            ['user_name', 'user_id', 'user_email', 'user_first_name', 'user_last_name']
-        )]
+        user_vars = ['_'.join(x) for x in itertools.product(['tower', 'awx'], ['user_name', 'user_id', 'user_email', 'user_first_name', 'user_last_name'])]
 
         for key in user_vars:
             assert key in job.awx_meta_vars()
@@ -141,68 +119,44 @@ class TestMetaVars:
             assert key not in job.awx_meta_vars()
 
     def test_workflow_job_metavars(self, admin_user, job_template):
-        workflow_job = WorkflowJob.objects.create(
-            name='workflow-job',
-            created_by=admin_user
-        )
+        workflow_job = WorkflowJob.objects.create(name='workflow-job', created_by=admin_user)
         node = workflow_job.workflow_nodes.create(unified_job_template=job_template)
         job_kv = node.get_job_kwargs()
         job = node.unified_job_template.create_unified_job(**job_kv)
 
         workflow_job.workflow_nodes.create(job=job)
         data = job.awx_meta_vars()
-        assert data['awx_user_id'] == admin_user.id
-        assert data['awx_user_name'] == admin_user.username
-        assert data['awx_workflow_job_id'] == workflow_job.pk
+        for name in JOB_VARIABLE_PREFIXES:
+            assert data['{}_user_id'.format(name)] == admin_user.id
+            assert data['{}_user_name'.format(name)] == admin_user.username
+            assert data['{}_workflow_job_id'.format(name)] == workflow_job.pk
+            assert data['{}_workflow_job_launch_type'.format(name)] == workflow_job.launch_type
 
     def test_scheduled_job_metavars(self, job_template, admin_user):
-        schedule = Schedule.objects.create(
-            name='job-schedule',
-            rrule='DTSTART:20171129T155939z\nFREQ=MONTHLY',
-            unified_job_template=job_template
-        )
-        job = Job.objects.create(
-            name='fake-job',
-            launch_type='workflow',
-            schedule=schedule,
-            job_template=job_template
-        )
+        schedule = Schedule.objects.create(name='job-schedule', rrule='DTSTART:20171129T155939z\nFREQ=MONTHLY', unified_job_template=job_template)
+        job = Job.objects.create(name='fake-job', launch_type='workflow', schedule=schedule, job_template=job_template)
         data = job.awx_meta_vars()
-        assert data['awx_schedule_id'] == schedule.pk
-        assert 'awx_user_name' not in data
+        for name in JOB_VARIABLE_PREFIXES:
+            assert data['{}_schedule_id'.format(name)] == schedule.pk
+            assert '{}_user_name'.format(name) not in data
 
     def test_scheduled_workflow_job_node_metavars(self, workflow_job_template):
-        schedule = Schedule.objects.create(
-            name='job-schedule',
-            rrule='DTSTART:20171129T155939z\nFREQ=MONTHLY',
-            unified_job_template=workflow_job_template
-        )
+        schedule = Schedule.objects.create(name='job-schedule', rrule='DTSTART:20171129T155939z\nFREQ=MONTHLY', unified_job_template=workflow_job_template)
 
-        workflow_job = WorkflowJob.objects.create(
-            name='workflow-job',
-            workflow_job_template=workflow_job_template,
-            schedule=schedule
-        )
+        workflow_job = WorkflowJob.objects.create(name='workflow-job', workflow_job_template=workflow_job_template, schedule=schedule)
 
-        job = Job.objects.create(
-            launch_type='workflow'
-        )
+        job = Job.objects.create(launch_type='workflow')
         workflow_job.workflow_nodes.create(job=job)
-        assert job.awx_meta_vars() == {
-            'awx_job_id': job.id,
-            'tower_job_id': job.id,
-            'awx_job_launch_type': 'workflow',
-            'tower_job_launch_type': 'workflow',
-            'awx_workflow_job_name': 'workflow-job',
-            'tower_workflow_job_name': 'workflow-job',
-            'awx_workflow_job_id': workflow_job.id,
-            'tower_workflow_job_id': workflow_job.id,
-            'awx_parent_job_schedule_id': schedule.id,
-            'tower_parent_job_schedule_id': schedule.id,
-            'awx_parent_job_schedule_name': 'job-schedule',
-            'tower_parent_job_schedule_name': 'job-schedule',
-            
-        }
+        result_hash = {}
+        for name in JOB_VARIABLE_PREFIXES:
+            result_hash['{}_job_id'.format(name)] = job.id
+            result_hash['{}_job_launch_type'.format(name)] = 'workflow'
+            result_hash['{}_workflow_job_name'.format(name)] = 'workflow-job'
+            result_hash['{}_workflow_job_id'.format(name)] = workflow_job.id
+            result_hash['{}_workflow_job_launch_type'.format(name)] = workflow_job.launch_type
+            result_hash['{}_parent_job_schedule_id'.format(name)] = schedule.id
+            result_hash['{}_parent_job_schedule_name'.format(name)] = 'job-schedule'
+        assert job.awx_meta_vars() == result_hash
 
 
 @pytest.mark.django_db
@@ -220,7 +174,6 @@ def test_event_model_undefined():
 
 @pytest.mark.django_db
 class TestUpdateParentInstance:
-
     def test_template_modified_by_not_changed_on_launch(self, job_template, alice):
         # jobs are launched as a particular user, user not saved as JT modified_by
         with impersonate(alice):
@@ -235,9 +188,7 @@ class TestUpdateParentInstance:
             assert job_template.modified_by is None
 
     def check_update(self, project, status):
-        pu_check = project.project_updates.create(
-            job_type='check', status='new', launch_type='manual'
-        )
+        pu_check = project.project_updates.create(job_type='check', status='new', launch_type='manual')
         pu_check.status = 'running'
         pu_check.save()
         # these should always be updated for a running check job
@@ -249,9 +200,7 @@ class TestUpdateParentInstance:
         return pu_check
 
     def run_update(self, project, status):
-        pu_run = project.project_updates.create(
-            job_type='run', status='new', launch_type='sync'
-        )
+        pu_run = project.project_updates.create(job_type='run', status='new', launch_type='sync')
         pu_run.status = 'running'
         pu_run.save()
 
@@ -295,14 +244,9 @@ class TestTaskImpact:
         def r(hosts, forks):
             for i in range(hosts):
                 inventory.hosts.create(name='foo' + str(i))
-            job = Job.objects.create(
-                name='fake-job',
-                launch_type='workflow',
-                job_template=job_template,
-                inventory=inventory,
-                forks=forks
-            )
+            job = Job.objects.create(name='fake-job', launch_type='workflow', job_template=job_template, inventory=inventory, forks=forks)
             return job
+
         return r
 
     def test_limit_task_impact(self, job_host_limit, run_computed_fields_right_away):
@@ -324,17 +268,11 @@ class TestTaskImpact:
         for node in workflow_job.workflow_nodes.all():
             jobs[node.job.job_slice_number - 1] = node.job
         # Even distribution - all jobs run on 1 host
-        assert [
-            len(jobs[0].inventory.get_script_data(slice_number=i + 1, slice_count=3)['all']['hosts'])
-            for i in range(3)
-        ] == [1, 1, 1]
+        assert [len(jobs[0].inventory.get_script_data(slice_number=i + 1, slice_count=3)['all']['hosts']) for i in range(3)] == [1, 1, 1]
         jobs[0].inventory.update_computed_fields()
         assert [job.task_impact for job in jobs] == [2, 2, 2]  # plus one base task impact
         # Uneven distribution - first job takes the extra host
         jobs[0].inventory.hosts.create(name='remainder_foo')
-        assert [
-            len(jobs[0].inventory.get_script_data(slice_number=i + 1, slice_count=3)['all']['hosts'])
-            for i in range(3)
-        ] == [2, 1, 1]
+        assert [len(jobs[0].inventory.get_script_data(slice_number=i + 1, slice_count=3)['all']['hosts']) for i in range(3)] == [2, 1, 1]
         jobs[0].inventory.update_computed_fields()
         assert [job.task_impact for job in jobs] == [3, 2, 2]

@@ -7,12 +7,31 @@ import awx.main.notifications.rocketchat_backend as rocketchat_backend
 
 
 def test_send_messages():
-    with mock.patch('awx.main.notifications.rocketchat_backend.requests') as requests_mock:
+    with mock.patch('awx.main.notifications.rocketchat_backend.requests') as requests_mock, mock.patch(
+        'awx.main.notifications.rocketchat_backend.get_awx_http_client_headers'
+    ) as version_mock:
         requests_mock.post.return_value.status_code = 201
+        version_mock.return_value = {'Content-Type': 'application/json', 'User-Agent': 'AWX 0.0.1.dev (open)'}
         backend = rocketchat_backend.RocketChatBackend()
-        message = EmailMessage('test subject', 'test body', [], ['http://example.com', ])
-        sent_messages = backend.send_messages([message, ])
-        requests_mock.post.assert_called_once_with('http://example.com', data='{"text": "test subject"}', verify=True)
+        message = EmailMessage(
+            'test subject',
+            'test body',
+            [],
+            [
+                'http://example.com',
+            ],
+        )
+        sent_messages = backend.send_messages(
+            [
+                message,
+            ]
+        )
+        requests_mock.post.assert_called_once_with(
+            'http://example.com',
+            data='{"text": "test subject"}',
+            headers={'Content-Type': 'application/json', 'User-Agent': 'AWX 0.0.1.dev (open)'},
+            verify=True,
+        )
         assert sent_messages == 1
 
 
@@ -20,8 +39,19 @@ def test_send_messages_with_username():
     with mock.patch('awx.main.notifications.rocketchat_backend.requests') as requests_mock:
         requests_mock.post.return_value.status_code = 201
         backend = rocketchat_backend.RocketChatBackend(rocketchat_username='testuser')
-        message = EmailMessage('test subject', 'test body', [], ['http://example.com', ])
-        sent_messages = backend.send_messages([message, ])
+        message = EmailMessage(
+            'test subject',
+            'test body',
+            [],
+            [
+                'http://example.com',
+            ],
+        )
+        sent_messages = backend.send_messages(
+            [
+                message,
+            ]
+        )
 
         calls = requests_mock.post.call_args_list
         assert len(calls) == 1
@@ -37,8 +67,19 @@ def test_send_messages_with_icon_url():
     with mock.patch('awx.main.notifications.rocketchat_backend.requests') as requests_mock:
         requests_mock.post.return_value.status_code = 201
         backend = rocketchat_backend.RocketChatBackend(rocketchat_icon_url='http://example.com')
-        message = EmailMessage('test subject', 'test body', [], ['http://example.com', ])
-        sent_messages = backend.send_messages([message, ])
+        message = EmailMessage(
+            'test subject',
+            'test body',
+            [],
+            [
+                'http://example.com',
+            ],
+        )
+        sent_messages = backend.send_messages(
+            [
+                message,
+            ]
+        )
 
         calls = requests_mock.post.call_args_list
         assert len(calls) == 1
@@ -51,10 +92,29 @@ def test_send_messages_with_icon_url():
 
 
 def test_send_messages_with_no_verify_ssl():
-    with mock.patch('awx.main.notifications.rocketchat_backend.requests') as requests_mock:
+    with mock.patch('awx.main.notifications.rocketchat_backend.requests') as requests_mock, mock.patch(
+        'awx.main.notifications.rocketchat_backend.get_awx_http_client_headers'
+    ) as version_mock:
         requests_mock.post.return_value.status_code = 201
+        version_mock.return_value = {'Content-Type': 'application/json', 'User-Agent': 'AWX 0.0.1.dev (open)'}
         backend = rocketchat_backend.RocketChatBackend(rocketchat_no_verify_ssl=True)
-        message = EmailMessage('test subject', 'test body', [], ['http://example.com', ])
-        sent_messages = backend.send_messages([message, ])
-        requests_mock.post.assert_called_once_with('http://example.com', data='{"text": "test subject"}', verify=False)
+        message = EmailMessage(
+            'test subject',
+            'test body',
+            [],
+            [
+                'http://example.com',
+            ],
+        )
+        sent_messages = backend.send_messages(
+            [
+                message,
+            ]
+        )
+        requests_mock.post.assert_called_once_with(
+            'http://example.com',
+            data='{"text": "test subject"}',
+            headers={'Content-Type': 'application/json', 'User-Agent': 'AWX 0.0.1.dev (open)'},
+            verify=False,
+        )
         assert sent_messages == 1

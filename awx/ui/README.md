@@ -1,103 +1,115 @@
-# AWX UI
+# AWX-UI
 
 ## Requirements
-- node.js 10.x LTS
-- npm >=6.x
-- bzip2, gcc-c++, git, make
+- node >= 16.13.1, npm >= 8.x make, git
 
 ## Development
 The API development server will need to be running. See [CONTRIBUTING.md](../../CONTRIBUTING.md).
 
 ```shell
-# Build ui for the devel environment - reachable at https://localhost:8043
-make ui-devel
+# install
+npm --prefix=awx/ui install
 
-# Alternatively, start the ui development server. While running, the ui will be reachable
-# at https://localhost:3000 and updated automatically when code changes.
-make ui-docker
-
-# When using docker machine, use this command to start the ui development server instead.
-DOCKER_MACHINE_NAME=default make ui-docker-machine
+# Start the ui development server. While running, the ui will be reachable
+# at https://127.0.0.1:3001 and updated automatically when code changes.
+npm --prefix=awx/ui start
 ```
 
-## Development with an external server
+### Build for the Development Containers
+If you just want to build a ui for the container-based awx development
+environment and do not need to work on the ui code, use these make targets:
+
+```shell
+# The ui will be reachable at https://localhost:8043 or
+# http://localhost:8013
+make ui-devel 
+
+# clean up 
+make clean-ui
+```
+
+### Using an External Server
 If you normally run awx on an external host/server (in this example, `awx.local`),
-you'll need to reconfigure the webpack proxy slightly for `make ui-docker` to
-work:
+you'll need use the `TARGET` environment variable when starting the ui development
+server:
 
-```javascript
-/awx/settings/development.py
-+
-+CSRF_TRUSTED_ORIGINS = ['awx.local:8043']
-
-awx/ui/build/webpack.watch.js
--        host: '127.0.0.1',
-+        host: '0.0.0.0',
-+        disableHostCheck: true,
-
-/awx/ui/package.json
-@@ -7,7 +7,7 @@
-   "config": {
-     ...
-+    "django_host": "awx.local"
-   },
+```shell
+TARGET='https://awx.local:8043' npm --prefix awx/ui start
 ```
 
 ## Testing
 ```shell
-# run linters
-make jshint
+# run code formatting check
+npm --prefix awx/ui run prettier-check
 
-# run unit tests
-make ui-test-ci
+# run lint checks
+npm --prefix awx/ui run lint
 
-# run e2e tests - see awx/ui/test/e2e for more information
-npm --prefix awx/ui run e2e
+# run all unit tests
+npm --prefix awx/ui run test
+
+# run a single test (in this case the login page test):
+npm --prefix awx/ui test -- src/screens/Login/Login.test.jsx
+
+# start the test watcher and run tests on files that you've changed
+npm --prefix awx/ui run test-watch
+
+# start the tests and get the coverage report after the tests have completed
+npm --prefix awx/ui run test -- --coverage
 ```
-**Note**: Unit tests are run on your host machine and not in the development containers.
+#### Note:
+- Once the test watcher is up and running you can hit `a` to run all the tests.
+- All commands are run on your host machine and not in the api development containers.
 
-## Adding dependencies
+
+## Updating Dependencies
+It is not uncommon to run the ui development tooling outside of the awx development
+container. That said, dependencies should always be modified from within the
+container to ensure consistency.
+
 ```shell
-# add an exact development or build dependency
-npm install --prefix awx/ui --save-dev --save-exact dev-package@1.2.3
+# make sure the awx development container is running and open a shell
+docker exec -it tools_awx_1 bash
+
+# start with a fresh install of the current dependencies
+(tools_awx_1)$ make clean-ui && npm --prefix=awx/ui ci
+
+# add an exact development dependency
+(tools_awx_1)$ npm --prefix awx/ui install --save-dev --save-exact dev-package@1.2.3
 
 # add an exact production dependency
-npm install --prefix awx/ui --save --save-exact prod-package@1.23
+(tools_awx_1)$ npm --prefix awx/ui install --save --save-exact prod-package@1.23
+
+# remove a development dependency
+(tools_awx_1)$ npm --prefix awx/ui uninstall --save-dev dev-package
+
+# remove a production dependency
+(tools_awx_1)$ npm --prefix awx/ui uninstall --save prod-package
+
+# exit the container
+(tools_awx_1)$ exit
 
 # add the updated package.json and package-lock.json files to scm
 git add awx/ui/package.json awx/ui/package-lock.json
 ```
-
-## Removing dependencies
-```shell
-# remove a development or build dependency
-npm uninstall --prefix awx/ui --save-dev dev-package
-
-# remove a production dependency
-npm uninstall --prefix awx/ui --save prod-package
-```
+#### Note:
+- Building the ui can use up a lot of resources. If you're running docker for mac or similar
+virtualization, the default memory limit may not be enough and you should increase it.
 
 ## Building for Production
 ```shell
-# built files are placed in awx/ui/static
-make ui-release
+# built files are placed in awx/ui/build
+npm --prefix awx/ui run build
 ```
 
-## Internationalization
-Application strings marked for translation are extracted and used to generate `.pot` files using the following command:
+## CI Container
+
+To run:
+
 ```shell
-# extract strings and generate .pot files
-make pot
+cd awx/awx/ui
+docker build -t awx-ui .
+docker run --name tools_ui_1 --network _sources_default --link 'tools_awx_1:awx' -e TARGET="https://awx:8043" -p '3001:3001' --rm -v $(pwd)/src:/ui/src awx-ui
 ```
-To include the translations in the development environment, we compile them prior to building the ui:
-```shell
-# remove any prior ui builds
-make clean-ui
 
-# compile the .pot files to javascript files usable by the application
-make languages
-
-# build the ui with translations included
-make ui-devel
-```
-**Note**: Python 3.6 is required to compile the `.pot` files.
+**Note:** This is for CI, test systems, zuul, etc. For local development, see [usage](https://github.com/ansible/awx/blob/devel/awx/ui/README.md#Development)

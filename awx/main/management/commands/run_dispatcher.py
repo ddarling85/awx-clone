@@ -24,13 +24,14 @@ class Command(BaseCommand):
     help = 'Launch the task dispatcher'
 
     def add_arguments(self, parser):
-        parser.add_argument('--status', dest='status', action='store_true',
-                            help='print the internal state of any running dispatchers')
-        parser.add_argument('--running', dest='running', action='store_true',
-                            help='print the UUIDs of any tasked managed by this dispatcher')
-        parser.add_argument('--reload', dest='reload', action='store_true',
-                            help=('cause the dispatcher to recycle all of its worker processes;'
-                                  'running jobs will run to completion first'))
+        parser.add_argument('--status', dest='status', action='store_true', help='print the internal state of any running dispatchers')
+        parser.add_argument('--running', dest='running', action='store_true', help='print the UUIDs of any tasked managed by this dispatcher')
+        parser.add_argument(
+            '--reload',
+            dest='reload',
+            action='store_true',
+            help=('cause the dispatcher to recycle all of its worker processes;' 'running jobs will run to completion first'),
+        )
 
     def handle(self, *arg, **options):
         if options.get('status'):
@@ -44,7 +45,7 @@ class Command(BaseCommand):
 
         # It's important to close these because we're _about_ to fork, and we
         # don't want the forked processes to inherit the open sockets
-        # for the DB and memcached connections (that way lies race conditions)
+        # for the DB and cache connections (that way lies race conditions)
         django_connection.close()
         django_cache.close()
 
@@ -57,12 +58,7 @@ class Command(BaseCommand):
 
         try:
             queues = ['tower_broadcast_all', get_local_queuename()]
-            consumer = AWXConsumerPG(
-                'dispatcher',
-                TaskWorker(),
-                queues,
-                AutoscalePool(min_workers=4)
-            )
+            consumer = AWXConsumerPG('dispatcher', TaskWorker(), queues, AutoscalePool(min_workers=4))
             consumer.run()
         except KeyboardInterrupt:
             logger.debug('Terminating Task Dispatcher')

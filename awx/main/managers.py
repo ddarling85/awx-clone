@@ -1,19 +1,23 @@
 # Copyright (c) 2015 Ansible, Inc.
 # All Rights Reserved.
 
-import sys
 import logging
-import os
-
 from django.db import models
 from django.conf import settings
-
+from django.db.models.functions import Lower
 from awx.main.utils.filters import SmartFilter
 from awx.main.utils.pglock import advisory_lock
+from awx.main.constants import RECEPTOR_PENDING
 
-___all__ = ['HostManager', 'InstanceManager', 'InstanceGroupManager']
+___all__ = ['HostManager', 'InstanceManager', 'DeferJobCreatedManager', 'UUID_DEFAULT']
 
 logger = logging.getLogger('awx.main.managers')
+UUID_DEFAULT = '00000000-0000-0000-0000-000000000000'
+
+
+class DeferJobCreatedManager(models.Manager):
+    def get_queryset(self):
+        return super(DeferJobCreatedManager, self).get_queryset().defer('job_created')
 
 
 class HostManager(models.Manager):
@@ -28,7 +32,7 @@ class HostManager(models.Manager):
          - Only consider results that are unique
          - Return the count of this query
         """
-        return self.order_by().exclude(inventory_sources__source='tower').values('name').distinct().count()
+        return self.order_by().exclude(inventory_sources__source='controller').values(name_lower=Lower('name')).distinct().count()
 
     def org_active_count(self, org_id):
         """Return count of active, unique hosts used by an organization.
@@ -40,32 +44,24 @@ class HostManager(models.Manager):
          - Only consider results that are unique
          - Return the count of this query
         """
-        return self.order_by().exclude(
-            inventory_sources__source='tower'
-        ).filter(inventory__organization=org_id).values('name').distinct().count()
-
-    def active_counts_by_org(self):
-        """Return the counts of active, unique hosts for each organization.
-        Construction of query involves:
-         - remove any ordering specified in model's Meta
-         - Exclude hosts sourced from another Tower
-         - Consider only hosts where the canonical inventory is owned by each organization
-         - Restrict the query to only count distinct names
-         - Return the counts
-        """
-        return self.order_by().exclude(
-            inventory_sources__source='tower'
-        ).values('inventory__organization').annotate(
-            inventory__organization__count=models.Count('name', distinct=True))
+        return self.order_by().exclude(inventory_sources__source='controller').filter(inventory__organization=org_id).values('name').distinct().count()
 
     def get_queryset(self):
         """When the parent instance of the host query set has a `kind=smart` and a `host_filter`
         set. Use the `host_filter` to generate the queryset for the hosts.
         """
-        qs = super(HostManager, self).get_queryset()
-        if (hasattr(self, 'instance') and
-           hasattr(self.instance, 'host_filter') and
-           hasattr(self.instance, 'kind')):
+        qs = (
+            super(HostManager, self)
+            .get_queryset()
+            .defer(
+                'last_job__extra_vars',
+                'last_job_host_summary__job__extra_vars',
+                'last_job__artifacts',
+                'last_job_host_summary__job__artifacts',
+            )
+        )
+
+        if hasattr(self, 'instance') and hasattr(self.instance, 'host_filter') and hasattr(self.instance, 'kind'):
             if self.instance.kind == 'smart' and self.instance.host_filter is not None:
                 q = SmartFilter.query_from_string(self.instance.host_filter)
                 if self.instance.organization_id:
@@ -102,24 +98,18 @@ class InstanceManager(models.Manager):
     Provides "table-level" methods including getting the currently active
     instance or role.
     """
+
     def me(self):
         """Return the currently active instance."""
-        # If we are running unit tests, return a stub record.
-        if settings.IS_TESTING(sys.argv) or hasattr(sys, '_called_from_test'):
-            return self.model(id=1,
-                              hostname='localhost',
-                              uuid='00000000-0000-0000-0000-000000000000')
-
         node = self.filter(hostname=settings.CLUSTER_HOST_ID)
         if node.exists():
             return node[0]
         raise RuntimeError("No instance found with the current cluster host id")
 
-    def register(self, uuid=None, hostname=None, ip_address=None):
-        if not uuid:
-            uuid = settings.SYSTEM_UUID
+    def register(self, uuid=None, hostname=None, ip_address=None, node_type='hybrid', defaults=None):
         if not hostname:
             hostname = settings.CLUSTER_HOST_ID
+
         with advisory_lock('instance_registration_%s' % hostname):
             if settings.AWX_AUTO_DEPROVISION_INSTANCES:
                 # detect any instances with the same IP address.
@@ -132,134 +122,42 @@ class InstanceManager(models.Manager):
                         other_inst.save(update_fields=['ip_address'])
                         logger.warning("IP address {0} conflict detected, ip address unset for host {1}.".format(ip_address, other_hostname))
 
-            instance = self.filter(hostname=hostname)
+            # Return existing instance that matches hostname or UUID (default to UUID)
+            if uuid is not None and uuid != UUID_DEFAULT and self.filter(uuid=uuid).exists():
+                instance = self.filter(uuid=uuid)
+            else:
+                # if instance was not retrieved by uuid and hostname was, use the hostname
+                instance = self.filter(hostname=hostname)
+
+            # Return existing instance
             if instance.exists():
-                instance = instance.get()
+                instance = instance.first()  # in the unusual occasion that there is more than one, only get one
+                update_fields = []
+                # if instance was retrieved by uuid and hostname has changed, update hostname
+                if instance.hostname != hostname:
+                    logger.warning("passed in hostname {0} is different from the original hostname {1}, updating to {0}".format(hostname, instance.hostname))
+                    instance.hostname = hostname
+                    update_fields.append('hostname')
+                # if any other fields are to be updated
                 if instance.ip_address != ip_address:
                     instance.ip_address = ip_address
-                    instance.save(update_fields=['ip_address'])
+                if instance.node_type != node_type:
+                    instance.node_type = node_type
+                    update_fields.append('node_type')
+                if update_fields:
+                    instance.save(update_fields=update_fields)
                     return (True, instance)
                 else:
                     return (False, instance)
-            instance = self.create(uuid=uuid,
-                                   hostname=hostname,
-                                   ip_address=ip_address,
-                                   capacity=0)
+
+            # Create new instance, and fill in default values
+            create_defaults = dict(capacity=0)
+            if defaults is not None:
+                create_defaults.update(defaults)
+            uuid_option = {}
+            if uuid is not None:
+                uuid_option = dict(uuid=uuid)
+            if node_type == 'execution' and 'version' not in create_defaults:
+                create_defaults['version'] = RECEPTOR_PENDING
+            instance = self.create(hostname=hostname, ip_address=ip_address, node_type=node_type, **create_defaults, **uuid_option)
         return (True, instance)
-
-    def get_or_register(self):
-        if settings.AWX_AUTO_DEPROVISION_INSTANCES:
-            from awx.main.management.commands.register_queue import RegisterQueue
-            pod_ip = os.environ.get('MY_POD_IP')
-            registered = self.register(ip_address=pod_ip)
-            RegisterQueue('tower', None, 100, 0, []).register()
-            return registered
-        else:
-            return (False, self.me())
-
-    def active_count(self):
-        """Return count of active Tower nodes for licensing."""
-        return self.all().count()
-
-    def my_role(self):
-        # NOTE: TODO: Likely to repurpose this once standalone ramparts are a thing
-        return "tower"
-
-    def all_non_isolated(self):
-        return self.exclude(rampart_groups__controller__isnull=False)
-
-
-class InstanceGroupManager(models.Manager):
-    """A custom manager class for the Instance model.
-
-    Used for global capacity calculations
-    """
-
-    def capacity_mapping(self, qs=None):
-        """
-        Another entry-point to Instance manager method by same name
-        """
-        if qs is None:
-            qs = self.all().prefetch_related('instances')
-        instance_ig_mapping = {}
-        ig_instance_mapping = {}
-        # Create dictionaries that represent basic m2m memberships
-        for group in qs:
-            ig_instance_mapping[group.name] = set(
-                instance.hostname for instance in group.instances.all() if
-                instance.capacity != 0
-            )
-            for inst in group.instances.all():
-                if inst.capacity == 0:
-                    continue
-                instance_ig_mapping.setdefault(inst.hostname, set())
-                instance_ig_mapping[inst.hostname].add(group.name)
-        # Get IG capacity overlap mapping
-        ig_ig_mapping = get_ig_ig_mapping(ig_instance_mapping, instance_ig_mapping)
-
-        return instance_ig_mapping, ig_ig_mapping
-
-    @staticmethod
-    def zero_out_group(graph, name, breakdown):
-        if name not in graph:
-            graph[name] = {}
-        graph[name]['consumed_capacity'] = 0
-        if breakdown:
-            graph[name]['committed_capacity'] = 0
-            graph[name]['running_capacity'] = 0
-
-    def capacity_values(self, qs=None, tasks=None, breakdown=False, graph=None):
-        """
-        Returns a dictionary of capacity values for all IGs
-        """
-        if qs is None:  # Optionally BYOQS - bring your own queryset
-            qs = self.all().prefetch_related('instances')
-        instance_ig_mapping, ig_ig_mapping = self.capacity_mapping(qs=qs)
-
-        if tasks is None:
-            tasks = self.model.unifiedjob_set.related.related_model.objects.filter(
-                status__in=('running', 'waiting'))
-
-        if graph is None:
-            graph = {group.name: {} for group in qs}
-        for group_name in graph:
-            self.zero_out_group(graph, group_name, breakdown)
-        for t in tasks:
-            # TODO: dock capacity for isolated job management tasks running in queue
-            impact = t.task_impact
-            if t.status == 'waiting' or not t.execution_node:
-                # Subtract capacity from any peer groups that share instances
-                if not t.instance_group:
-                    impacted_groups = []
-                elif t.instance_group.name not in ig_ig_mapping:
-                    # Waiting job in group with 0 capacity has no collateral impact
-                    impacted_groups = [t.instance_group.name]
-                else:
-                    impacted_groups = ig_ig_mapping[t.instance_group.name]
-                for group_name in impacted_groups:
-                    if group_name not in graph:
-                        self.zero_out_group(graph, group_name, breakdown)
-                    graph[group_name]['consumed_capacity'] += impact
-                    if breakdown:
-                        graph[group_name]['committed_capacity'] += impact
-            elif t.status == 'running':
-                # Subtract capacity from all groups that contain the instance
-                if t.execution_node not in instance_ig_mapping:
-                    if not t.is_containerized:
-                        logger.warning('Detected %s running inside lost instance, '
-                                       'may still be waiting for reaper.', t.log_format)
-                    if t.instance_group:
-                        impacted_groups = [t.instance_group.name]
-                    else:
-                        impacted_groups = []
-                else:
-                    impacted_groups = instance_ig_mapping[t.execution_node]
-                for group_name in impacted_groups:
-                    if group_name not in graph:
-                        self.zero_out_group(graph, group_name, breakdown)
-                    graph[group_name]['consumed_capacity'] += impact
-                    if breakdown:
-                        graph[group_name]['running_capacity'] += impact
-            else:
-                logger.error('Programming error, %s not in ["running", "waiting"]', t.log_format)
-        return graph

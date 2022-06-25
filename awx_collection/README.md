@@ -1,10 +1,21 @@
 # AWX Ansible Collection
 
-This Ansible collection allows for easy interaction with an AWX or Ansible Tower
-server via Ansible playbooks.
+[comment]: # (*******************************************************)
+[comment]: # (*                                                     *)
+[comment]: # (*             WARNING                                 *)
+[comment]: # (*                                                     *)
+[comment]: # (*  This file is templated and not to be               *)
+[comment]: # (*  edited directly! Instead modify:                   *)
+[comment]: # (*  tools/roles/template_galaxy/templates/README.md.j2 *)
+[comment]: # (*                                                     *)
+[comment]: # (*  Changes to the base README.md file are refreshed   *)
+[comment]: # (*  upon build of the collection                       *)
+[comment]: # (*******************************************************)
+
+This Ansible collection allows for easy interaction with an AWX server via Ansible playbooks.
 
 This source for this collection lives in the `awx_collection` folder inside of the
-AWX source.
+AWX GitHub repository.
 The previous home for this collection was inside the folder [lib/ansible/modules/web_infrastructure/ansible_tower](https://github.com/ansible/ansible/tree/stable-2.9/lib/ansible/modules/web_infrastructure/ansible_tower) in the Ansible repo,
 as well as other places for the inventory plugin, module utils, and
 doc fragment.
@@ -56,9 +67,16 @@ Notable releases of the `awx.awx` collection:
 
  - 7.0.0 is intended to be identical to the content prior to the migration, aside from changes necessary to function as a collection.
  - 11.0.0 has no non-deprecated modules that depend on the deprecated `tower-cli` [PyPI](https://pypi.org/project/ansible-tower-cli/).
+ - 19.2.1 large renaming purged "tower" names (like options and module names), adding redirects for old names
+ - 0.0.1-devel is the version you should see if installing from source, which is intended for development and expected to be unstable.
 
 The following notes are changes that may require changes to playbooks:
 
+ - The `credential` module no longer allows `kind` as a parameter; additionally, `inputs` must now be used with a variety of key/value parameters to go with it (e.g., `become_method`)
+ - The `job_wait` module no longer allows `min_interval`/ `max_interval` parameters; use `interval` instead
+ - The `notification_template` requires various notification configuration information to be listed as a dictionary under the `notification_configuration` parameter (e.g., `use_ssl`)
+ - In the `inventory_source` module, the `source_project` (when provided) lookup defaults to the specified organization in the same way the inventory is looked up
+ - The module `tower_notification` was renamed `tower_notification_template`. In `ansible >= 2.10` there is a seamless redirect. Ansible 2.9 does not respect the redirect.
  - When a project is created, it will wait for the update/sync to finish by default; this can be turned off with the `wait` parameter, if desired.
  - Creating a "scan" type job template is no longer supported.
  - Specifying a custom certificate via the `TOWER_CERTIFICATE` environment variable no longer works.
@@ -79,17 +97,17 @@ The following notes are changes that may require changes to playbooks:
  - Specified `tower_config` file used to handle `k=v` pairs on a single line; this is no longer supported. Please use a file formatted as `yaml`, `json` or `ini` only.
  - Some return values (e.g., `credential_type`) have been removed. Use of `id` is recommended.
  - `tower_job_template` no longer supports the deprecated `extra_vars_path` parameter, please use `extra_vars` with the lookup plugin to replace this functionality.
- - The `notification_configuration` parameter of `tower_notification` has changed from a string to a dict. Please use the `lookup` plugin to read an existing file into a dict.
- - `tower_credential` no longer supports passing a file name to ssh_key_data.
- - The HipChat `notification_type` has been removed and can no longer be created using the `tower_notification` module.
+ - The `notification_configuration` parameter of `tower_notification_template` has changed from a string to a dict. Please use the `lookup` plugin to read an existing file into a dict.
+ - `tower_credential` no longer supports passing a file name to `ssh_key_data`.
+ - The HipChat `notification_type` has been removed and can no longer be created using the `tower_notification_template` module.
 
 ## Running Unit Tests
 
 Tests to verify compatibility with the most recent AWX code are in `awx_collection/test/awx`.
-These can be ran by `make test_collection` in the development container.
+These can be ran via the `make test_collection` command in the development container.
 
-To run outside of the development container, or to run against
-Ansible source, set up a working environment:
+To run tests outside of the development container, or to run against
+Ansible source, set up a dedicated virtual environment:
 
 ```
 mkvirtualenv my_new_venv
@@ -104,11 +122,11 @@ py.test awx_collection/test/awx/
 
 ## Running Integration Tests
 
-The integration tests require a virtualenv with `ansible` >= 2.9 and `tower_cli`.
+The integration tests require a virtualenv with `ansible >= 2.9` and `awxkit`.
 The collection must first be installed, which can be done using `make install_collection`.
-You also need a configuration file, as described in the running section.
+You also need a configuration file, as described in the [Running](https://github.com/ansible/awx/blob/devel/awx_collection/README.md#running) section.
 
-Run the tests:
+How to run the tests:
 
 ```
 # ansible-test must be run from the directory in which the collection is installed
@@ -119,5 +137,5 @@ ansible-test integration
 ## Licensing
 
 All content in this folder is licensed under the same license as Ansible,
-which is the same as license that applied before the split into an
+which is the same as the license that applied before the split into an
 independent collection.

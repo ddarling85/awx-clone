@@ -1,17 +1,6 @@
 #!/bin/bash
 set +x
 
-# Wait for the databases to come up
-ansible -i "127.0.0.1," -c local -v -m wait_for -a "host=postgres port=5432" all
-ansible -i "127.0.0.1," -c local -v -m wait_for -a "path=/var/run/redis/redis.sock" all
-
-# In case AWX in the container wants to connect to itself, use "docker exec" to attach to the container otherwise
-# TODO: FIX
-#/etc/init.d/ssh start
-
-ansible -i "127.0.0.1," -c local -v -m postgresql_user --become-user postgres -a "name=awx-dev password=AWXsome1 encrypted=yes login_user=postgres login_password=postgrespass login_host=postgres" all
-ansible -i "127.0.0.1," -c local -v -m postgresql_db --become-user postgres -a "name=awx-dev owner=awx-dev login_user=postgres login_password=postgrespass login_host=postgres" all
-
 # Move to the source directory so we can bootstrap
 if [ -f "/awx_devel/manage.py" ]; then
     cd /awx_devel
@@ -23,8 +12,48 @@ make awx-link
 
 # AWX bootstrapping
 make version_file
-make migrate
-make init
+
+if [[ -n "$RUN_MIGRATIONS" ]]; then
+    make migrate
+else
+    wait-for-migrations
+fi
+
+if output=$(awx-manage createsuperuser --noinput --username=admin --email=admin@localhost 2> /dev/null); then
+    echo $output
+    admin_password=$(openssl rand -base64 12)
+    echo "Admin password: ${admin_password}"
+    awx-manage update_password --username=admin --password=${admin_password}
+fi
+awx-manage create_preload_data
+awx-manage register_default_execution_environments
 
 mkdir -p /awx_devel/awx/public/static
 mkdir -p /awx_devel/awx/ui/static
+mkdir -p /awx_devel/awx/ui/build/static
+
+awx-manage provision_instance --hostname="$(hostname)" --node_type="$MAIN_NODE_TYPE"
+awx-manage register_queue --queuename=controlplane --instance_percent=100
+awx-manage register_queue --queuename=default --instance_percent=100
+
+if [[ -n "$RUN_MIGRATIONS" ]]; then
+    for (( i=1; i<$CONTROL_PLANE_NODE_COUNT; i++ )); do
+        for (( j=i + 1; j<=$CONTROL_PLANE_NODE_COUNT; j++ )); do
+            awx-manage register_peers "awx_$i" --peers "awx_$j"
+        done
+    done
+
+    if [[ $EXECUTION_NODE_COUNT > 0 ]]; then
+        awx-manage provision_instance --hostname="receptor-hop" --node_type="hop"
+        awx-manage register_peers "receptor-hop" --peers "awx_1"
+        for (( e=1; e<=$EXECUTION_NODE_COUNT; e++ )); do
+            awx-manage provision_instance --hostname="receptor-$e" --node_type="execution"
+            awx-manage register_peers "receptor-$e" --peers "receptor-hop"
+        done
+    fi
+fi
+
+# Create resource entries when using Minikube
+if [[ -n "$MINIKUBE_CONTAINER_GROUP" ]]; then
+    awx-manage shell < /awx_devel/tools/docker-compose-minikube/_sources/bootstrap_minikube.py
+fi

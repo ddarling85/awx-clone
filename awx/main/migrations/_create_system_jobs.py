@@ -1,8 +1,6 @@
-import random
 import logging
 
-from django.db import migrations, models
-from django.utils.timezone import now, timedelta
+from django.utils.timezone import now
 
 logger = logging.getLogger('awx.main.migrations')
 
@@ -40,7 +38,7 @@ def create_clearsessions_jt(apps, schema_editor):
             name='Cleanup Expired Sessions',
             rrule='DTSTART:%s RRULE:FREQ=WEEKLY;INTERVAL=1;COUNT=1' % schedule_time,
             description='Cleans out expired browser sessions',
-            enabled=True,            
+            enabled=True,
             created=now_dt,
             modified=now_dt,
             extra_data={},

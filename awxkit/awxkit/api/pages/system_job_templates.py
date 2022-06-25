@@ -5,6 +5,7 @@ from . import page
 
 
 class SystemJobTemplate(UnifiedJobTemplate, HasNotifications):
+    NATURAL_KEY = ('name', 'organization')
 
     def launch(self, payload={}):
         """Launch the system_job_template using related->launch endpoint."""
@@ -12,9 +13,7 @@ class SystemJobTemplate(UnifiedJobTemplate, HasNotifications):
 
         # return job
         jobs_pg = self.get_related('jobs', id=result.json['system_job'])
-        assert jobs_pg.count == 1, \
-            "system_job_template launched (id:%s) but unable to find matching " \
-            "job at %s/jobs/" % (result.json['job'], self.url)
+        assert jobs_pg.count == 1, "system_job_template launched (id:%s) but unable to find matching " "job at %s/jobs/" % (result.json['job'], self.url)
         return jobs_pg.results[0]
 
 

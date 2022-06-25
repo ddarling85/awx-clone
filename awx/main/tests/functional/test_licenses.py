@@ -1,4 +1,3 @@
-
 import glob
 import json
 import os
@@ -10,9 +9,10 @@ try:
 except ImportError:
     from pip.req import parse_requirements
 
+from pip._internal.req.constructors import parse_req_from_line
+
 
 def test_python_and_js_licenses():
-
     def index_licenses(path):
         # Check for GPL (forbidden) and LGPL (need to ship source)
         # This is not meant to be an exhaustive check.
@@ -28,10 +28,9 @@ def test_python_and_js_licenses():
         def find_embedded_source_version(path, name):
             for entry in os.listdir(path):
                 # Check variations of '-' and '_' in filenames due to python
-                for fname in [name, name.replace('-','_')]:
+                for fname in [name, name.replace('-', '_')]:
                     if entry.startswith(fname) and entry.endswith('.tar.gz'):
-                        entry = entry[:-7]
-                        (n, v) = entry.rsplit('-',1)
+                        v = entry.split(name + '-')[1].split('.tar.gz')[0]
                         return v
             return None
 
@@ -45,42 +44,51 @@ def test_python_and_js_licenses():
                 'filename': filename,
                 'gpl': is_gpl,
                 'source_required': (is_gpl or is_lgpl),
-                'source_version': find_embedded_source_version(path, name)
+                'source_version': find_embedded_source_version(path, name),
             }
         return list
 
     def read_api_requirements(path):
         ret = {}
-        for req_file in ['requirements.txt', 'requirements_ansible.txt', 'requirements_git.txt', 'requirements_ansible_git.txt']:
+        skip_pbr_license_check = False
+        for req_file in ['requirements.txt', 'requirements_git.txt']:
             fname = '%s/%s' % (path, req_file)
 
             for reqt in parse_requirements(fname, session=''):
-                name = reqt.name
-                version = str(reqt.specifier)
+                parsed_requirement = parse_req_from_line(reqt.requirement, None)
+                name = parsed_requirement.requirement.name
+                version = str(parsed_requirement.requirement.specifier)
                 if version.startswith('=='):
-                    version=version[2:]
-                if reqt.link:
-                    (name, version) = reqt.link.filename.split('@',1)
+                    version = version[2:]
+                if parsed_requirement.link:
+                    if str(parsed_requirement.link).startswith(('http://', 'https://')):
+                        (name, version) = str(parsed_requirement.requirement).split('==', 1)
+                    else:
+                        (name, version) = parsed_requirement.link.filename.split('@', 1)
                     if name.endswith('.git'):
                         name = name[:-4]
-                ret[name] = { 'name': name, 'version': version}
+                    if name == 'receptor':
+                        name = 'receptorctl'
+                    if name == 'ansible-runner':
+                        skip_pbr_license_check = True
+                ret[name] = {'name': name, 'version': version}
+        if 'pbr' in ret and skip_pbr_license_check:
+            del ret['pbr']
         return ret
-
 
     def read_ui_requirements(path):
         def json_deps(jsondata):
             ret = {}
-            deps = jsondata.get('dependencies',{})
+            deps = jsondata.get('dependencies', {})
             for key in deps.keys():
                 key = key.lower()
-                devonly = deps[key].get('dev',False)
+                devonly = deps[key].get('dev', False)
                 if not devonly:
                     if key not in ret.keys():
-                        depname = key.replace('/','-')
-                        ret[depname] = {
-                            'name': depname,
-                            'version': deps[key]['version']
-                        }
+                        depname = key.replace('/', '-')
+                        if depname[0] == '@':
+                            depname = depname[1:]
+                        ret[depname] = {'name': depname, 'version': deps[key]['version']}
                         ret.update(json_deps(deps[key]))
             return ret
 
@@ -104,12 +112,12 @@ def test_python_and_js_licenses():
                 if version != licenses[item]['source_version']:
                     errors.append(" embedded source for %s is %s instead of the required version %s" % (item, licenses[item]['source_version'], version))
             elif licenses[item]['source_version']:
-                errors.append(" embedded source version %s for %s is included despite not being needed" % (licenses[item]['source_version'],item))
+                errors.append(" embedded source version %s for %s is included despite not being needed" % (licenses[item]['source_version'], item))
         items = list(requirements.keys())
         items.sort()
         for item in items:
             if item.lower() not in licenses.keys():
-                errors.append(" license for requirement %s is missing" %(item,))
+                errors.append(" license for requirement %s is missing" % (item,))
         return errors
 
     base_dir = settings.BASE_DIR
@@ -122,5 +130,4 @@ def test_python_and_js_licenses():
     errors += remediate_licenses_and_requirements(ui_licenses, ui_requirements)
     errors += remediate_licenses_and_requirements(api_licenses, api_requirements)
     if errors:
-        raise Exception('Included licenses not consistent with requirements:\n%s' %
-                        '\n'.join(errors))
+        raise Exception('Included licenses not consistent with requirements:\n%s' % '\n'.join(errors))

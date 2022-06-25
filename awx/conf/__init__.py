@@ -4,10 +4,8 @@
 # Django
 from django.utils.module_loading import autodiscover_modules
 
-# Tower
+# AWX
 from .registry import settings_registry
-
-default_app_config = 'awx.conf.apps.ConfConfig'
 
 
 def register(setting, **kwargs):

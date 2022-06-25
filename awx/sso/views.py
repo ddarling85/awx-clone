@@ -10,7 +10,7 @@ from django.urls import reverse
 from django.http import HttpResponse
 from django.views.generic import View
 from django.views.generic.base import RedirectView
-from django.utils.encoding import smart_text
+from django.utils.encoding import smart_str
 from awx.api.serializers import UserSerializer
 from rest_framework.renderers import JSONRenderer
 from django.conf import settings
@@ -37,16 +37,16 @@ sso_inactive = BaseRedirectView.as_view()
 
 
 class CompleteView(BaseRedirectView):
-
     def dispatch(self, request, *args, **kwargs):
         response = super(CompleteView, self).dispatch(request, *args, **kwargs)
         if self.request.user and self.request.user.is_authenticated:
-            logger.info(smart_text(u"User {} logged in".format(self.request.user.username)))
+            logger.info(smart_str(u"User {} logged in".format(self.request.user.username)))
             response.set_cookie('userLoggedIn', 'true')
             current_user = UserSerializer(self.request.user)
-            current_user = smart_text(JSONRenderer().render(current_user.data))
+            current_user = smart_str(JSONRenderer().render(current_user.data))
             current_user = urllib.parse.quote('%s' % current_user, '')
             response.set_cookie('current_user', current_user, secure=settings.SESSION_COOKIE_SECURE or None)
+            response.setdefault('X-API-Session-Cookie-Name', getattr(settings, 'SESSION_COOKIE_NAME', 'awx_sessionid'))
         return response
 
 
@@ -54,16 +54,12 @@ sso_complete = CompleteView.as_view()
 
 
 class MetadataView(View):
-
     def get(self, request, *args, **kwargs):
         from social_django.utils import load_backend, load_strategy
-        complete_url = reverse('social:complete', args=('saml', ))
-        saml_backend = load_backend(
-            load_strategy(request),
-            'saml',
-            redirect_uri=complete_url,
-        )
+
+        complete_url = reverse('social:complete', args=('saml',))
         try:
+            saml_backend = load_backend(load_strategy(request), 'saml', redirect_uri=complete_url)
             metadata, errors = saml_backend.generate_metadata_xml()
         except Exception as e:
             logger.exception('unable to generate SAML metadata')

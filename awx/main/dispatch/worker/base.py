@@ -25,14 +25,10 @@ else:
 
 
 def signame(sig):
-    return dict(
-        (k, v) for v, k in signal.__dict__.items()
-        if v.startswith('SIG') and not v.startswith('SIG_')
-    )[sig]
+    return dict((k, v) for v, k in signal.__dict__.items() if v.startswith('SIG') and not v.startswith('SIG_'))[sig]
 
 
 class WorkerSignalHandler:
-
     def __init__(self):
         self.kill_now = False
         signal.signal(signal.SIGTERM, signal.SIG_DFL)
@@ -43,6 +39,9 @@ class WorkerSignalHandler:
 
 
 class AWXConsumerBase(object):
+
+    last_stats = time.time()
+
     def __init__(self, name, worker, queues=[], pool=None):
         self.should_stop = False
 
@@ -54,13 +53,14 @@ class AWXConsumerBase(object):
         if pool is None:
             self.pool = WorkerPool()
         self.pool.init_workers(self.worker.work_loop)
+        self.redis = redis.Redis.from_url(settings.BROKER_URL)
 
     @property
     def listening_on(self):
         return f'listening on {self.queues}'
 
     def control(self, body):
-        logger.warn(body)
+        logger.warning(f'Received control signal:\n{body}')
         control = body.get('control')
         if control in ('status', 'running'):
             reply_queue = body['reply_to']
@@ -99,6 +99,16 @@ class AWXConsumerBase(object):
             queue = 0
         self.pool.write(queue, body)
         self.total_messages += 1
+        self.record_statistics()
+
+    def record_statistics(self):
+        if time.time() - self.last_stats > 1:  # buffer stat recording to once per second
+            try:
+                self.redis.set(f'awx_{self.name}_statistics', self.pool.debug())
+                self.last_stats = time.time()
+            except Exception:
+                logger.exception(f"encountered an error communicating with redis to store {self.name} statistics")
+                self.last_stats = time.time()
 
     def run(self, *args, **kwargs):
         signal.signal(signal.SIGINT, self.stop)
@@ -108,7 +118,7 @@ class AWXConsumerBase(object):
 
     def stop(self, signum, frame):
         self.should_stop = True
-        logger.warn('received {}, stopping'.format(signame(signum)))
+        logger.warning('received {}, stopping'.format(signame(signum)))
         self.worker.on_stop()
         raise SystemExit()
 
@@ -118,30 +128,23 @@ class AWXConsumerRedis(AWXConsumerBase):
         super(AWXConsumerRedis, self).run(*args, **kwargs)
         self.worker.on_start()
 
-        time_to_sleep = 1
         while True:
-            queue = redis.Redis.from_url(settings.BROKER_URL)
-            while True:
-                try:
-                    res = queue.blpop(self.queues)
-                    time_to_sleep = 1
-                    res = json.loads(res[1])
-                    self.process_task(res)
-                except redis.exceptions.RedisError:
-                    time_to_sleep = min(time_to_sleep * 2, 30)
-                    logger.exception(f"encountered an error communicating with redis. Reconnect attempt in {time_to_sleep} seconds")
-                    time.sleep(time_to_sleep)
-                except (json.JSONDecodeError, KeyError):
-                    logger.exception("failed to decode JSON message from redis")
-                if self.should_stop:
-                    return
+            logger.debug(f'{os.getpid()} is alive')
+            time.sleep(60)
 
 
 class AWXConsumerPG(AWXConsumerBase):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.pg_max_wait = settings.DISPATCHER_DB_DOWNTOWN_TOLLERANCE
+        # if no successful loops have ran since startup, then we should fail right away
+        self.pg_is_down = True  # set so that we fail if we get database errors on startup
+        self.pg_down_time = time.time() - self.pg_max_wait  # allow no grace period
+
     def run(self, *args, **kwargs):
         super(AWXConsumerPG, self).run(*args, **kwargs)
 
-        logger.warn(f"Running worker {self.name} listening to queues {self.queues}")
+        logger.info(f"Running worker {self.name} listening to queues {self.queues}")
         init = False
 
         while True:
@@ -154,15 +157,31 @@ class AWXConsumerPG(AWXConsumerBase):
                         init = True
                     for e in conn.events():
                         self.process_task(json.loads(e.payload))
+                        self.pg_is_down = False
                     if self.should_stop:
                         return
             except psycopg2.InterfaceError:
-                logger.warn("Stale Postgres message bus connection, reconnecting")
+                logger.warning("Stale Postgres message bus connection, reconnecting")
                 continue
+            except (db.DatabaseError, psycopg2.OperationalError):
+                # If we have attained stady state operation, tolerate short-term database hickups
+                if not self.pg_is_down:
+                    logger.exception(f"Error consuming new events from postgres, will retry for {self.pg_max_wait} s")
+                    self.pg_down_time = time.time()
+                    self.pg_is_down = True
+                if time.time() - self.pg_down_time > self.pg_max_wait:
+                    logger.warning(f"Postgres event consumer has not recovered in {self.pg_max_wait} s, exiting")
+                    raise
+                # Wait for a second before next attempt, but still listen for any shutdown signals
+                for i in range(10):
+                    if self.should_stop:
+                        return
+                    time.sleep(0.1)
+                for conn in db.connections.all():
+                    conn.close_if_unusable_or_obsolete()
 
 
 class BaseWorker(object):
-
     def read(self, queue):
         return queue.get(block=True, timeout=1)
 
@@ -193,7 +212,7 @@ class BaseWorker(object):
                 if 'uuid' in body:
                     uuid = body['uuid']
                     finished.put(uuid)
-        logger.warn('worker exiting gracefully pid:{}'.format(os.getpid()))
+        logger.debug('worker exiting gracefully pid:{}'.format(os.getpid()))
 
     def perform_work(self, body):
         raise NotImplementedError()

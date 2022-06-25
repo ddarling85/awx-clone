@@ -6,11 +6,12 @@ from uuid import UUID
 
 # Django
 from django.core.exceptions import PermissionDenied
+from django.db.models import JSONField
 from django.db.models.fields import PositiveIntegerField, BooleanField
 from django.db.models.fields.related import ForeignKey
 from django.http import Http404
-from django.utils.encoding import force_text, smart_text
-from django.utils.translation import ugettext_lazy as _
+from django.utils.encoding import force_str, smart_str
+from django.utils.translation import gettext_lazy as _
 
 # Django REST Framework
 from rest_framework import exceptions
@@ -22,30 +23,38 @@ from rest_framework.request import clone_request
 
 # AWX
 from awx.api.fields import ChoiceNullField
-from awx.main.fields import JSONField, ImplicitRoleField
-from awx.main.models import InventorySource, NotificationTemplate
-from awx.main.scheduler.kubernetes import PodManager
+from awx.main.fields import ImplicitRoleField
+from awx.main.models import NotificationTemplate
+from awx.main.utils.execution_environments import get_default_pod_spec
+
+# Polymorphic
+from polymorphic.models import PolymorphicModel
 
 
 class Metadata(metadata.SimpleMetadata):
-
     def get_field_info(self, field):
         field_info = OrderedDict()
         field_info['type'] = self.label_lookup[field]
         field_info['required'] = getattr(field, 'required', False)
 
         text_attrs = [
-            'read_only', 'label', 'help_text',
-            'min_length', 'max_length',
-            'min_value', 'max_value',
-            'category', 'category_slug',
-            'defined_in_file'
+            'read_only',
+            'label',
+            'help_text',
+            'min_length',
+            'max_length',
+            'min_value',
+            'max_value',
+            'category',
+            'category_slug',
+            'defined_in_file',
+            'unit',
         ]
 
         for attr in text_attrs:
             value = getattr(field, attr, None)
             if value is not None and value != '':
-                field_info[attr] = force_text(value, strings_only=True)
+                field_info[attr] = force_str(value, strings_only=True)
 
         placeholder = getattr(field, 'placeholder', serializers.empty)
         if placeholder is not serializers.empty:
@@ -61,18 +70,21 @@ class Metadata(metadata.SimpleMetadata):
                 'type': _('Data type for this {}.'),
                 'url': _('URL for this {}.'),
                 'related': _('Data structure with URLs of related resources.'),
-                'summary_fields': _('Data structure with name/description for related resources.  '
-                                    'The output for some objects may be limited for performance reasons.'),
+                'summary_fields': _(
+                    'Data structure with name/description for related resources.  ' 'The output for some objects may be limited for performance reasons.'
+                ),
                 'created': _('Timestamp when this {} was created.'),
                 'modified': _('Timestamp when this {} was last modified.'),
             }
             if field.field_name in field_help_text:
                 opts = serializer.Meta.model._meta.concrete_model._meta
-                verbose_name = smart_text(opts.verbose_name)
+                verbose_name = smart_str(opts.verbose_name)
                 field_info['help_text'] = field_help_text[field.field_name].format(verbose_name)
 
             if field.field_name == 'type':
-                field_info['filterable'] = True
+                # Only include model classes with `type` field.
+                if issubclass(serializer.Meta.model, PolymorphicModel):
+                    field_info['filterable'] = True
             else:
                 for model_field in serializer.Meta.model._meta.fields:
                     if field.field_name == model_field.name:
@@ -101,9 +113,7 @@ class Metadata(metadata.SimpleMetadata):
             field_info['children'] = self.get_serializer_info(field)
 
         if not isinstance(field, (RelatedField, ManyRelatedField)) and hasattr(field, 'choices'):
-            choices = [
-                (choice_value, choice_name) for choice_value, choice_name in field.choices.items()
-            ]
+            choices = [(choice_value, choice_name) for choice_value, choice_name in field.choices.items()]
             if not any(choice in ('', None) for choice, _ in choices):
                 if field.allow_blank:
                     choices = [("", "---------")] + choices
@@ -114,19 +124,6 @@ class Metadata(metadata.SimpleMetadata):
         # Indicate if a field is write-only.
         if getattr(field, 'write_only', False):
             field_info['write_only'] = True
-
-        # Special handling of inventory source_region choices that vary based on
-        # selected inventory source.
-        if field.field_name == 'source_regions':
-            for cp in ('azure_rm', 'ec2', 'gce'):
-                get_regions = getattr(InventorySource, 'get_%s_region_choices' % cp)
-                field_info['%s_region_choices' % cp] = get_regions()
-
-        # Special handling of group_by choices for EC2.
-        if field.field_name == 'group_by':
-            for cp in ('ec2',):
-                get_group_by_choices = getattr(InventorySource, 'get_%s_group_by_choices' % cp)
-                field_info['%s_group_by_choices' % cp] = get_group_by_choices()
 
         # Special handling of notification configuration where the required properties
         # are conditional on the type selected.
@@ -143,7 +140,6 @@ class Metadata(metadata.SimpleMetadata):
         if view_model == NotificationTemplate and field.field_name == 'messages':
             for (notification_type_name, notification_tr_name, notification_type_class) in NotificationTemplate.NOTIFICATION_TYPES:
                 field_info[notification_type_name] = notification_type_class.default_messages
-
 
         # Update type of fields returned...
         model_field = None
@@ -162,22 +158,19 @@ class Metadata(metadata.SimpleMetadata):
             field_info['type'] = 'integer'
         elif field.field_name in ('created', 'modified'):
             field_info['type'] = 'datetime'
-        elif (
-            RelatedField in field.__class__.__bases__ or
-            isinstance(model_field, ForeignKey)
-        ):
+        elif RelatedField in field.__class__.__bases__ or isinstance(model_field, ForeignKey):
             field_info['type'] = 'id'
         elif (
-            isinstance(field, JSONField) or
-            isinstance(model_field, JSONField) or
-            isinstance(field, DRFJSONField) or
-            isinstance(getattr(field, 'model_field', None), JSONField) or
-            field.field_name == 'credential_passwords'
+            isinstance(field, JSONField)
+            or isinstance(model_field, JSONField)
+            or isinstance(field, DRFJSONField)
+            or isinstance(getattr(field, 'model_field', None), JSONField)
+            or field.field_name == 'credential_passwords'
         ):
             field_info['type'] = 'json'
         elif (
-            isinstance(field, ManyRelatedField) and
-            field.field_name == 'credentials'
+            isinstance(field, ManyRelatedField)
+            and field.field_name == 'credentials'
             # launch-time credentials
         ):
             field_info['type'] = 'list_of_ids'
@@ -188,10 +181,7 @@ class Metadata(metadata.SimpleMetadata):
 
     def get_serializer_info(self, serializer, method=None):
         filterer = getattr(serializer, 'filter_field_metadata', lambda fields, method: fields)
-        return filterer(
-            super(Metadata, self).get_serializer_info(serializer),
-            method
-        )
+        return filterer(super(Metadata, self).get_serializer_info(serializer), method)
 
     def determine_actions(self, request, view):
         # Add field information for GET requests (so field names/labels are
@@ -222,7 +212,7 @@ class Metadata(metadata.SimpleMetadata):
                     continue
 
                 if field == "pod_spec_override":
-                    meta['default'] = PodManager().pod_definition
+                    meta['default'] = get_default_pod_spec()
 
                 # Add type choices if available from the serializer.
                 if field == 'type' and hasattr(serializer, 'get_type_choices'):
@@ -287,6 +277,7 @@ class Metadata(metadata.SimpleMetadata):
             metadata['object_roles'] = roles
 
         from rest_framework import generics
+
         if isinstance(view, generics.ListAPIView) and hasattr(view, 'paginator'):
             metadata['max_page_size'] = view.paginator.max_page_size
 
@@ -306,7 +297,6 @@ class RoleMetadata(Metadata):
 
 
 class SublistAttachDetatchMetadata(Metadata):
-
     def determine_actions(self, request, view):
         actions = super(SublistAttachDetatchMetadata, self).determine_actions(request, view)
         method = 'POST'

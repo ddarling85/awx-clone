@@ -9,33 +9,22 @@ import json
 import yaml
 from unittest import mock
 
-from backports.tempfile import TemporaryDirectory
-from django.conf import settings
-
 from rest_framework.exceptions import ParseError
 
 from awx.main.utils import common
 
-from awx.main.models import (
-    Job,
-    AdHocCommand,
-    InventoryUpdate,
-    ProjectUpdate,
-    SystemJob,
-    WorkflowJob,
-    Inventory,
-    JobTemplate,
-    UnifiedJobTemplate,
-    UnifiedJob
+from awx.main.models import Job, AdHocCommand, InventoryUpdate, ProjectUpdate, SystemJob, WorkflowJob, Inventory, JobTemplate, UnifiedJobTemplate, UnifiedJob
+
+
+@pytest.mark.parametrize(
+    'input_, output',
+    [
+        ({"foo": "bar"}, {"foo": "bar"}),
+        ('{"foo": "bar"}', {"foo": "bar"}),
+        ('---\nfoo: bar', {"foo": "bar"}),
+        (4399, {}),
+    ],
 )
-
-
-@pytest.mark.parametrize('input_, output', [
-    ({"foo": "bar"}, {"foo": "bar"}),
-    ('{"foo": "bar"}', {"foo": "bar"}),
-    ('---\nfoo: bar', {"foo": "bar"}),
-    (4399, {}),
-])
 def test_parse_yaml_or_json(input_, output):
     assert common.parse_yaml_or_json(input_) == output
 
@@ -51,7 +40,6 @@ def test_recursive_vars_not_allowed():
 
 
 class TestParserExceptions:
-
     @staticmethod
     def json_error(data):
         try:
@@ -106,7 +94,7 @@ TEST_MODELS = [
     (UnifiedJob, 'unified_job'),
     (Inventory, 'inventory'),
     (JobTemplate, 'job_template'),
-    (UnifiedJobTemplate, 'unified_job_template')
+    (UnifiedJobTemplate, 'unified_job_template'),
 ]
 
 
@@ -116,23 +104,36 @@ def test_get_type_for_model(model, name):
     assert common.get_type_for_model(model) == name
 
 
-@pytest.mark.django_db
 def test_get_model_for_invalid_type():
     with pytest.raises(LookupError):
         common.get_model_for_type('foobar')
 
 
-@pytest.mark.django_db
-@pytest.mark.parametrize("model_type,model_class", [
-    (name, cls) for cls, name in TEST_MODELS
-])
+@pytest.mark.parametrize("model_type,model_class", [(name, cls) for cls, name in TEST_MODELS])
 def test_get_model_for_valid_type(model_type, model_class):
     assert common.get_model_for_type(model_type) == model_class
+
+
+@pytest.mark.parametrize("model_type,model_class", [(name, cls) for cls, name in TEST_MODELS])
+def test_get_capacity_type(model_type, model_class):
+    if model_type in ('job', 'ad_hoc_command', 'inventory_update', 'job_template'):
+        expectation = 'execution'
+    elif model_type in ('project_update', 'system_job'):
+        expectation = 'control'
+    else:
+        expectation = None
+    if model_type in ('unified_job', 'unified_job_template', 'inventory'):
+        with pytest.raises(RuntimeError):
+            common.get_capacity_type(model_class)
+    else:
+        assert common.get_capacity_type(model_class) == expectation
+        assert common.get_capacity_type(model_class()) == expectation
 
 
 @pytest.fixture
 def memoized_function(mocker, mock_cache):
     with mock.patch('awx.main.utils.common.get_memoize_cache', return_value=mock_cache):
+
         @common.memoize(track_function=True)
         def myfunction(key, value):
             if key not in myfunction.calls:
@@ -144,6 +145,7 @@ def memoized_function(mocker, mock_cache):
                 return value
             else:
                 return '%s called %s times' % (value, myfunction.calls[key])
+
         myfunction.calls = dict()
         return myfunction
 
@@ -181,45 +183,14 @@ def test_memoize_delete(memoized_function, mock_cache):
 def test_memoize_parameter_error():
 
     with pytest.raises(common.IllegalArgumentError):
+
         @common.memoize(cache_key='foo', track_function=True)
         def fn():
             return
 
 
 def test_extract_ansible_vars():
-    my_dict = {
-        "foobar": "baz",
-        "ansible_connetion_setting": "1928"
-    }
+    my_dict = {"foobar": "baz", "ansible_connetion_setting": "1928"}
     redacted, var_list = common.extract_ansible_vars(json.dumps(my_dict))
     assert var_list == set(['ansible_connetion_setting'])
     assert redacted == {"foobar": "baz"}
-
-
-def test_get_custom_venv_choices():
-    bundled_venv = os.path.join(settings.BASE_VENV_PATH, 'ansible', '')
-    assert sorted(common.get_custom_venv_choices()) == [bundled_venv]
-
-    with TemporaryDirectory(dir=settings.BASE_VENV_PATH, prefix='tmp') as temp_dir:
-        os.makedirs(os.path.join(temp_dir, 'bin', 'activate'))
-
-        custom_venv_dir = os.path.join(temp_dir, 'custom')
-        custom_venv_1 = os.path.join(custom_venv_dir, 'venv-1')
-        custom_venv_awx = os.path.join(custom_venv_dir, 'custom', 'awx')
-
-        os.makedirs(os.path.join(custom_venv_1, 'bin', 'activate'))
-        os.makedirs(os.path.join(custom_venv_awx, 'bin', 'activate'))
-
-        assert sorted(common.get_custom_venv_choices([custom_venv_dir])) == [
-            bundled_venv,
-            os.path.join(temp_dir, ''),
-            os.path.join(custom_venv_1, '')
-        ]
-
-
-def test_region_sorting():
-    s = [('Huey', 'China1'),
-         ('Dewey', 'UK1'),
-         ('Lewie', 'US1'),
-         ('All', 'All')]
-    assert [x[1] for x in sorted(s, key=common.region_sorting)] == ['All', 'US1', 'China1', 'UK1']

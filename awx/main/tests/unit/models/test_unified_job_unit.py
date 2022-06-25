@@ -1,18 +1,8 @@
 import pytest
 from unittest import mock
 
-from awx.main.models import (
-    UnifiedJob,
-    UnifiedJobTemplate,
-    WorkflowJob,
-    WorkflowJobNode,
-    WorkflowApprovalTemplate,
-    Job,
-    User,
-    Project,
-    JobTemplate,
-    Inventory
-)
+from awx.main.models import UnifiedJob, UnifiedJobTemplate, WorkflowJob, WorkflowJobNode, WorkflowApprovalTemplate, Job, User, Project, JobTemplate, Inventory
+from awx.main.constants import JOB_VARIABLE_PREFIXES
 
 
 def test_incorrectly_formatted_variables():
@@ -67,9 +57,9 @@ def test_cancel_job_explanation(unified_job):
 
 
 def test_organization_copy_to_jobs():
-    '''
+    """
     All unified job types should infer their organization from their template organization
-    '''
+    """
     for cls in UnifiedJobTemplate.__subclasses__():
         if cls is WorkflowApprovalTemplate:
             continue  # these do not track organization
@@ -77,9 +67,9 @@ def test_organization_copy_to_jobs():
 
 
 def test_log_representation():
-    '''
+    """
     Common representation used inside of log messages
-    '''
+    """
     uj = UnifiedJob(status='running', id=4)
     job = Job(status='running', id=4)
     assert job.log_format == 'job 4 (running)'
@@ -87,55 +77,37 @@ def test_log_representation():
 
 
 class TestMetaVars:
-    '''
+    """
     Corresponding functional test exists for cases with indirect relationships
-    '''
+    """
 
     def test_job_metavars(self):
         maker = User(username='joe', pk=47, id=47)
         inv = Inventory(name='example-inv', id=45)
-        assert Job(
-            name='fake-job',
-            pk=42, id=42,
-            launch_type='manual',
-            created_by=maker,
-            inventory=inv
-        ).awx_meta_vars() == {
-            'tower_job_id': 42,
-            'awx_job_id': 42,
-            'tower_job_launch_type': 'manual',
-            'awx_job_launch_type': 'manual',
-            'awx_user_name': 'joe',
-            'tower_user_name': 'joe',
-            'awx_user_email': '',
-            'tower_user_email': '',
-            'awx_user_first_name': '',
-            'tower_user_first_name': '',
-            'awx_user_last_name': '',
-            'tower_user_last_name': '',
-            'awx_user_id': 47,
-            'tower_user_id': 47,
-            'tower_inventory_id': 45,
-            'awx_inventory_id': 45,
-            'tower_inventory_name': 'example-inv',
-            'awx_inventory_name': 'example-inv'
-        }
+        result_hash = {}
+        for name in JOB_VARIABLE_PREFIXES:
+            result_hash['{}_job_id'.format(name)] = 42
+            result_hash['{}_job_launch_type'.format(name)] = 'manual'
+            result_hash['{}_user_name'.format(name)] = 'joe'
+            result_hash['{}_user_email'.format(name)] = ''
+            result_hash['{}_user_first_name'.format(name)] = ''
+            result_hash['{}_user_last_name'.format(name)] = ''
+            result_hash['{}_user_id'.format(name)] = 47
+            result_hash['{}_inventory_id'.format(name)] = 45
+            result_hash['{}_inventory_name'.format(name)] = 'example-inv'
+        assert Job(name='fake-job', pk=42, id=42, launch_type='manual', created_by=maker, inventory=inv).awx_meta_vars() == result_hash
 
     def test_project_update_metavars(self):
         data = Job(
             name='fake-job',
-            pk=40, id=40,
+            pk=40,
+            id=40,
             launch_type='manual',
-            project=Project(
-                name='jobs-sync',
-                scm_revision='12345444'
-            ),
-            job_template=JobTemplate(
-                name='jobs-jt',
-                id=92, pk=92
-            )
+            project=Project(name='jobs-sync', scm_revision='12345444'),
+            job_template=JobTemplate(name='jobs-jt', id=92, pk=92),
         ).awx_meta_vars()
-        assert data['awx_project_revision'] == '12345444'
-        assert 'tower_job_template_id' in data
-        assert data['tower_job_template_id'] == 92
-        assert data['tower_job_template_name'] == 'jobs-jt'
+        for name in JOB_VARIABLE_PREFIXES:
+            assert data['{}_project_revision'.format(name)] == '12345444'
+            assert '{}_job_template_id'.format(name) in data
+            assert data['{}_job_template_id'.format(name)] == 92
+            assert data['{}_job_template_name'.format(name)] == 'jobs-jt'

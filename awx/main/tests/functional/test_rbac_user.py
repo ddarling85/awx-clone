@@ -4,7 +4,7 @@ from unittest import mock
 from django.test import TransactionTestCase
 
 from awx.main.access import UserAccess, RoleAccess, TeamAccess
-from awx.main.models import User, Organization, Inventory
+from awx.main.models import User, Organization, Inventory, Role
 
 
 class TestSysAuditorTransactional(TransactionTestCase):
@@ -60,12 +60,16 @@ def test_user_queryset(user):
 
 
 @pytest.mark.django_db
-@pytest.mark.parametrize('ext_auth,superuser,expect', [
-    (True, True, True),
-    (False, True, True),  # your setting can't touch me, I'm superuser
-    (True, False, True),  # org admin, managing my peeps
-    (False, False, False),  # setting blocks org admin
-], ids=['superuser', 'superuser-off', 'org', 'org-off'])
+@pytest.mark.parametrize(
+    'ext_auth,superuser,expect',
+    [
+        (True, True, True),
+        (False, True, True),  # your setting can't touch me, I'm superuser
+        (True, False, True),  # org admin, managing my peeps
+        (False, False, False),  # setting blocks org admin
+    ],
+    ids=['superuser', 'superuser-off', 'org', 'org-off'],
+)
 def test_manage_org_auth_setting(ext_auth, superuser, expect, organization, rando, user, team):
     u = user('foo-user', is_superuser=superuser)
     if not superuser:
@@ -108,22 +112,22 @@ def test_team_org_resource_role(ext_auth, organization, rando, org_admin, team):
             # use via /api/v2/teams/N/roles/
             TeamAccess(org_admin).can_attach(team, organization.workflow_admin_role, 'roles'),
             # use via /api/v2/roles/teams/
-            RoleAccess(org_admin).can_attach(organization.workflow_admin_role, team, 'member_role.parents')
+            RoleAccess(org_admin).can_attach(organization.workflow_admin_role, team, 'member_role.parents'),
         ] == [True for i in range(2)]
         assert [
             # use via /api/v2/teams/N/roles/
             TeamAccess(org_admin).can_unattach(team, organization.workflow_admin_role, 'roles'),
             # use via /api/v2/roles/teams/
-            RoleAccess(org_admin).can_unattach(organization.workflow_admin_role, team, 'member_role.parents')
+            RoleAccess(org_admin).can_unattach(organization.workflow_admin_role, team, 'member_role.parents'),
         ] == [True for i in range(2)]
 
 
 @pytest.mark.django_db
 def test_user_accessible_objects(user, organization):
-    '''
+    """
     We cannot directly use accessible_objects for User model because
     both editing and read permissions are obligated to complex business logic
-    '''
+    """
     admin = user('admin', False)
     u = user('john', False)
     access = UserAccess(admin)
@@ -140,9 +144,7 @@ def test_user_accessible_objects(user, organization):
 @pytest.mark.django_db
 def test_org_admin_create_sys_auditor(org_admin):
     access = UserAccess(org_admin)
-    assert not access.can_add(data=dict(
-        username='new_user', password="pa$$sowrd", email="asdf@redhat.com",
-        is_system_auditor='true'))
+    assert not access.can_add(data=dict(username='new_user', password="pa$$sowrd", email="asdf@redhat.com", is_system_auditor='true'))
 
 
 @pytest.mark.django_db
@@ -170,4 +172,34 @@ def test_org_admin_cannot_delete_member_attached_to_other_group(org_admin, org_m
     access = UserAccess(org_admin)
     other_org.member_role.members.add(org_member)
     assert not access.can_delete(org_member)
-    
+
+
+@pytest.mark.parametrize('reverse', (True, False))
+@pytest.mark.django_db
+def test_consistency_of_is_superuser_flag(reverse):
+    users = [User.objects.create(username='rando_{}'.format(i)) for i in range(2)]
+    for u in users:
+        assert u.is_superuser is False
+
+    system_admin = Role.singleton('system_administrator')
+    if reverse:
+        for u in users:
+            u.roles.add(system_admin)
+    else:
+        system_admin.members.add(*[u.id for u in users])  # like .add(42, 54)
+
+    for u in users:
+        u.refresh_from_db()
+        assert u.is_superuser is True
+
+    users[0].roles.clear()
+    for u in users:
+        u.refresh_from_db()
+    assert users[0].is_superuser is False
+    assert users[1].is_superuser is True
+
+    system_admin.members.clear()
+
+    for u in users:
+        u.refresh_from_db()
+        assert u.is_superuser is False
