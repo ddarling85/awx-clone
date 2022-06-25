@@ -21,7 +21,6 @@ from split_settings.tools import optional, include
 # Load default settings.
 from .defaults import *  # NOQA
 
-
 # awx-manage shell_plus --notebook
 NOTEBOOK_ARGUMENTS = ['--NotebookApp.token=', '--ip', '0.0.0.0', '--port', '8888', '--allow-root', '--no-browser']
 
@@ -35,13 +34,6 @@ LOGGING['handlers']['console']['()'] = 'awx.main.utils.handlers.ColorHandler'  #
 LOGGING['handlers']['task_system'] = LOGGING['handlers']['console'].copy()  # noqa
 COLOR_LOGS = True
 
-# celery is annoyingly loud when docker containers start
-LOGGING['loggers'].pop('celery', None)  # noqa
-# avoid awx.main.dispatch WARNING-level scaling worker up/down messages
-LOGGING['loggers']['awx.main.dispatch']['level'] = 'ERROR'  # noqa
-# suppress the spamminess of the awx.main.scheduler and .tasks loggers
-LOGGING['loggers']['awx']['level'] = 'INFO'  # noqa
-
 ALLOWED_HOSTS = ['*']
 
 mimetypes.add_type("image/svg+xml", ".svg", True)
@@ -52,17 +44,6 @@ SESSION_COOKIE_SECURE = False
 
 # Disallow sending csrf cookies over insecure connections
 CSRF_COOKIE_SECURE = False
-
-# Override django.template.loaders.cached.Loader in defaults.py
-template = next((tpl_backend for tpl_backend in TEMPLATES if tpl_backend['NAME'] == 'default'), None)  # noqa
-template['OPTIONS']['loaders'] = ('django.template.loaders.filesystem.Loader', 'django.template.loaders.app_directories.Loader')
-
-CALLBACK_QUEUE = "callback_tasks"
-
-# Enable dynamically pulling roles from a requirement.yml file
-# when updating SCM projects
-# Note: This setting may be overridden by database settings.
-AWX_ROLES_ENABLED = True
 
 # Disable Pendo on the UI for development/test.
 # Note: This setting may be overridden by database settings.
@@ -94,11 +75,7 @@ for setting in dir(this_module):
 include(optional('/etc/tower/settings.py'), scope=locals())
 include(optional('/etc/tower/conf.d/*.py'), scope=locals())
 
-# Installed differently in Dockerfile compared to production versions
-AWX_ANSIBLE_COLLECTIONS_PATHS = '/var/lib/awx/vendor/awx_ansible_collections'
-
 BASE_VENV_PATH = "/var/lib/awx/venv/"
-ANSIBLE_VENV_PATH = os.path.join(BASE_VENV_PATH, "ansible")
 AWX_VENV_PATH = os.path.join(BASE_VENV_PATH, "awx")
 
 # If any local_*.py files are present in awx/settings/, use them to override

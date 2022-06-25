@@ -4,6 +4,7 @@ import pytest
 
 from awx.api.versioning import reverse
 from awx.main.models import (
+    ActivityStream,
     Instance,
     InstanceGroup,
     ProjectUpdate,
@@ -13,7 +14,7 @@ from awx.main.utils import camelcase_to_underscore
 
 @pytest.fixture
 def tower_instance_group():
-    ig = InstanceGroup(name='tower')
+    ig = InstanceGroup(name='default')
     ig.save()
     return ig
 
@@ -21,6 +22,14 @@ def tower_instance_group():
 @pytest.fixture
 def instance():
     return Instance.objects.create(hostname='instance')
+
+
+@pytest.fixture
+def node_type_instance():
+    def fn(hostname, node_type):
+        return Instance.objects.create(hostname=hostname, node_type=node_type)
+
+    return fn
 
 
 @pytest.fixture
@@ -105,7 +114,9 @@ def test_delete_instance_group_jobs_running(delete, instance_group_jobs_running,
 
 
 @pytest.mark.django_db
-def test_delete_rename_tower_instance_group_prevented(delete, options, tower_instance_group, instance_group, user, patch, execution_environment):
+def test_delete_rename_tower_instance_group_prevented(
+    delete, options, tower_instance_group, instance_group, user, patch, control_plane_execution_environment, default_job_execution_environment
+):
     url = reverse("api:instance_group_detail", kwargs={'pk': tower_instance_group.pk})
     super_user = user('bob', True)
 
@@ -117,8 +128,8 @@ def test_delete_rename_tower_instance_group_prevented(delete, options, tower_ins
     assert 'GET' in resp.data['actions']
     assert 'PUT' in resp.data['actions']
 
-    # Rename 'tower' instance group denied
-    patch(url, {'name': 'tower_prime'}, super_user, expect=400)
+    # Rename 'default' instance group denied
+    patch(url, {'name': 'default_prime'}, super_user, expect=400)
 
     # Rename, other instance group OK
     url = reverse("api:instance_group_detail", kwargs={'pk': instance_group.pk})
@@ -196,3 +207,111 @@ def test_containerized_group_default_fields(instance_group, kube_credential):
     assert ig.policy_instance_list == []
     assert ig.policy_instance_minimum == 0
     assert ig.policy_instance_percentage == 0
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize('node_type', ['control', 'hybrid', 'execution'])
+def test_instance_attach_to_instance_group(post, instance_group, node_type_instance, admin, node_type):
+    instance = node_type_instance(hostname=node_type, node_type=node_type)
+
+    count = ActivityStream.objects.count()
+
+    url = reverse(f'api:instance_group_instance_list', kwargs={'pk': instance_group.pk})
+    post(url, {'associate': True, 'id': instance.id}, admin, expect=204 if node_type != 'control' else 400)
+
+    new_activity = ActivityStream.objects.all()[count:]
+    if node_type != 'control':
+        assert len(new_activity) == 2  # the second is an update of the instance group policy
+        new_activity = new_activity[0]
+        assert new_activity.operation == 'associate'
+        assert new_activity.object1 == 'instance_group'
+        assert new_activity.object2 == 'instance'
+        assert new_activity.instance.first() == instance
+        assert new_activity.instance_group.first() == instance_group
+    else:
+        assert not new_activity
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize('node_type', ['control', 'hybrid', 'execution'])
+def test_instance_unattach_from_instance_group(post, instance_group, node_type_instance, admin, node_type):
+    instance = node_type_instance(hostname=node_type, node_type=node_type)
+    instance_group.instances.add(instance)
+
+    count = ActivityStream.objects.count()
+
+    url = reverse(f'api:instance_group_instance_list', kwargs={'pk': instance_group.pk})
+    post(url, {'disassociate': True, 'id': instance.id}, admin, expect=204 if node_type != 'control' else 400)
+
+    new_activity = ActivityStream.objects.all()[count:]
+    if node_type != 'control':
+        assert len(new_activity) == 1
+        new_activity = new_activity[0]
+        assert new_activity.operation == 'disassociate'
+        assert new_activity.object1 == 'instance_group'
+        assert new_activity.object2 == 'instance'
+        assert new_activity.instance.first() == instance
+        assert new_activity.instance_group.first() == instance_group
+    else:
+        assert not new_activity
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize('node_type', ['control', 'hybrid', 'execution'])
+def test_instance_group_attach_to_instance(post, instance_group, node_type_instance, admin, node_type):
+    instance = node_type_instance(hostname=node_type, node_type=node_type)
+
+    count = ActivityStream.objects.count()
+
+    url = reverse(f'api:instance_instance_groups_list', kwargs={'pk': instance.pk})
+    post(url, {'associate': True, 'id': instance_group.id}, admin, expect=204 if node_type != 'control' else 400)
+
+    new_activity = ActivityStream.objects.all()[count:]
+    if node_type != 'control':
+        assert len(new_activity) == 2  # the second is an update of the instance group policy
+        new_activity = new_activity[0]
+        assert new_activity.operation == 'associate'
+        assert new_activity.object1 == 'instance'
+        assert new_activity.object2 == 'instance_group'
+        assert new_activity.instance.first() == instance
+        assert new_activity.instance_group.first() == instance_group
+    else:
+        assert not new_activity
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize('node_type', ['control', 'hybrid', 'execution'])
+def test_instance_group_unattach_from_instance(post, instance_group, node_type_instance, admin, node_type):
+    instance = node_type_instance(hostname=node_type, node_type=node_type)
+    instance_group.instances.add(instance)
+
+    count = ActivityStream.objects.count()
+
+    url = reverse(f'api:instance_instance_groups_list', kwargs={'pk': instance.pk})
+    post(url, {'disassociate': True, 'id': instance_group.id}, admin, expect=204 if node_type != 'control' else 400)
+
+    new_activity = ActivityStream.objects.all()[count:]
+    if node_type != 'control':
+        assert len(new_activity) == 1
+        new_activity = new_activity[0]
+        assert new_activity.operation == 'disassociate'
+        assert new_activity.object1 == 'instance'
+        assert new_activity.object2 == 'instance_group'
+        assert new_activity.instance.first() == instance
+        assert new_activity.instance_group.first() == instance_group
+    else:
+        assert not new_activity
+
+
+@pytest.mark.django_db
+def test_cannot_remove_controlplane_hybrid_instances(post, controlplane_instance_group, node_type_instance, admin_user):
+    instance = node_type_instance(hostname='hybrid_node', node_type='hybrid')
+    controlplane_instance_group.instances.add(instance)
+
+    url = reverse('api:instance_group_instance_list', kwargs={'pk': controlplane_instance_group.pk})
+    r = post(url, {'disassociate': True, 'id': instance.id}, admin_user, expect=400)
+    assert 'Cannot disassociate hybrid node' in str(r.data)
+
+    url = reverse('api:instance_instance_groups_list', kwargs={'pk': instance.pk})
+    r = post(url, {'disassociate': True, 'id': controlplane_instance_group.id}, admin_user, expect=400)
+    assert f'Cannot disassociate hybrid instance' in str(r.data)

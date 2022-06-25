@@ -3,11 +3,11 @@ from unittest import mock
 from datetime import timedelta
 from awx.main.scheduler import TaskManager
 from awx.main.models import InstanceGroup, WorkflowJob
-from awx.main.tasks import apply_cluster_membership_policies
+from awx.main.tasks.system import apply_cluster_membership_policies
 
 
 @pytest.mark.django_db
-def test_multi_group_basic_job_launch(instance_factory, default_instance_group, mocker, instance_group_factory, job_template_factory):
+def test_multi_group_basic_job_launch(instance_factory, controlplane_instance_group, mocker, instance_group_factory, job_template_factory):
     i1 = instance_factory("i1")
     i2 = instance_factory("i2")
     ig1 = instance_group_factory("ig1", instances=[i1])
@@ -30,7 +30,7 @@ def test_multi_group_basic_job_launch(instance_factory, default_instance_group, 
 
 
 @pytest.mark.django_db
-def test_multi_group_with_shared_dependency(instance_factory, default_instance_group, mocker, instance_group_factory, job_template_factory):
+def test_multi_group_with_shared_dependency(instance_factory, controlplane_instance_group, mocker, instance_group_factory, job_template_factory):
     i1 = instance_factory("i1")
     i2 = instance_factory("i2")
     ig1 = instance_group_factory("ig1", instances=[i1])
@@ -54,7 +54,7 @@ def test_multi_group_with_shared_dependency(instance_factory, default_instance_g
     with mocker.patch("awx.main.scheduler.TaskManager.start_task"):
         TaskManager().schedule()
         pu = p.project_updates.first()
-        TaskManager.start_task.assert_called_once_with(pu, default_instance_group, [j1, j2], default_instance_group.instances.all()[0])
+        TaskManager.start_task.assert_called_once_with(pu, controlplane_instance_group, [j1, j2], controlplane_instance_group.instances.all()[0])
         pu.finished = pu.created + timedelta(seconds=1)
         pu.status = "successful"
         pu.save()
@@ -67,7 +67,7 @@ def test_multi_group_with_shared_dependency(instance_factory, default_instance_g
 
 
 @pytest.mark.django_db
-def test_workflow_job_no_instancegroup(workflow_job_template_factory, default_instance_group, mocker):
+def test_workflow_job_no_instancegroup(workflow_job_template_factory, controlplane_instance_group, mocker):
     wfjt = workflow_job_template_factory('anicedayforawalk').workflow_job_template
     wfj = WorkflowJob.objects.create(workflow_job_template=wfjt)
     wfj.status = "pending"
@@ -79,9 +79,10 @@ def test_workflow_job_no_instancegroup(workflow_job_template_factory, default_in
 
 
 @pytest.mark.django_db
-def test_overcapacity_blocking_other_groups_unaffected(instance_factory, default_instance_group, mocker, instance_group_factory, job_template_factory):
+def test_overcapacity_blocking_other_groups_unaffected(instance_factory, controlplane_instance_group, mocker, instance_group_factory, job_template_factory):
     i1 = instance_factory("i1")
-    i1.capacity = 1000
+    # need to account a little extra for controller node capacity impact
+    i1.capacity = 1020
     i1.save()
     i2 = instance_factory("i2")
     ig1 = instance_group_factory("ig1", instances=[i1])
@@ -120,7 +121,7 @@ def test_overcapacity_blocking_other_groups_unaffected(instance_factory, default
 
 
 @pytest.mark.django_db
-def test_failover_group_run(instance_factory, default_instance_group, mocker, instance_group_factory, job_template_factory):
+def test_failover_group_run(instance_factory, controlplane_instance_group, mocker, instance_group_factory, job_template_factory):
     i1 = instance_factory("i1")
     i2 = instance_factory("i2")
     ig1 = instance_group_factory("ig1", instances=[i1])

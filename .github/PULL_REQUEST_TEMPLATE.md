@@ -9,14 +9,18 @@ the change does.
 
 ##### ISSUE TYPE
 <!--- Pick one below and delete the rest: -->
- - Feature Pull Request
- - Bugfix Pull Request
- - Docs Pull Request
+ - Breaking Change 
+ - New or Enhanced Feature
+ - Bug or Docs Fix
 
 ##### COMPONENT NAME
 <!--- Name of the module/plugin/module/task -->
  - API
  - UI
+ - Collection
+ - CLI
+ - Docs
+ - Other
 
 ##### AWX VERSION
 <!--- Paste verbatim output from `make VERSION` between quotes below -->

@@ -3,7 +3,7 @@ import pytest
 from unittest import mock
 from contextlib import contextmanager
 
-from awx.main.models import Credential
+from awx.main.models import Credential, UnifiedJob, Instance
 from awx.main.tests.factories import (
     create_organization,
     create_job_template,
@@ -15,6 +15,7 @@ from awx.main.tests.factories import (
 )
 
 from django.core.cache import cache
+from django.conf import settings
 
 
 def pytest_addoption(parser):
@@ -80,8 +81,44 @@ def instance_group_factory():
 
 
 @pytest.fixture
+def controlplane_instance_group(instance_factory, instance_group_factory):
+    """There always has to be a controlplane instancegroup and at least one instance in it"""
+    return create_instance_group(settings.DEFAULT_CONTROL_PLANE_QUEUE_NAME, create_instance('hybrid-1', node_type='hybrid', capacity=500))
+
+
+@pytest.fixture
 def default_instance_group(instance_factory, instance_group_factory):
-    return create_instance_group("tower", instances=[create_instance("hostA")])
+    return create_instance_group("default", instances=[create_instance("hostA", node_type='execution')])
+
+
+@pytest.fixture
+def control_instance():
+    '''Control instance in the controlplane automatic IG'''
+    inst = create_instance('control-1', node_type='control', capacity=500)
+    return inst
+
+
+@pytest.fixture
+def control_instance_low_capacity():
+    '''Control instance in the controlplane automatic IG that has low capacity'''
+    inst = create_instance('control-1', node_type='control', capacity=5)
+    return inst
+
+
+@pytest.fixture
+def execution_instance():
+    '''Execution node in the automatic default IG'''
+    ig = create_instance_group('default')
+    inst = create_instance('receptor-1', node_type='execution', capacity=500)
+    ig.instances.add(inst)
+    return inst
+
+
+@pytest.fixture
+def hybrid_instance():
+    '''Hybrid node in the default controlplane IG'''
+    inst = create_instance('hybrid-1', node_type='hybrid', capacity=500)
+    return inst
 
 
 @pytest.fixture
@@ -149,3 +186,36 @@ def mock_external_credential_input_sources():
     # test it explicitly.
     with mock.patch.object(Credential, 'dynamic_input_fields', new=[]) as _fixture:
         yield _fixture
+
+
+@pytest.fixture(scope='session', autouse=True)
+def mock_has_unpartitioned_events():
+    # has_unpartitioned_events determines if there are any events still
+    # left in the old, unpartitioned job events table. In order to work,
+    # this method looks up when the partition migration occurred. When
+    # Django's unit tests run, however, there will be no record of the migration.
+    # We mock this out to circumvent the migration query.
+    with mock.patch.object(UnifiedJob, 'has_unpartitioned_events', new=False) as _fixture:
+        yield _fixture
+
+
+@pytest.fixture(scope='session', autouse=True)
+def mock_get_event_queryset_no_job_created():
+    """
+    SQLite friendly since partitions aren't supported. Do not add the faked job_created field to the filter. If we do, it will result in an sql query for the
+    job_created field. That field does not actually exist in a non-partition scenario.
+    """
+
+    def event_qs(self):
+        kwargs = {self.event_parent_key: self.id}
+        return self.event_class.objects.filter(**kwargs)
+
+    with mock.patch.object(UnifiedJob, 'get_event_queryset', lambda self: event_qs(self)) as _fixture:
+        yield _fixture
+
+
+@pytest.fixture
+def mock_me():
+    me_mock = mock.MagicMock(return_value=Instance(id=1, hostname=settings.CLUSTER_HOST_ID, uuid='00000000-0000-0000-0000-000000000000'))
+    with mock.patch.object(Instance.objects, 'me', me_mock):
+        yield

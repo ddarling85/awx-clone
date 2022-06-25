@@ -15,8 +15,10 @@ from requests.models import Response, PreparedRequest
 
 import pytest
 
+from ansible.module_utils.six import raise_from
+
 from awx.main.tests.functional.conftest import _request
-from awx.main.models import Organization, Project, Inventory, JobTemplate, Credential, CredentialType, ExecutionEnvironment
+from awx.main.models import Organization, Project, Inventory, JobTemplate, Credential, CredentialType, ExecutionEnvironment, UnifiedJob
 
 from django.db import transaction
 
@@ -31,7 +33,7 @@ try:
     # Because awxkit will be a directory at the root of this makefile and we are using python3, import awxkit will work even if its not installed.
     # However, awxkit will not contain api whih causes a stack failure down on line 170 when we try to mock it.
     # So here we are importing awxkit.api to prevent that. Then you only get an error on tests for awxkit functionality.
-    import awxkit.api
+    import awxkit.api  # noqa
 
     HAS_AWX_KIT = True
 except ImportError:
@@ -150,14 +152,14 @@ def run_module(request, collection_import):
         def mock_load_params(self):
             self.params = module_params
 
-        if getattr(resource_module, 'TowerAWXKitModule', None):
-            resource_class = resource_module.TowerAWXKitModule
-        elif getattr(resource_module, 'TowerAPIModule', None):
-            resource_class = resource_module.TowerAPIModule
+        if getattr(resource_module, 'ControllerAWXKitModule', None):
+            resource_class = resource_module.ControllerAWXKitModule
+        elif getattr(resource_module, 'ControllerAPIModule', None):
+            resource_class = resource_module.ControllerAPIModule
         elif getattr(resource_module, 'TowerLegacyModule', None):
             resource_class = resource_module.TowerLegacyModule
         else:
-            raise ("The module has neither a TowerLegacyModule, TowerAWXKitModule or a TowerAPIModule")
+            raise ("The module has neither a TowerLegacyModule, ControllerAWXKitModule or a ControllerAPIModule")
 
         with mock.patch.object(resource_class, '_load_params', new=mock_load_params):
             # Call the test utility (like a mock server) instead of issuing HTTP requests
@@ -184,7 +186,7 @@ def run_module(request, collection_import):
         try:
             result = json.loads(module_stdout)
         except Exception as e:
-            raise Exception('Module did not write valid JSON, error: {0}, stdout:\n{1}'.format(str(e), module_stdout))
+            raise_from(Exception('Module did not write valid JSON, error: {0}, stdout:\n{1}'.format(str(e), module_stdout)), e)
         # A module exception should never be a test expectation
         if 'exception' in result:
             if "ModuleNotFoundError: No module named 'tower_cli'" in result['exception']:
@@ -248,6 +250,15 @@ def vault_credential(organization):
 
 
 @pytest.fixture
+def kube_credential():
+    ct = CredentialType.defaults['kubernetes_bearer_token']()
+    ct.save()
+    return Credential.objects.create(
+        credential_type=ct, name='kube-cred', inputs={'host': 'my.cluster', 'bearer_token': 'my-token', 'verify_ssl': False}
+    )
+
+
+@pytest.fixture
 def silence_deprecation():
     """The deprecation warnings are stored in a global variable
     they will create cross-test interference. Use this to turn them off.
@@ -265,4 +276,15 @@ def silence_warning():
 
 @pytest.fixture
 def execution_environment():
-    return ExecutionEnvironment.objects.create(name="test-ee", description="test-ee", managed_by_tower=True)
+    return ExecutionEnvironment.objects.create(name="test-ee", description="test-ee", managed=False)
+
+
+@pytest.fixture(scope='session', autouse=True)
+def mock_has_unpartitioned_events():
+    # has_unpartitioned_events determines if there are any events still
+    # left in the old, unpartitioned job events table. In order to work,
+    # this method looks up when the partition migration occurred. When
+    # Django's unit tests run, however, there will be no record of the migration.
+    # We mock this out to circumvent the migration query.
+    with mock.patch.object(UnifiedJob, 'has_unpartitioned_events', new=False) as _fixture:
+        yield _fixture

@@ -5,10 +5,11 @@ import logging
 import requests
 import json
 
-from django.utils.encoding import smart_text
-from django.utils.translation import ugettext_lazy as _
+from django.utils.encoding import smart_str
+from django.utils.translation import gettext_lazy as _
 
 from awx.main.notifications.base import AWXBaseEmailBackend
+from awx.main.utils import get_awx_http_client_headers
 from awx.main.notifications.custom_notification_base import CustomNotificationBase
 
 logger = logging.getLogger('awx.main.notifications.rocketchat_backend')
@@ -38,11 +39,13 @@ class RocketChatBackend(AWXBaseEmailBackend, CustomNotificationBase):
                 if optvalue is not None:
                     payload[optval] = optvalue.strip()
 
-            r = requests.post("{}".format(m.recipients()[0]), data=json.dumps(payload), verify=(not self.rocketchat_no_verify_ssl))
+            r = requests.post(
+                "{}".format(m.recipients()[0]), data=json.dumps(payload), headers=get_awx_http_client_headers(), verify=(not self.rocketchat_no_verify_ssl)
+            )
 
             if r.status_code >= 400:
-                logger.error(smart_text(_("Error sending notification rocket.chat: {}").format(r.status_code)))
+                logger.error(smart_str(_("Error sending notification rocket.chat: {}").format(r.status_code)))
                 if not self.fail_silently:
-                    raise Exception(smart_text(_("Error sending notification rocket.chat: {}").format(r.status_code)))
+                    raise Exception(smart_str(_("Error sending notification rocket.chat: {}").format(r.status_code)))
             sent_messages += 1
         return sent_messages

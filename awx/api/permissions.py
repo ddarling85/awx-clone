@@ -23,7 +23,7 @@ __all__ = [
     'ProjectUpdatePermission',
     'InventoryInventorySourcesUpdatePermission',
     'UserPermission',
-    'IsSuperUser',
+    'IsSystemAdminOrAuditor',
     'InstanceGroupTowerPermission',
     'WorkflowApprovalPermission',
 ]
@@ -234,20 +234,18 @@ class UserPermission(ModelAccessPermission):
         raise PermissionDenied()
 
 
-class IsSuperUser(permissions.BasePermission):
+class IsSystemAdminOrAuditor(permissions.BasePermission):
     """
-    Allows access only to admin users.
+    Allows write access only to system admin users.
+    Allows read access only to system auditor users.
     """
 
     def has_permission(self, request, view):
-        return request.user and request.user.is_superuser
-
-
-class InstanceGroupTowerPermission(ModelAccessPermission):
-    def has_object_permission(self, request, view, obj):
-        if request.method == 'DELETE' and obj.name == "tower":
+        if not (request.user and request.user.is_authenticated):
             return False
-        return super(InstanceGroupTowerPermission, self).has_object_permission(request, view, obj)
+        if request.method == 'GET':
+            return request.user.is_superuser or request.user.is_system_auditor
+        return request.user.is_superuser
 
 
 class WebhookKeyPermission(permissions.BasePermission):

@@ -11,7 +11,7 @@ from functools import reduce
 from django.conf import settings
 from django.db.models import Q, Prefetch
 from django.contrib.auth.models import User
-from django.utils.translation import ugettext_lazy as _
+from django.utils.translation import gettext_lazy as _
 from django.core.exceptions import ObjectDoesNotExist
 
 # Django REST Framework
@@ -45,6 +45,7 @@ from awx.main.models import (
     InventoryUpdateEvent,
     Job,
     JobEvent,
+    UnpartitionedJobEvent,
     JobHostSummary,
     JobLaunchConfig,
     JobTemplate,
@@ -464,7 +465,7 @@ class BaseAccess(object):
             if display_method == 'schedule':
                 user_capabilities['schedule'] = user_capabilities['start']
                 continue
-            elif display_method == 'delete' and not isinstance(obj, (User, UnifiedJob, CredentialInputSource)):
+            elif display_method == 'delete' and not isinstance(obj, (User, UnifiedJob, CredentialInputSource, ExecutionEnvironment, InstanceGroup)):
                 user_capabilities['delete'] = user_capabilities['edit']
                 continue
             elif display_method == 'copy' and isinstance(obj, (Group, Host)):
@@ -572,6 +573,11 @@ class InstanceGroupAccess(BaseAccess):
         return self.user.is_superuser
 
     def can_change(self, obj, data):
+        return self.user.is_superuser
+
+    def can_delete(self, obj):
+        if obj.name in [settings.DEFAULT_EXECUTION_QUEUE_NAME, settings.DEFAULT_CONTROL_PLANE_QUEUE_NAME]:
+            return False
         return self.user.is_superuser
 
 
@@ -852,7 +858,12 @@ class InventoryAccess(BaseAccess):
     """
 
     model = Inventory
-    prefetch_related = ('created_by', 'modified_by', 'organization')
+    prefetch_related = (
+        'created_by',
+        'modified_by',
+        'organization',
+        Prefetch('labels', queryset=Label.objects.all().order_by('name')),
+    )
 
     def filtered_queryset(self, allowed=None, ad_hoc=None):
         return self.model.accessible_objects(self.user, 'read_role')
@@ -866,13 +877,11 @@ class InventoryAccess(BaseAccess):
         # If no data is specified, just checking for generic add permission?
         if not data:
             return Organization.accessible_objects(self.user, 'inventory_admin_role').exists()
-        return self.check_related('organization', Organization, data, role_field='inventory_admin_role') and self.check_related(
-            'insights_credential', Credential, data, role_field='use_role'
-        )
+        return self.check_related('organization', Organization, data, role_field='inventory_admin_role')
 
     @check_superuser
     def can_change(self, obj, data):
-        return self.can_admin(obj, data) and self.check_related('insights_credential', Credential, data, obj=obj, role_field='use_role')
+        return self.can_admin(obj, data)
 
     @check_superuser
     def can_admin(self, obj, data):
@@ -1037,7 +1046,7 @@ class InventorySourceAccess(NotificationAttachMixin, BaseAccess):
 
     def can_add(self, data):
         if not data or 'inventory' not in data:
-            return Organization.accessible_objects(self.user, 'admin_role').exists()
+            return Inventory.accessible_objects(self.user, 'admin_role').exists()
 
         if not self.check_related('source_project', Project, data, role_field='use_role'):
             return False
@@ -1120,7 +1129,7 @@ class CredentialTypeAccess(BaseAccess):
     I can create when:
      - I'm a superuser:
     I can change when:
-     - I'm a superuser and the type is not "managed by Tower"
+     - I'm a superuser and the type is not "managed"
     """
 
     model = CredentialType
@@ -1206,7 +1215,7 @@ class CredentialAccess(BaseAccess):
     def get_user_capabilities(self, obj, **kwargs):
         user_capabilities = super(CredentialAccess, self).get_user_capabilities(obj, **kwargs)
         user_capabilities['use'] = self.can_use(obj)
-        if getattr(obj, 'managed_by_tower', False) is True:
+        if getattr(obj, 'managed', False) is True:
             user_capabilities['edit'] = user_capabilities['delete'] = False
         return user_capabilities
 
@@ -1369,6 +1378,8 @@ class ExecutionEnvironmentAccess(BaseAccess):
         return self.check_related('organization', Organization, data, obj=obj, mandatory=True, role_field='execution_environment_admin_role')
 
     def can_delete(self, obj):
+        if obj.managed:
+            raise PermissionDenied
         return self.can_change(obj, None)
 
 
@@ -2352,6 +2363,11 @@ class JobEventAccess(BaseAccess):
         return False
 
 
+class UnpartitionedJobEventAccess(JobEventAccess):
+
+    model = UnpartitionedJobEvent
+
+
 class ProjectUpdateEventAccess(BaseAccess):
     """
     I can see project update event records whenever I can access the project update
@@ -2895,3 +2911,4 @@ class WorkflowApprovalTemplateAccess(BaseAccess):
 
 for cls in BaseAccess.__subclasses__():
     access_registry[cls.model] = cls
+access_registry[UnpartitionedJobEvent] = UnpartitionedJobEventAccess

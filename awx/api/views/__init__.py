@@ -21,7 +21,7 @@ from urllib3.exceptions import ConnectTimeoutError
 from django.conf import settings
 from django.core.exceptions import FieldError, ObjectDoesNotExist
 from django.db.models import Q, Sum
-from django.db import IntegrityError, transaction, connection
+from django.db import IntegrityError, ProgrammingError, transaction, connection
 from django.shortcuts import get_object_or_404
 from django.utils.safestring import mark_safe
 from django.utils.timezone import now
@@ -29,7 +29,7 @@ from django.views.decorators.csrf import csrf_exempt
 from django.template.loader import render_to_string
 from django.http import HttpResponse
 from django.contrib.contenttypes.models import ContentType
-from django.utils.translation import ugettext_lazy as _
+from django.utils.translation import gettext_lazy as _
 
 
 # Django REST Framework
@@ -62,7 +62,7 @@ import pytz
 from wsgiref.util import FileWrapper
 
 # AWX
-from awx.main.tasks import send_notifications, update_inventory_computed_fields
+from awx.main.tasks.system import send_notifications, update_inventory_computed_fields
 from awx.main.access import get_user_queryset, HostAccess
 from awx.api.generics import (
     APIView,
@@ -90,17 +90,14 @@ from awx.main import models
 from awx.main.utils import (
     camelcase_to_underscore,
     extract_ansible_vars,
-    get_awx_http_client_headers,
     get_object_or_400,
     getattrd,
     get_pk_from_dict,
     schedule_task_manager,
     ignore_inventory_computed_fields,
-    set_environ,
 )
 from awx.main.utils.encryption import encrypt_value
 from awx.main.utils.filters import SmartFilter
-from awx.main.utils.insights import filter_insights_api_response
 from awx.main.redact import UriCleaner
 from awx.api.permissions import (
     JobTemplateCallbackPermission,
@@ -108,14 +105,14 @@ from awx.api.permissions import (
     ProjectUpdatePermission,
     InventoryInventorySourcesUpdatePermission,
     UserPermission,
-    InstanceGroupTowerPermission,
     VariableDataPermission,
     WorkflowApprovalPermission,
+    IsSystemAdminOrAuditor,
 )
 from awx.api import renderers
 from awx.api import serializers
 from awx.api.metadata import RoleMetadata
-from awx.main.constants import ACTIVE_STATES
+from awx.main.constants import ACTIVE_STATES, SURVEY_TYPE_MAPPING
 from awx.main.scheduler.dag_workflow import WorkflowDAG
 from awx.api.views.mixin import (
     ControlledByScmMixin,
@@ -159,8 +156,10 @@ from awx.api.views.inventory import (  # noqa
     InventoryAccessList,
     InventoryObjectRolesList,
     InventoryJobTemplateList,
+    InventoryLabelList,
     InventoryCopy,
 )
+from awx.api.views.mesh_visualizer import MeshVisualizer  # noqa
 from awx.api.views.root import (  # noqa
     ApiRootView,
     ApiOAuthAuthorizationRootView,
@@ -172,9 +171,20 @@ from awx.api.views.root import (  # noqa
     ApiV2AttachView,
 )
 from awx.api.views.webhooks import WebhookKeyView, GithubWebhookReceiver, GitlabWebhookReceiver  # noqa
+from awx.api.pagination import UnifiedJobEventPagination
+from awx.main.utils import set_environ
 
 
 logger = logging.getLogger('awx.api.views')
+
+
+def unpartitioned_event_horizon(cls):
+    with connection.cursor() as cursor:
+        try:
+            cursor.execute(f'SELECT MAX(id) FROM _unpartitioned_{cls._meta.db_table}')
+            return cursor.fetchone()[0] or -1
+        except ProgrammingError:
+            return 0
 
 
 def api_exception_handler(exc, context):
@@ -355,6 +365,7 @@ class InstanceList(ListAPIView):
     model = models.Instance
     serializer_class = serializers.InstanceSerializer
     search_fields = ('hostname',)
+    ordering = ('id',)
 
 
 class InstanceDetail(RetrieveUpdateAPIView):
@@ -367,8 +378,8 @@ class InstanceDetail(RetrieveUpdateAPIView):
         r = super(InstanceDetail, self).update(request, *args, **kwargs)
         if status.is_success(r.status_code):
             obj = self.get_object()
-            obj.refresh_capacity()
-            obj.save()
+            obj.set_capacity_value()
+            obj.save(update_fields=['capacity'])
             r.data = serializers.InstanceSerializer(obj, context=self.get_serializer_context()).to_representation(obj)
         return r
 
@@ -395,6 +406,75 @@ class InstanceInstanceGroupsList(InstanceGroupMembershipMixin, SubListCreateAtta
     parent_model = models.Instance
     relationship = 'rampart_groups'
 
+    def is_valid_relation(self, parent, sub, created=False):
+        if parent.node_type == 'control':
+            return {'msg': _(f"Cannot change instance group membership of control-only node: {parent.hostname}.")}
+        if parent.node_type == 'hop':
+            return {'msg': _(f"Cannot change instance group membership of hop node : {parent.hostname}.")}
+        return None
+
+    def is_valid_removal(self, parent, sub):
+        res = self.is_valid_relation(parent, sub)
+        if res:
+            return res
+        if sub.name == settings.DEFAULT_CONTROL_PLANE_QUEUE_NAME and parent.node_type == 'hybrid':
+            return {'msg': _(f"Cannot disassociate hybrid instance {parent.hostname} from {sub.name}.")}
+        return None
+
+
+class InstanceHealthCheck(GenericAPIView):
+
+    name = _('Instance Health Check')
+    model = models.Instance
+    serializer_class = serializers.InstanceHealthCheckSerializer
+    permission_classes = (IsSystemAdminOrAuditor,)
+
+    def get_queryset(self):
+        # FIXME: For now, we don't have a good way of checking the health of a hop node.
+        return super().get_queryset().exclude(node_type='hop')
+
+    def get(self, request, *args, **kwargs):
+        obj = self.get_object()
+        data = self.get_serializer(data=request.data).to_representation(obj)
+        return Response(data, status=status.HTTP_200_OK)
+
+    def post(self, request, *args, **kwargs):
+        obj = self.get_object()
+
+        if obj.node_type == 'execution':
+            from awx.main.tasks.system import execution_node_health_check
+
+            runner_data = execution_node_health_check(obj.hostname)
+            obj.refresh_from_db()
+            data = self.get_serializer(data=request.data).to_representation(obj)
+            # Add in some extra unsaved fields
+            for extra_field in ('transmit_timing', 'run_timing'):
+                if extra_field in runner_data:
+                    data[extra_field] = runner_data[extra_field]
+        else:
+            from awx.main.tasks.system import cluster_node_health_check
+
+            if settings.CLUSTER_HOST_ID == obj.hostname:
+                cluster_node_health_check(obj.hostname)
+            else:
+                cluster_node_health_check.apply_async([obj.hostname], queue=obj.hostname)
+                start_time = time.time()
+                prior_check_time = obj.last_health_check
+                while time.time() - start_time < 50.0:
+                    obj.refresh_from_db(fields=['last_health_check'])
+                    if obj.last_health_check != prior_check_time:
+                        break
+                    if time.time() - start_time < 1.0:
+                        time.sleep(0.1)
+                    else:
+                        time.sleep(1.0)
+                else:
+                    obj.mark_offline(errors=_('Health check initiated by user determined this instance to be unresponsive'))
+            obj.refresh_from_db()
+            data = self.get_serializer(data=request.data).to_representation(obj)
+
+        return Response(data, status=status.HTTP_200_OK)
+
 
 class InstanceGroupList(ListCreateAPIView):
 
@@ -409,7 +489,6 @@ class InstanceGroupDetail(RelatedJobsPreventDeleteMixin, RetrieveUpdateDestroyAP
     name = _("Instance Group Detail")
     model = models.InstanceGroup
     serializer_class = serializers.InstanceGroupSerializer
-    permission_classes = (InstanceGroupTowerPermission,)
 
     def update_raw_data(self, data):
         if self.get_object().is_container_group:
@@ -437,12 +516,28 @@ class InstanceGroupInstanceList(InstanceGroupMembershipMixin, SubListAttachDetac
     relationship = "instances"
     search_fields = ('hostname',)
 
+    def is_valid_relation(self, parent, sub, created=False):
+        if sub.node_type == 'control':
+            return {'msg': _(f"Cannot change instance group membership of control-only node: {sub.hostname}.")}
+        if sub.node_type == 'hop':
+            return {'msg': _(f"Cannot change instance group membership of hop node : {sub.hostname}.")}
+        return None
+
+    def is_valid_removal(self, parent, sub):
+        res = self.is_valid_relation(parent, sub)
+        if res:
+            return res
+        if sub.node_type == 'hybrid' and parent.name == settings.DEFAULT_CONTROL_PLANE_QUEUE_NAME:
+            return {'msg': _(f"Cannot disassociate hybrid node {sub.hostname} from {parent.name}.")}
+        return None
+
 
 class ScheduleList(ListCreateAPIView):
 
     name = _("Schedules")
     model = models.Schedule
     serializer_class = serializers.ScheduleSerializer
+    ordering = ('id',)
 
 
 class ScheduleDetail(RetrieveUpdateDestroyAPIView):
@@ -483,8 +578,7 @@ class ScheduleZoneInfo(APIView):
     swagger_topic = 'System Configuration'
 
     def get(self, request):
-        zones = [{'name': zone} for zone in models.Schedule.get_zoneinfo()]
-        return Response(zones)
+        return Response({'zones': models.Schedule.get_zoneinfo(), 'links': models.Schedule.get_zoneinfo_links()})
 
 
 class LaunchConfigCredentialsBase(SubListAttachDetachAPIView):
@@ -685,6 +779,7 @@ class TeamAccessList(ResourceAccessList):
 
 class ExecutionEnvironmentList(ListCreateAPIView):
 
+    always_allow_superuser = False
     model = models.ExecutionEnvironment
     serializer_class = serializers.ExecutionEnvironmentSerializer
     swagger_topic = "Execution Environments"
@@ -692,9 +787,25 @@ class ExecutionEnvironmentList(ListCreateAPIView):
 
 class ExecutionEnvironmentDetail(RetrieveUpdateDestroyAPIView):
 
+    always_allow_superuser = False
     model = models.ExecutionEnvironment
     serializer_class = serializers.ExecutionEnvironmentSerializer
     swagger_topic = "Execution Environments"
+
+    def update(self, request, *args, **kwargs):
+        instance = self.get_object()
+        fields_to_check = ['name', 'description', 'organization', 'image', 'credential']
+        if instance.managed and request.user.can_access(models.ExecutionEnvironment, 'change', instance):
+            for field in fields_to_check:
+                if kwargs.get('partial') and field not in request.data:
+                    continue
+                left = getattr(instance, field, None)
+                if hasattr(left, 'id'):
+                    left = left.id
+                right = request.data.get(field)
+                if left != right:
+                    raise PermissionDenied(_("Only the 'pull' field can be edited for managed execution environments."))
+        return super().update(request, *args, **kwargs)
 
 
 class ExecutionEnvironmentJobTemplateList(SubListAPIView):
@@ -878,10 +989,16 @@ class ProjectUpdateEventsList(SubListAPIView):
     relationship = 'project_update_events'
     name = _('Project Update Events List')
     search_fields = ('stdout',)
+    pagination_class = UnifiedJobEventPagination
 
     def finalize_response(self, request, response, *args, **kwargs):
         response['X-UI-Max-Events'] = settings.MAX_UI_JOB_EVENTS
         return super(ProjectUpdateEventsList, self).finalize_response(request, response, *args, **kwargs)
+
+    def get_queryset(self):
+        pu = self.get_parent_object()
+        self.check_parent_access(pu)
+        return pu.get_event_queryset()
 
 
 class SystemJobEventsList(SubListAPIView):
@@ -892,10 +1009,16 @@ class SystemJobEventsList(SubListAPIView):
     relationship = 'system_job_events'
     name = _('System Job Events List')
     search_fields = ('stdout',)
+    pagination_class = UnifiedJobEventPagination
 
     def finalize_response(self, request, response, *args, **kwargs):
         response['X-UI-Max-Events'] = settings.MAX_UI_JOB_EVENTS
         return super(SystemJobEventsList, self).finalize_response(request, response, *args, **kwargs)
+
+    def get_queryset(self):
+        job = self.get_parent_object()
+        self.check_parent_access(job)
+        return job.get_event_queryset()
 
 
 class ProjectUpdateCancel(RetrieveAPIView):
@@ -1274,7 +1397,7 @@ class CredentialTypeDetail(RetrieveUpdateDestroyAPIView):
 
     def destroy(self, request, *args, **kwargs):
         instance = self.get_object()
-        if instance.managed_by_tower:
+        if instance.managed:
             raise PermissionDenied(detail=_("Deletion not allowed for managed credential types"))
         if instance.credentials.exists():
             raise PermissionDenied(detail=_("Credential types that are in use cannot be deleted"))
@@ -1389,7 +1512,7 @@ class CredentialDetail(RetrieveUpdateDestroyAPIView):
 
     def destroy(self, request, *args, **kwargs):
         instance = self.get_object()
-        if instance.managed_by_tower:
+        if instance.managed:
             raise PermissionDenied(detail=_("Deletion not allowed for managed credentials"))
         return super(CredentialDetail, self).destroy(request, *args, **kwargs)
 
@@ -1450,8 +1573,9 @@ class CredentialExternalTest(SubDetailAPIView):
                 backend_kwargs[field_name] = value
         backend_kwargs.update(request.data.get('metadata', {}))
         try:
-            obj.credential_type.plugin.backend(**backend_kwargs)
-            return Response({}, status=status.HTTP_202_ACCEPTED)
+            with set_environ(**settings.AWX_TASK_ENV):
+                obj.credential_type.plugin.backend(**backend_kwargs)
+                return Response({}, status=status.HTTP_202_ACCEPTED)
         except requests.exceptions.HTTPError as exc:
             message = 'HTTP {}'.format(exc.response.status_code)
             return Response({'inputs': message}, status=status.HTTP_400_BAD_REQUEST)
@@ -1663,106 +1787,6 @@ class GatewayTimeout(APIException):
     status_code = status.HTTP_504_GATEWAY_TIMEOUT
     default_detail = ''
     default_code = 'gateway_timeout'
-
-
-class HostInsights(GenericAPIView):
-
-    model = models.Host
-    serializer_class = serializers.EmptySerializer
-
-    def _call_insights_api(self, url, session, headers):
-        try:
-            with set_environ(**settings.AWX_TASK_ENV):
-                res = session.get(url, headers=headers, timeout=120)
-        except requests.exceptions.SSLError:
-            raise BadGateway(_('SSLError while trying to connect to {}').format(url))
-        except requests.exceptions.Timeout:
-            raise GatewayTimeout(_('Request to {} timed out.').format(url))
-        except requests.exceptions.RequestException as e:
-            raise BadGateway(_('Unknown exception {} while trying to GET {}').format(e, url))
-
-        if res.status_code == 401:
-            raise BadGateway(_('Unauthorized access. Please check your Insights Credential username and password.'))
-        elif res.status_code != 200:
-            raise BadGateway(
-                _('Failed to access the Insights API at URL {}.' ' Server responded with {} status code and message {}').format(
-                    url, res.status_code, res.content
-                )
-            )
-
-        try:
-            return res.json()
-        except ValueError:
-            raise BadGateway(_('Expected JSON response from Insights at URL {}' ' but instead got {}').format(url, res.content))
-
-    def _get_session(self, username, password):
-        session = requests.Session()
-        session.auth = requests.auth.HTTPBasicAuth(username, password)
-
-        return session
-
-    def _get_platform_info(self, host, session, headers):
-        url = '{}/api/inventory/v1/hosts?insights_id={}'.format(settings.INSIGHTS_URL_BASE, host.insights_system_id)
-        res = self._call_insights_api(url, session, headers)
-        try:
-            res['results'][0]['id']
-        except (IndexError, KeyError):
-            raise NotFound(_('Could not translate Insights system ID {}' ' into an Insights platform ID.').format(host.insights_system_id))
-
-        return res['results'][0]
-
-    def _get_reports(self, platform_id, session, headers):
-        url = '{}/api/insights/v1/system/{}/reports/'.format(settings.INSIGHTS_URL_BASE, platform_id)
-
-        return self._call_insights_api(url, session, headers)
-
-    def _get_remediations(self, platform_id, session, headers):
-        url = '{}/api/remediations/v1/remediations?system={}'.format(settings.INSIGHTS_URL_BASE, platform_id)
-
-        remediations = []
-
-        # Iterate over all of the pages of content.
-        while url:
-            data = self._call_insights_api(url, session, headers)
-            remediations.extend(data['data'])
-
-            url = data['links']['next']  # Will be `None` if this is the last page.
-
-        return remediations
-
-    def _get_insights(self, host, session, headers):
-        platform_info = self._get_platform_info(host, session, headers)
-        platform_id = platform_info['id']
-        reports = self._get_reports(platform_id, session, headers)
-        remediations = self._get_remediations(platform_id, session, headers)
-
-        return {'insights_content': filter_insights_api_response(platform_info, reports, remediations)}
-
-    def get(self, request, *args, **kwargs):
-        host = self.get_object()
-        cred = None
-
-        if host.insights_system_id is None:
-            return Response(dict(error=_('This host is not recognized as an Insights host.')), status=status.HTTP_404_NOT_FOUND)
-
-        if host.inventory and host.inventory.insights_credential:
-            cred = host.inventory.insights_credential
-        else:
-            return Response(dict(error=_('The Insights Credential for "{}" was not found.').format(host.inventory.name)), status=status.HTTP_404_NOT_FOUND)
-
-        username = cred.get_input('username', default='')
-        password = cred.get_input('password', default='')
-        session = self._get_session(username, password)
-        headers = get_awx_http_client_headers()
-
-        data = self._get_insights(host, session, headers)
-        return Response(data, status=status.HTTP_200_OK)
-
-    def handle_exception(self, exc):
-        # Continue supporting the slightly different way we have handled error responses on this view.
-        response = super().handle_exception(exc)
-        response.data['error'] = response.data.pop('detail')
-        return response
 
 
 class GroupList(ListCreateAPIView):
@@ -2461,8 +2485,6 @@ class JobTemplateSurveySpec(GenericAPIView):
     obj_permission_type = 'admin'
     serializer_class = serializers.EmptySerializer
 
-    ALLOWED_TYPES = {'text': str, 'textarea': str, 'password': str, 'multiplechoice': str, 'multiselect': str, 'integer': int, 'float': float}
-
     def get(self, request, *args, **kwargs):
         obj = self.get_object()
         return Response(obj.display_survey_spec())
@@ -2533,17 +2555,17 @@ class JobTemplateSurveySpec(GenericAPIView):
             # Type-specific validation
             # validate question type <-> default type
             qtype = survey_item["type"]
-            if qtype not in JobTemplateSurveySpec.ALLOWED_TYPES:
+            if qtype not in SURVEY_TYPE_MAPPING:
                 return Response(
                     dict(
                         error=_("'{survey_item[type]}' in survey question {idx} is not one of '{allowed_types}' allowed question types.").format(
-                            allowed_types=', '.join(JobTemplateSurveySpec.ALLOWED_TYPES.keys()), **context
+                            allowed_types=', '.join(SURVEY_TYPE_MAPPING.keys()), **context
                         )
                     ),
                     status=status.HTTP_400_BAD_REQUEST,
                 )
             if 'default' in survey_item and survey_item['default'] != '':
-                if not isinstance(survey_item['default'], JobTemplateSurveySpec.ALLOWED_TYPES[qtype]):
+                if not isinstance(survey_item['default'], SURVEY_TYPE_MAPPING[qtype]):
                     type_label = 'string'
                     if qtype in ['integer', 'float']:
                         type_label = qtype
@@ -3602,7 +3624,7 @@ class JobRelaunch(RetrieveAPIView):
                     status=status.HTTP_400_BAD_REQUEST,
                 )
             host_qs = obj.retry_qs(retry_hosts)
-            if not obj.job_events.filter(event='playbook_on_stats').exists():
+            if not obj.get_event_queryset().filter(event='playbook_on_stats').exists():
                 return Response(
                     {'hosts': _('Cannot retry on {status_value} hosts, playbook stats not available.').format(status_value=retry_hosts)},
                     status=status.HTTP_400_BAD_REQUEST,
@@ -3729,17 +3751,21 @@ class JobHostSummaryDetail(RetrieveAPIView):
     serializer_class = serializers.JobHostSummarySerializer
 
 
-class JobEventList(NoTruncateMixin, ListAPIView):
-
-    model = models.JobEvent
-    serializer_class = serializers.JobEventSerializer
-    search_fields = ('stdout',)
-
-
 class JobEventDetail(RetrieveAPIView):
 
-    model = models.JobEvent
     serializer_class = serializers.JobEventSerializer
+
+    @property
+    def is_partitioned(self):
+        if 'pk' not in self.kwargs:
+            return True
+        return int(self.kwargs['pk']) > unpartitioned_event_horizon(models.JobEvent)
+
+    @property
+    def model(self):
+        if self.is_partitioned:
+            return models.JobEvent
+        return models.UnpartitionedJobEvent
 
     def get_serializer_context(self):
         context = super().get_serializer_context()
@@ -3749,33 +3775,31 @@ class JobEventDetail(RetrieveAPIView):
 
 class JobEventChildrenList(NoTruncateMixin, SubListAPIView):
 
-    model = models.JobEvent
     serializer_class = serializers.JobEventSerializer
-    parent_model = models.JobEvent
     relationship = 'children'
     name = _('Job Event Children List')
     search_fields = ('stdout',)
 
+    @property
+    def is_partitioned(self):
+        if 'pk' not in self.kwargs:
+            return True
+        return int(self.kwargs['pk']) > unpartitioned_event_horizon(models.JobEvent)
+
+    @property
+    def model(self):
+        if self.is_partitioned:
+            return models.JobEvent
+        return models.UnpartitionedJobEvent
+
+    @property
+    def parent_model(self):
+        return self.model
+
     def get_queryset(self):
         parent_event = self.get_parent_object()
         self.check_parent_access(parent_event)
-        qs = self.request.user.get_queryset(self.model).filter(parent_uuid=parent_event.uuid)
-        return qs
-
-
-class JobEventHostsList(HostRelatedSearchMixin, SubListAPIView):
-
-    model = models.Host
-    serializer_class = serializers.HostSerializer
-    parent_model = models.JobEvent
-    relationship = 'hosts'
-    name = _('Job Event Hosts List')
-
-    def get_queryset(self):
-        parent_event = self.get_parent_object()
-        self.check_parent_access(parent_event)
-        qs = self.request.user.get_queryset(self.model).filter(job_events_as_primary_host=parent_event)
-        return qs
+        return parent_event.job.get_event_queryset().filter(parent_uuid=parent_event.uuid)
 
 
 class BaseJobEventsList(NoTruncateMixin, SubListAPIView):
@@ -3811,12 +3835,118 @@ class GroupJobEventsList(BaseJobEventsList):
 class JobJobEventsList(BaseJobEventsList):
 
     parent_model = models.Job
+    pagination_class = UnifiedJobEventPagination
 
     def get_queryset(self):
         job = self.get_parent_object()
         self.check_parent_access(job)
-        qs = job.job_events.select_related('host').order_by('start_line')
-        return qs.all()
+        return job.get_event_queryset().select_related('host').order_by('start_line')
+
+
+class JobJobEventsChildrenSummary(APIView):
+
+    renderer_classes = [JSONRenderer]
+    meta_events = ('debug', 'verbose', 'warning', 'error', 'system_warning', 'deprecated')
+
+    def get(self, request, **kwargs):
+        resp = dict(children_summary={}, meta_event_nested_uuid={}, event_processing_finished=False, is_tree=True)
+        job = get_object_or_404(models.Job, pk=kwargs['pk'])
+        if not job.event_processing_finished:
+            return Response(resp)
+        else:
+            resp["event_processing_finished"] = True
+
+        events = list(job.get_event_queryset().values('counter', 'uuid', 'parent_uuid', 'event').order_by('counter'))
+        if len(events) == 0:
+            return Response(resp)
+
+        # key is counter, value is number of total children (including children of children, etc.)
+        map_counter_children_tally = {i['counter']: {"rowNumber": 0, "numChildren": 0} for i in events}
+        # key is uuid, value is counter
+        map_uuid_counter = {i['uuid']: i['counter'] for i in events}
+        # key is uuid, value is parent uuid. Used as a quick lookup
+        map_uuid_puuid = {i['uuid']: i['parent_uuid'] for i in events}
+        # key is counter of meta events (i.e. verbose), value is uuid of the assigned parent
+        map_meta_counter_nested_uuid = {}
+
+        # collapsable tree view in the UI only makes sense for tree-like
+        # hierarchy. If ansible is ran with a strategy like free or host_pinned, then
+        # events can be out of sequential order, and no longer follow a tree structure
+        # E1
+        #  E2
+        # E3
+        #  E4  <- parent is E3
+        #  E5  <- parent is E1
+        # in the above, there is no clear way to collapse E1, because E5 comes after
+        # E3, which occurs after E1. Thus the tree view should be disabled.
+
+        # mark the last seen uuid at a given level (0-3)
+        # if a parent uuid is not in this list, then we know the events are not tree-like
+        # and return a response with is_tree: False
+        level_current_uuid = [None, None, None, None]
+
+        prev_non_meta_event = events[0]
+        for i, e in enumerate(events):
+            if not e['event'] in JobJobEventsChildrenSummary.meta_events:
+                prev_non_meta_event = e
+            if not e['uuid']:
+                continue
+
+            if not e['event'] in JobJobEventsChildrenSummary.meta_events:
+                level = models.JobEvent.LEVEL_FOR_EVENT[e['event']]
+                level_current_uuid[level] = e['uuid']
+                # if setting level 1, for example, set levels 2 and 3 back to None
+                for u in range(level + 1, len(level_current_uuid)):
+                    level_current_uuid[u] = None
+
+            puuid = e['parent_uuid']
+            if puuid and puuid not in level_current_uuid:
+                # improper tree detected, so bail out early
+                resp['is_tree'] = False
+                return Response(resp)
+
+            # if event is verbose (or debug, etc), we need to "assign" it a
+            # parent. This code looks at the event level of the previous
+            # non-verbose event, and the level of the next (by looking ahead)
+            # non-verbose event. The verbose event is assigned the same parent
+            # uuid of the higher level event.
+            # e.g.
+            # E1
+            #  E2
+            # verbose
+            # verbose <- we are on this event currently
+            #    E4
+            # We'll compare E2 and E4, and the verbose event
+            # will be assigned the parent uuid of E4 (higher event level)
+            if e['event'] in JobJobEventsChildrenSummary.meta_events:
+                event_level_before = models.JobEvent.LEVEL_FOR_EVENT[prev_non_meta_event['event']]
+                # find next non meta event
+                z = i
+                next_non_meta_event = events[-1]
+                while z < len(events):
+                    if events[z]['event'] not in JobJobEventsChildrenSummary.meta_events:
+                        next_non_meta_event = events[z]
+                        break
+                    z += 1
+                event_level_after = models.JobEvent.LEVEL_FOR_EVENT[next_non_meta_event['event']]
+                if event_level_after and event_level_after > event_level_before:
+                    puuid = next_non_meta_event['parent_uuid']
+                else:
+                    puuid = prev_non_meta_event['parent_uuid']
+                if puuid:
+                    map_meta_counter_nested_uuid[e['counter']] = puuid
+            map_counter_children_tally[e['counter']]['rowNumber'] = i
+            if not puuid:
+                continue
+            # now traverse up the parent, grandparent, etc. events and tally those
+            while puuid:
+                map_counter_children_tally[map_uuid_counter[puuid]]['numChildren'] += 1
+                puuid = map_uuid_puuid.get(puuid, None)
+
+        # create new dictionary, dropping events with 0 children
+        resp["children_summary"] = {k: v for k, v in map_counter_children_tally.items() if v['numChildren'] != 0}
+        resp["meta_event_nested_uuid"] = map_meta_counter_nested_uuid
+        return Response(resp)
 
 
 class AdHocCommandList(ListCreateAPIView):
@@ -3968,13 +4098,6 @@ class AdHocCommandRelaunch(GenericAPIView):
             return Response(data, status=status.HTTP_201_CREATED, headers=headers)
 
 
-class AdHocCommandEventList(NoTruncateMixin, ListAPIView):
-
-    model = models.AdHocCommandEvent
-    serializer_class = serializers.AdHocCommandEventSerializer
-    search_fields = ('stdout',)
-
-
 class AdHocCommandEventDetail(RetrieveAPIView):
 
     model = models.AdHocCommandEvent
@@ -3994,11 +4117,20 @@ class BaseAdHocCommandEventsList(NoTruncateMixin, SubListAPIView):
     relationship = 'ad_hoc_command_events'
     name = _('Ad Hoc Command Events List')
     search_fields = ('stdout',)
+    pagination_class = UnifiedJobEventPagination
+
+    def get_queryset(self):
+        parent = self.get_parent_object()
+        self.check_parent_access(parent)
+        return parent.get_event_queryset()
 
 
 class HostAdHocCommandEventsList(BaseAdHocCommandEventsList):
 
     parent_model = models.Host
+
+    def get_queryset(self):
+        return super(BaseAdHocCommandEventsList, self).get_queryset()
 
 
 # class GroupJobEventsList(BaseJobEventsList):

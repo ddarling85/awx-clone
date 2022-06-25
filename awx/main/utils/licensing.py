@@ -15,6 +15,7 @@ from datetime import datetime, timezone
 import collections
 import copy
 import io
+import os
 import json
 import logging
 import re
@@ -32,10 +33,8 @@ from cryptography import x509
 
 # Django
 from django.conf import settings
-from django.utils.translation import ugettext_lazy as _
+from django.utils.translation import gettext_lazy as _
 
-# AWX
-from awx.main.models import Host
 
 MAX_INSTANCES = 9999999
 
@@ -379,16 +378,23 @@ class Licenser(object):
             return attrs
         attrs['valid_key'] = True
 
-        if Host:
-            current_instances = Host.objects.active_count()
+        from awx.main.models import Host, HostMetric, Instance
+
+        current_instances = Host.objects.active_count()
+        license_date = int(attrs.get('license_date', 0) or 0)
+        automated_instances = HostMetric.objects.count()
+        first_host = HostMetric.objects.only('first_automation').order_by('first_automation').first()
+        if first_host:
+            automated_since = int(first_host.first_automation.timestamp())
         else:
-            current_instances = 0
+            automated_since = int(Instance.objects.order_by('id').first().created.timestamp())
         instance_count = int(attrs.get('instance_count', 0))
         attrs['current_instances'] = current_instances
-        free_instances = instance_count - current_instances
+        attrs['automated_instances'] = automated_instances
+        attrs['automated_since'] = automated_since
+        free_instances = instance_count - automated_instances
         attrs['free_instances'] = max(0, free_instances)
 
-        license_date = int(attrs.get('license_date', 0) or 0)
         current_date = int(time.time())
         time_remaining = license_date - current_date
         attrs['time_remaining'] = time_remaining
@@ -400,3 +406,19 @@ class Licenser(object):
         attrs['date_warning'] = bool(time_remaining < self.SUBSCRIPTION_TIMEOUT)
         attrs['date_expired'] = bool(time_remaining <= 0)
         return attrs
+
+
+def get_licenser(*args, **kwargs):
+    from awx.main.utils.licensing import Licenser, OpenLicense
+
+    try:
+        if os.path.exists('/var/lib/awx/.tower_version'):
+            return Licenser(*args, **kwargs)
+        else:
+            return OpenLicense()
+    except Exception as e:
+        raise ValueError(_('Error importing License: %s') % e)
+
+
+def server_product_name():
+    return 'AWX' if isinstance(get_licenser(), OpenLicense) else 'Red Hat Ansible Automation Platform'

@@ -9,13 +9,13 @@ from urllib.parse import urljoin
 from django.conf import settings
 from django.db import models
 from django.utils.text import Truncator
-from django.utils.translation import ugettext_lazy as _
+from django.utils.translation import gettext_lazy as _
 from django.core.exceptions import ValidationError
 
 # AWX
 from awx.api.versioning import reverse
 from awx.main.models.base import prevent_search, AD_HOC_JOB_TYPE_CHOICES, VERBOSITY_CHOICES, VarsDictProperty
-from awx.main.models.events import AdHocCommandEvent
+from awx.main.models.events import AdHocCommandEvent, UnpartitionedAdHocCommandEvent
 from awx.main.models.unified_jobs import UnifiedJob
 from awx.main.models.notifications import JobNotificationMixin, NotificationTemplate
 
@@ -127,6 +127,8 @@ class AdHocCommand(UnifiedJob, JobNotificationMixin):
 
     @property
     def event_class(self):
+        if self.has_unpartitioned_events:
+            return UnpartitionedAdHocCommandEvent
         return AdHocCommandEvent
 
     @property
@@ -142,17 +144,13 @@ class AdHocCommand(UnifiedJob, JobNotificationMixin):
 
     @classmethod
     def _get_task_class(cls):
-        from awx.main.tasks import RunAdHocCommand
+        from awx.main.tasks.jobs import RunAdHocCommand
 
         return RunAdHocCommand
 
     @property
     def is_container_group_task(self):
         return bool(self.instance_group and self.instance_group.is_container_group)
-
-    @property
-    def can_run_containerized(self):
-        return True
 
     def get_absolute_url(self, request=None):
         return reverse('api:ad_hoc_command_detail', kwargs={'pk': self.pk}, request=request)
@@ -162,9 +160,7 @@ class AdHocCommand(UnifiedJob, JobNotificationMixin):
 
     @property
     def notification_templates(self):
-        all_orgs = set()
-        for h in self.hosts.all():
-            all_orgs.add(h.inventory.organization)
+        all_orgs = {h.inventory.organization for h in self.hosts.all()}
         active_templates = dict(error=set(), success=set(), started=set())
         base_notification_templates = NotificationTemplate.objects
         for org in all_orgs:
@@ -215,9 +211,6 @@ class AdHocCommand(UnifiedJob, JobNotificationMixin):
             self.name = Truncator(u': '.join(filter(None, (self.module_name, self.module_args)))).chars(512)
             if 'name' not in update_fields:
                 update_fields.append('name')
-        if not self.execution_environment_id:
-            self.execution_environment = self.resolve_execution_environment()
-            update_fields.append('execution_environment')
         super(AdHocCommand, self).save(*args, **kwargs)
 
     @property

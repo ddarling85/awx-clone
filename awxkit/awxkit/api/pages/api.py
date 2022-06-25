@@ -1,3 +1,4 @@
+from collections import defaultdict
 import itertools
 import logging
 
@@ -24,18 +25,12 @@ EXPORTABLE_RESOURCES = [
     'job_templates',
     'workflow_job_templates',
     'execution_environments',
+    'applications',
+    'schedules',
 ]
 
 
-EXPORTABLE_RELATIONS = [
-    'Roles',
-    'NotificationTemplates',
-    'WorkflowJobTemplateNodes',
-    'Credentials',
-    'Hosts',
-    'Groups',
-    'ExecutionEnvironments',
-]
+EXPORTABLE_RELATIONS = ['Roles', 'NotificationTemplates', 'WorkflowJobTemplateNodes', 'Credentials', 'Hosts', 'Groups', 'ExecutionEnvironments', 'Schedules']
 
 
 # These are special-case related objects, where we want only in this
@@ -43,15 +38,12 @@ EXPORTABLE_RELATIONS = [
 DEPENDENT_EXPORT = [
     ('JobTemplate', 'labels'),
     ('JobTemplate', 'survey_spec'),
-    ('JobTemplate', 'schedules'),
     ('WorkflowJobTemplate', 'labels'),
     ('WorkflowJobTemplate', 'survey_spec'),
-    ('WorkflowJobTemplate', 'schedules'),
     ('WorkflowJobTemplate', 'workflow_nodes'),
-    ('Project', 'schedules'),
-    ('InventorySource', 'schedules'),
     ('Inventory', 'groups'),
     ('Inventory', 'hosts'),
+    ('Inventory', 'labels'),
 ]
 
 
@@ -82,11 +74,12 @@ class ApiV2(base.Base):
 
     def _export(self, _page, post_fields):
         # Drop any (credential_type) assets that are being managed by the instance.
-        if _page.json.get('managed_by_tower'):
-            log.debug("%s is managed by Tower, skipping.", _page.endpoint)
+        if _page.json.get('managed'):
+            log.debug("%s is managed, skipping.", _page.endpoint)
             return None
         if post_fields is None:  # Deprecated endpoint or insufficient permissions
             log.error("Object export failed: %s", _page.endpoint)
+            self._has_error = True
             return None
 
         # Note: doing _page[key] automatically parses json blob strings, which can be a problem.
@@ -98,9 +91,16 @@ class ApiV2(base.Base):
             else:
                 if post_fields[key]['type'] == 'id' and _page.json.get(key) is not None:
                     log.warning("Related link %r missing from %s, attempting to reconstruct endpoint.", key, _page.endpoint)
-                    resource = getattr(self, key, None)
+                    res_pattern, resource = getattr(resources, key, None), None
+                    if res_pattern:
+                        try:
+                            top_level = res_pattern.split('/')[3]
+                            resource = getattr(self, top_level, None)
+                        except IndexError:
+                            pass
                     if resource is None:
                         log.error("Unable to infer endpoint for %r on %s.", key, _page.endpoint)
+                        self._has_error = True
                         continue
                     related = self._filtered_list(resource, _page.json[key]).results[0]
                 else:
@@ -110,12 +110,14 @@ class ApiV2(base.Base):
             if rel_endpoint is None:  # This foreign key is unreadable
                 if post_fields[key].get('required'):
                     log.error("Foreign key %r export failed for object %s.", key, _page.endpoint)
+                    self._has_error = True
                     return None
                 log.warning("Foreign key %r export failed for object %s, setting to null", key, _page.endpoint)
                 continue
             rel_natural_key = rel_endpoint.get_natural_key(self._cache)
             if rel_natural_key is None:
                 log.error("Unable to construct a natural key for foreign key %r of object %s.", key, _page.endpoint)
+                self._has_error = True
                 return None  # This foreign key has unresolvable dependencies
             fields[key] = rel_natural_key
 
@@ -160,6 +162,7 @@ class ApiV2(base.Base):
         natural_key = _page.get_natural_key(self._cache)
         if natural_key is None:
             log.error("Unable to construct a natural key for object %s.", _page.endpoint)
+            self._has_error = True
             return None
         fields['natural_key'] = natural_key
 
@@ -183,7 +186,7 @@ class ApiV2(base.Base):
             return endpoint.get(id=int(value))
         options = self._cache.get_options(endpoint)
         identifier = next(field for field in options['search_fields'] if field in ('name', 'username', 'hostname'))
-        return endpoint.get(**{identifier: value})
+        return endpoint.get(**{identifier: value}, all_pages=True)
 
     def export_assets(self, **kwargs):
         self._cache = page.PageCache()
@@ -204,7 +207,7 @@ class ApiV2(base.Base):
 
     # Import methods
 
-    def _dependent_resources(self, data):
+    def _dependent_resources(self):
         page_resource = {getattr(self, resource)._create().__item_class__: resource for resource in self.json}
         data_pages = [getattr(self, resource)._create().__item_class__ for resource in EXPORTABLE_RESOURCES]
 
@@ -242,10 +245,16 @@ class ApiV2(base.Base):
                         # JTs have valid options for playbook names
                         _page.wait_until_completed()
                 else:
+                    # If we are an existing project and our scm_tpye is not changing don't try and import the local_path setting
+                    if asset['natural_key']['type'] == 'project' and 'local_path' in post_data and _page['scm_type'] == post_data['scm_type']:
+                        del post_data['local_path']
+
                     _page = _page.put(post_data)
                     changed = True
             except (exc.Common, AssertionError) as e:
-                log.error("Object import failed: %s.", e)
+                identifier = asset.get("name", None) or asset.get("username", None) or asset.get("hostname", None)
+                log.error(f"{endpoint} \"{identifier}\": {e}.")
+                self._has_error = True
                 log.debug("post_data: %r", post_data)
                 continue
 
@@ -256,7 +265,12 @@ class ApiV2(base.Base):
                 if not S:
                     continue
                 if name == 'roles':
-                    self._roles.append((_page, S))
+                    indexed_roles = defaultdict(list)
+                    for role in S:
+                        if 'content_object' not in role:
+                            continue
+                        indexed_roles[role['content_object']['type']].append(role)
+                    self._roles.append((_page, indexed_roles))
                 else:
                     self._related.append((_page, name, S))
 
@@ -275,20 +289,21 @@ class ApiV2(base.Base):
             pass
         except exc.Common as e:
             log.error("Role assignment failed: %s.", e)
+            self._has_error = True
             log.debug("post_data: %r", {'id': role_page['id']})
 
     def _assign_membership(self):
-        for _page, roles in self._roles:
+        for _page, indexed_roles in self._roles:
             role_endpoint = _page.json['related']['roles']
-            for role in roles:
-                if role['name'] == 'Member':
+            for content_type in ('organization', 'team'):
+                for role in indexed_roles.get(content_type, []):
                     self._assign_role(role_endpoint, role)
 
     def _assign_roles(self):
-        for _page, roles in self._roles:
+        for _page, indexed_roles in self._roles:
             role_endpoint = _page.json['related']['roles']
-            for role in roles:
-                if role['name'] != 'Member':
+            for content_type in set(indexed_roles) - {'organization', 'team'}:
+                for role in indexed_roles.get(content_type, []):
                     self._assign_role(role_endpoint, role)
 
     def _assign_related(self):
@@ -305,17 +320,21 @@ class ApiV2(base.Base):
                 for item in related_set:
                     rel_page = self._cache.get_by_natural_key(item)
                     if rel_page is None:
-                        continue  # FIXME
+                        log.error("Could not find matching object in Tower for imported relation, item: %r", item)
+                        self._has_error = True
+                        continue
                     if rel_page['id'] in existing:
                         continue
                     try:
                         post_data = {'id': rel_page['id']}
                         endpoint.post(post_data)
                         log.error("endpoint: %s, id: %s", endpoint.endpoint, rel_page['id'])
+                        self._has_error = True
                     except exc.NoContent:  # desired exception on successful (dis)association
                         pass
                     except exc.Common as e:
                         log.error("Object association failed: %s.", e)
+                        self._has_error = True
                         log.debug("post_data: %r", post_data)
             else:  # It is a create set
                 self._cache.get_page(endpoint)
@@ -330,7 +349,7 @@ class ApiV2(base.Base):
 
         changed = False
 
-        for resource in self._dependent_resources(data):
+        for resource in self._dependent_resources():
             endpoint = getattr(self, resource)
             # Load up existing objects, so that we can try to update or link to them
             self._cache.get_page(endpoint)

@@ -5,16 +5,9 @@ import base64
 import os
 import re  # noqa
 import sys
+import tempfile
 from datetime import timedelta
 
-# global settings
-from django.conf import global_settings
-
-# Update this module's local settings from the global settings module.
-this_module = sys.modules[__name__]
-for setting in dir(global_settings):
-    if setting == setting.upper():
-        setattr(this_module, setting, getattr(global_settings, setting))
 
 # Build paths inside the project like this: os.path.join(BASE_DIR, ...)
 BASE_DIR = os.path.dirname(os.path.dirname(__file__))
@@ -49,6 +42,11 @@ else:
 DEBUG = True
 SQL_DEBUG = DEBUG
 
+# FIXME: it would be nice to cycle back around and allow this to be
+# BigAutoField going forward, but we'd have to be explicit about our
+# existing models.
+DEFAULT_AUTO_FIELD = 'django.db.models.AutoField'
+
 DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.sqlite3',
@@ -68,11 +66,13 @@ DATABASES = {
 # the K8S cluster where awx itself is running)
 IS_K8S = False
 
-RECEPTOR_RELEASE_WORK = True
 AWX_CONTAINER_GROUP_K8S_API_TIMEOUT = 10
 AWX_CONTAINER_GROUP_DEFAULT_NAMESPACE = os.getenv('MY_POD_NAMESPACE', 'default')
 # Timeout when waiting for pod to enter running state. If the pod is still in pending state , it will be terminated. Valid time units are "s", "m", "h". Example : "5m" , "10s".
-AWX_CONTAINER_GROUP_POD_PENDING_TIMEOUT = "5m"
+AWX_CONTAINER_GROUP_POD_PENDING_TIMEOUT = "2h"
+
+# How much capacity controlling a task costs a hybrid or control node
+AWX_CONTROL_NODE_TASK_IMPACT = 1
 
 # Internationalization
 # https://docs.djangoproject.com/en/dev/topics/i18n/
@@ -100,7 +100,7 @@ USE_L10N = True
 
 USE_TZ = True
 
-STATICFILES_DIRS = (os.path.join(BASE_DIR, 'ui_next', 'build', 'static'), os.path.join(BASE_DIR, 'static'))
+STATICFILES_DIRS = (os.path.join(BASE_DIR, 'ui', 'build', 'static'), os.path.join(BASE_DIR, 'static'))
 
 # Absolute filesystem path to the directory where static file are collected via
 # the collectstatic command.
@@ -124,10 +124,6 @@ LOGIN_URL = '/api/login/'
 # Absolute filesystem path to the directory to host projects (with playbooks).
 # This directory should not be web-accessible.
 PROJECTS_ROOT = '/var/lib/awx/projects/'
-
-# Absolute filesystem path to the directory to host collections for
-# running inventory imports
-AWX_ANSIBLE_COLLECTIONS_PATHS = os.path.join(BASE_DIR, 'vendor', 'awx_ansible_collections')
 
 # Absolute filesystem path to the directory for job status stdout (default for
 # development and tests, default for production defined in production.py). This
@@ -154,7 +150,8 @@ SITE_ID = 1
 
 # Make this unique, and don't share it with anybody.
 if os.path.exists('/etc/tower/SECRET_KEY'):
-    SECRET_KEY = open('/etc/tower/SECRET_KEY', 'rb').read().strip()
+    with open('/etc/tower/SECRET_KEY', 'rb') as f:
+        SECRET_KEY = f.read().strip()
 else:
     SECRET_KEY = base64.encodebytes(os.urandom(32)).decode().rstrip()
 
@@ -167,7 +164,7 @@ ALLOWED_HOSTS = []
 # reverse proxy.
 REMOTE_HOST_HEADERS = ['REMOTE_ADDR', 'REMOTE_HOST']
 
-# If we is behind a reverse proxy/load balancer, use this setting to
+# If we are behind a reverse proxy/load balancer, use this setting to
 # allow the proxy IP addresses from which Tower should trust custom
 # REMOTE_HOST_HEADERS header values
 # REMOTE_HOST_HEADERS = ['HTTP_X_FORWARDED_FOR', ''REMOTE_ADDR', 'REMOTE_HOST']
@@ -184,7 +181,15 @@ DEFAULT_EXECUTION_ENVIRONMENT = None
 
 # This list is used for creating default EEs when running awx-manage create_preload_data.
 # Should be ordered from highest to lowest precedence.
-DEFAULT_EXECUTION_ENVIRONMENTS = [{'name': 'AWX EE 0.2.0', 'image': 'quay.io/ansible/awx-ee:0.2.0'}]
+# The awx-manage register_default_execution_environments command reads this setting and registers the EE(s)
+# If a registry credential is needed to pull the image, that can be provided to the awx-manage command
+GLOBAL_JOB_EXECUTION_ENVIRONMENTS = [{'name': 'AWX EE (latest)', 'image': 'quay.io/ansible/awx-ee:latest'}]
+# This setting controls which EE will be used for project updates.
+# The awx-manage register_default_execution_environments command reads this setting and registers the EE
+# This image is distinguished from others by having "managed" set to True and users have limited
+# ability to modify it through the API.
+# If a registry credential is needed to pull the image, that can be provided to the awx-manage command
+CONTROL_PLANE_EXECUTION_ENVIRONMENT = 'quay.io/ansible/awx-ee:latest'
 
 # Note: This setting may be overridden by database settings.
 STDOUT_MAX_BYTES_DISPLAY = 1048576
@@ -201,8 +206,9 @@ UI_LIVE_UPDATES_ENABLED = True
 # beyond this limit and the value will be removed
 MAX_EVENT_RES_DATA = 700000
 
-# Note: This setting may be overridden by database settings.
+# Note: These settings may be overridden by database settings.
 EVENT_STDOUT_MAX_BYTES_DISPLAY = 1024
+MAX_WEBSOCKET_EVENT_RATE = 30
 
 # The amount of time before a stdout file is expired and removed locally
 # Note that this can be recreated if the stdout is downloaded
@@ -235,6 +241,10 @@ SUBSYSTEM_METRICS_INTERVAL_SEND_METRICS = 3
 # Interval in seconds for saving local metrics to redis
 SUBSYSTEM_METRICS_INTERVAL_SAVE_TO_REDIS = 2
 
+# Record task manager metrics at the following interval in seconds
+# If using Prometheus, it is recommended to be => the Prometheus scrape interval
+SUBSYSTEM_METRICS_TASK_MANAGER_RECORD_INTERVAL = 15
+
 # The maximum allowed jobs to start on a given task manager cycle
 START_TASK_LIMIT = 100
 
@@ -244,6 +254,10 @@ SESSION_COOKIE_SECURE = True
 # Seconds before sessions expire.
 # Note: This setting may be overridden by database settings.
 SESSION_COOKIE_AGE = 1800
+
+# Name of the cookie that contains the session information.
+# Note: Changing this value may require changes to any clients.
+SESSION_COOKIE_NAME = 'awx_sessionid'
 
 # Maximum number of per-user valid, concurrent sessions.
 # -1 is unlimited
@@ -262,8 +276,8 @@ TEMPLATES = [
     {
         'NAME': 'default',
         'BACKEND': 'django.template.backends.django.DjangoTemplates',
+        'APP_DIRS': True,
         'OPTIONS': {
-            'debug': DEBUG,
             'context_processors': [  # NOQA
                 'django.contrib.auth.context_processors.auth',
                 'django.template.context_processors.debug',
@@ -274,16 +288,14 @@ TEMPLATES = [
                 'django.template.context_processors.tz',
                 'django.contrib.messages.context_processors.messages',
                 'awx.ui.context_processors.csp',
+                'awx.ui.context_processors.version',
                 'social_django.context_processors.backends',
                 'social_django.context_processors.login_redirect',
             ],
-            'loaders': [
-                ('django.template.loaders.cached.Loader', ('django.template.loaders.filesystem.Loader', 'django.template.loaders.app_directories.Loader'))
-            ],
             'builtins': ['awx.main.templatetags.swagger'],
         },
-        'DIRS': [os.path.join(BASE_DIR, 'templates'), os.path.join(BASE_DIR, 'ui_next', 'build'), os.path.join(BASE_DIR, 'ui_next', 'public')],
-    }
+        'DIRS': [os.path.join(BASE_DIR, 'templates'), os.path.join(BASE_DIR, 'ui', 'build'), os.path.join(BASE_DIR, 'ui', 'public')],
+    },
 ]
 
 ROOT_URLCONF = 'awx.urls'
@@ -310,7 +322,6 @@ INSTALLED_APPS = [
     'awx.main',
     'awx.api',
     'awx.ui',
-    'awx.ui_next',
     'awx.sso',
     'solo',
 ]
@@ -414,15 +425,28 @@ DEVSERVER_DEFAULT_PORT = '8013'
 # Set default ports for live server tests.
 os.environ.setdefault('DJANGO_LIVE_TEST_SERVER_ADDRESS', 'localhost:9013-9199')
 
+# heartbeat period can factor into some forms of logic, so it is maintained as a setting here
+CLUSTER_NODE_HEARTBEAT_PERIOD = 60
+RECEPTOR_SERVICE_ADVERTISEMENT_PERIOD = 60  # https://github.com/ansible/receptor/blob/aa1d589e154d8a0cb99a220aff8f98faf2273be6/pkg/netceptor/netceptor.go#L34
+EXECUTION_NODE_REMEDIATION_CHECKS = 60 * 30  # once every 30 minutes check if an execution node errors have been resolved
+
+# Amount of time dispatcher will try to reconnect to database for jobs and consuming new work
+DISPATCHER_DB_DOWNTOWN_TOLLERANCE = 40
+
 BROKER_URL = 'unix:///var/run/redis/redis.sock'
 CELERYBEAT_SCHEDULE = {
-    'tower_scheduler': {'task': 'awx.main.tasks.awx_periodic_scheduler', 'schedule': timedelta(seconds=30), 'options': {'expires': 20}},
-    'cluster_heartbeat': {'task': 'awx.main.tasks.cluster_node_heartbeat', 'schedule': timedelta(seconds=60), 'options': {'expires': 50}},
-    'gather_analytics': {'task': 'awx.main.tasks.gather_analytics', 'schedule': timedelta(minutes=5)},
+    'tower_scheduler': {'task': 'awx.main.tasks.system.awx_periodic_scheduler', 'schedule': timedelta(seconds=30), 'options': {'expires': 20}},
+    'cluster_heartbeat': {
+        'task': 'awx.main.tasks.system.cluster_node_heartbeat',
+        'schedule': timedelta(seconds=CLUSTER_NODE_HEARTBEAT_PERIOD),
+        'options': {'expires': 50},
+    },
+    'gather_analytics': {'task': 'awx.main.tasks.system.gather_analytics', 'schedule': timedelta(minutes=5)},
     'task_manager': {'task': 'awx.main.scheduler.tasks.run_task_manager', 'schedule': timedelta(seconds=20), 'options': {'expires': 20}},
-    'k8s_reaper': {'task': 'awx.main.tasks.awx_k8s_reaper', 'schedule': timedelta(seconds=60), 'options': {'expires': 50}},
+    'k8s_reaper': {'task': 'awx.main.tasks.system.awx_k8s_reaper', 'schedule': timedelta(seconds=60), 'options': {'expires': 50}},
+    'receptor_reaper': {'task': 'awx.main.tasks.system.awx_receptor_workunit_reaper', 'schedule': timedelta(seconds=60)},
     'send_subsystem_metrics': {'task': 'awx.main.analytics.analytics_tasks.send_subsystem_metrics', 'schedule': timedelta(seconds=20)},
-    'cleanup_images': {'task': 'awx.main.tasks.cleanup_execution_environment_images', 'schedule': timedelta(hours=3)},
+    'cleanup_images': {'task': 'awx.main.tasks.system.cleanup_images_and_files', 'schedule': timedelta(hours=3)},
 }
 
 # Django Caching Configuration
@@ -432,7 +456,7 @@ CACHES = {'default': {'BACKEND': 'django_redis.cache.RedisCache', 'LOCATION': 'u
 # Social Auth configuration.
 SOCIAL_AUTH_STRATEGY = 'social_django.strategy.DjangoStrategy'
 SOCIAL_AUTH_STORAGE = 'social_django.models.DjangoStorage'
-SOCIAL_AUTH_USER_MODEL = AUTH_USER_MODEL  # noqa
+SOCIAL_AUTH_USER_MODEL = 'auth.User'
 
 _SOCIAL_AUTH_PIPELINE_BASE = (
     'social_core.pipeline.social_auth.social_details',
@@ -455,6 +479,7 @@ SOCIAL_AUTH_SAML_PIPELINE = _SOCIAL_AUTH_PIPELINE_BASE + (
     'awx.sso.pipeline.update_user_teams_by_saml_attr',
     'awx.sso.pipeline.update_user_orgs',
     'awx.sso.pipeline.update_user_teams',
+    'awx.sso.pipeline.update_user_flags',
 )
 SAML_AUTO_CREATE_OBJECTS = True
 
@@ -517,6 +542,7 @@ SOCIAL_AUTH_SAML_ENABLED_IDPS = {}
 
 SOCIAL_AUTH_SAML_ORGANIZATION_ATTR = {}
 SOCIAL_AUTH_SAML_TEAM_ATTR = {}
+SOCIAL_AUTH_SAML_USER_FLAGS_BY_ATTR = {}
 
 # Any ANSIBLE_* settings will be passed to the task runner subprocess
 # environment
@@ -538,6 +564,10 @@ ANSIBLE_INVENTORY_UNPARSED_FAILED = True
 
 # Additional environment variables to be passed to the ansible subprocesses
 AWX_TASK_ENV = {}
+
+# Additional environment variables to apply when running ansible-galaxy commands
+# to fetch Ansible content - roles and collections
+GALAXY_TASK_ENV = {'ANSIBLE_FORCE_COLOR': 'false', 'GIT_SSH_COMMAND': "ssh -o StrictHostKeyChecking=no"}
 
 # Rebuild Host Smart Inventory memberships.
 AWX_REBUILD_SMART_MEMBERSHIP = False
@@ -572,7 +602,7 @@ AWX_ISOLATION_SHOW_PATHS = []
 # execution and isolation (such as credential files and custom
 # inventory scripts).
 # Note: This setting may be overridden by database settings.
-AWX_ISOLATION_BASE_PATH = "/tmp"
+AWX_ISOLATION_BASE_PATH = tempfile.gettempdir()
 
 # User definable ansible callback plugins
 # Note: This setting may be overridden by database settings.
@@ -671,12 +701,12 @@ RHV_EXCLUDE_EMPTY_GROUPS = True
 RHV_INSTANCE_ID_VAR = 'id'
 
 # ---------------------
-# ----- Tower     -----
+# ----- Controller     -----
 # ---------------------
-TOWER_ENABLED_VAR = 'remote_tower_enabled'
-TOWER_ENABLED_VALUE = 'true'
-TOWER_EXCLUDE_EMPTY_GROUPS = True
-TOWER_INSTANCE_ID_VAR = 'remote_tower_id'
+CONTROLLER_ENABLED_VAR = 'remote_tower_enabled'
+CONTROLLER_ENABLED_VALUE = 'true'
+CONTROLLER_EXCLUDE_EMPTY_GROUPS = True
+CONTROLLER_INSTANCE_ID_VAR = 'remote_tower_id'
 
 # ---------------------
 # ----- Foreman -----
@@ -686,6 +716,14 @@ SATELLITE6_ENABLED_VALUE = 'True'
 SATELLITE6_EXCLUDE_EMPTY_GROUPS = True
 SATELLITE6_INSTANCE_ID_VAR = 'foreman_id'
 # SATELLITE6_GROUP_PREFIX and SATELLITE6_GROUP_PATTERNS defined in source vars
+
+# ----------------
+# -- Red Hat Insights --
+# ----------------
+# INSIGHTS_ENABLED_VAR =
+# INSIGHTS_ENABLED_VALUE =
+INSIGHTS_INSTANCE_ID_VAR = 'insights_id'
+INSIGHTS_EXCLUDE_EMPTY_GROUPS = False
 
 # ---------------------
 # ----- Custom -----
@@ -737,6 +775,7 @@ LOG_AGGREGATOR_MAX_DISK_USAGE_GB = 1
 LOG_AGGREGATOR_MAX_DISK_USAGE_PATH = '/var/lib/awx'
 LOG_AGGREGATOR_RSYSLOGD_DEBUG = False
 LOG_AGGREGATOR_RSYSLOGD_ERROR_LOG_FILE = '/var/log/tower/rsyslog.err'
+API_400_ERROR_LOG_FORMAT = 'status {status_code} received by user {user_name} attempting to access {url_path} from {remote_addr}'
 
 # The number of retry attempts for websocket session establishment
 # If you're encountering issues establishing websockets in a cluster,
@@ -769,7 +808,12 @@ LOGGING = {
         'job_lifecycle': {'()': 'awx.main.utils.formatters.JobLifeCycleFormatter'},
     },
     'handlers': {
-        'console': {'()': 'logging.StreamHandler', 'level': 'DEBUG', 'filters': ['require_debug_true_or_test', 'guid'], 'formatter': 'simple'},
+        'console': {
+            '()': 'logging.StreamHandler',
+            'level': 'DEBUG',
+            'filters': ['require_debug_true_or_test', 'dynamic_level_filter', 'guid'],
+            'formatter': 'simple',
+        },
         'null': {'class': 'logging.NullHandler'},
         'file': {'class': 'logging.NullHandler', 'formatter': 'simple'},
         'syslog': {'level': 'WARNING', 'filters': ['require_debug_false'], 'class': 'logging.NullHandler', 'formatter': 'simple'},
@@ -904,8 +948,18 @@ AWX_CALLBACK_PROFILE = False
 # Delete temporary directories created to store playbook run-time
 AWX_CLEANUP_PATHS = True
 
+# Allow ansible-runner to store env folder (may contain sensitive information)
+AWX_RUNNER_OMIT_ENV_FILES = True
+
+# Allow ansible-runner to save ansible output (may cause performance issues)
+AWX_RUNNER_SUPPRESS_OUTPUT_FILE = True
+
+# Delete completed work units in receptor
+RECEPTOR_RELEASE_WORK = True
+
 MIDDLEWARE = [
-    'django_guid.middleware.GuidMiddleware',
+    'django_guid.middleware.guid_middleware',
+    'awx.main.middleware.SettingsCacheMiddleware',
     'awx.main.middleware.TimingMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'awx.main.middleware.MigrationRanCheckMiddleware',
@@ -949,3 +1003,18 @@ BROADCAST_WEBSOCKET_NEW_INSTANCE_POLL_RATE_SECONDS = 10
 BROADCAST_WEBSOCKET_STATS_POLL_RATE_SECONDS = 5
 
 DJANGO_GUID = {'GUID_HEADER_NAME': 'X-API-Request-Id'}
+
+# Name of the default task queue
+DEFAULT_EXECUTION_QUEUE_NAME = 'default'
+# pod spec used when the default execution queue is a container group, e.g. when deploying on k8s/ocp with the operator
+DEFAULT_EXECUTION_QUEUE_POD_SPEC_OVERRIDE = ''
+# Name of the default controlplane queue
+DEFAULT_CONTROL_PLANE_QUEUE_NAME = 'controlplane'
+
+# Extend container runtime attributes.
+# For example, to disable SELinux in containers for podman
+# DEFAULT_CONTAINER_RUN_OPTIONS = ['--security-opt', 'label=disable']
+DEFAULT_CONTAINER_RUN_OPTIONS = ['--network', 'slirp4netns:enable_ipv6=true']
+
+# Mount exposed paths as hostPath resource in k8s/ocp
+AWX_MOUNT_ISOLATED_PATHS_ON_K8S = False

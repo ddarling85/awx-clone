@@ -1,4 +1,3 @@
-from contextlib import contextmanager
 from datetime import datetime, timedelta, tzinfo
 import inspect
 import logging
@@ -256,7 +255,7 @@ def random_ipv4():
 
 def random_ipv6():
     """Generates a random ipv6 address;; useful for testing."""
-    return ':'.join('{0:x}'.format(random.randint(0, 2 ** 16 - 1)) for i in range(8))
+    return ':'.join('{0:x}'.format(random.randint(0, 2**16 - 1)) for i in range(8))
 
 
 def random_loopback_ip():
@@ -278,10 +277,13 @@ def random_utf8(*args, **kwargs):
 
 def random_title(num_words=2, non_ascii=True):
     base = ''.join([random.choice(words) for word in range(num_words)])
-    if non_ascii:
-        title = ''.join([base, random_utf8(1)])
+    if os.getenv('AWXKIT_FORCE_ONLY_ASCII', False):
+        title = ''.join([base, ''.join(str(random_int(99)))])
     else:
-        title = ''.join([base, ''.join([str(random_int()) for _ in range(3)])])
+        if non_ascii:
+            title = ''.join([base, random_utf8(1)])
+        else:
+            title = ''.join([base, ''.join([str(random_int()) for _ in range(3)])])
     return title
 
 

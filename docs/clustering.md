@@ -36,7 +36,7 @@ Ansible Tower 3.3 adds support for container-based clusters using Openshift or K
 ### Installation and the Inventory File
 The current standalone instance configuration doesn't change for a 3.1+ deployment. The inventory file does change in some important ways:
 
-* Since there is no primary/secondary configuration, those inventory groups go away and are replaced with a single inventory group `tower`. The customer may *optionally* define other groups and group instances in those groups. These groups should be prefixed with `instance_group_`. Instances are not required to be in the `tower` group alongside other `instance_group_` groups, but one instance *must* be present in the `tower` group. Technically `tower` is a group like any other `instance_group_` group, but it must always be present and if a specific group is not associated with a specific resource, then job execution will always fall back to the `tower` group:
+* Since there is no primary/secondary configuration, those inventory groups go away and are replaced with a single inventory group `tower`. The customer may *optionally* define other groups and group instances in those groups. These groups should be prefixed with `instance_group_`. One instance *must* be present in the `tower` group. Technically `tower` is a group like any other `instance_group_` group, but it must always be present and if a specific group is not associated with a specific resource, then job execution will always fall back to the `tower` group:
 
 ```
 [tower]
@@ -72,13 +72,13 @@ Recommendations and constraints:
 
 ### Provisioning and Deprovisioning Instances and Groups
 
-* **Provisioning** - Provisioning Instances after installation is supported by updating the `inventory` file and re-running the setup playbook. It's important that this file contain all passwords and information used when installing the cluster, or other instances may be reconfigured (this can be done intentionally).
+* **Provisioning** - Provisioning instances after installation is supported by updating the `inventory` file and re-running the setup playbook. It's important that this file contains all passwords and related information used when installing the cluster; if this is not the case, other instances may be reconfigured (this can be done intentionally).
 
-* **Deprovisioning** - AWX does not automatically de-provision instances since it cannot distinguish between an instance that was taken offline intentionally or due to failure. Instead, the procedure for de-provisioning an instance is to shut it down (or stop the `automation-controller-service`) and run the AWX de-provision command:
+* **Deprovisioning** - AWX does not automatically deprovision instances since it cannot distinguish between an instance that was taken offline intentionally or due to failure.
 
-```
-$ awx-manage deprovision_instance --hostname=<hostname>
-```
+  Starting with AWX version 19.3.0, deprovisioning an instance results in one or more Receptor configurations needing to be updated across one or more nodes, which therefore cannot be done via a manual process; the Automation Mesh Installer needs to deprovision the nodes.
+
+  Adding to and removing from the mesh does not require that every node is listed in the inventory file; in other words, the absence of a node from the inventory file _does not_ indicate that a node should be removed. Instead, a `hostvar` of `node_state: deprovision` conveys to the mesh installer that the node should be deprovisioned.
 
 * **Removing/Deprovisioning Instance Groups** - AWX does not automatically de-provision or remove instance groups, even though re-provisioning will often cause these to be unused. They may still show up in API endpoints and stats monitoring. These groups can be removed with the following command:
 
@@ -181,13 +181,21 @@ If an Instance Group is configured but all instances in that group are offline o
 
 #### Project Synchronization Behavior
 
-Project updates behave differently than they did before. Previously they were ordinary jobs that ran on a single instance. It's now important that they run successfully on any instance that could potentially run a job. Projects will sync themselves to the correct version on the instance immediately prior to running the job. If the needed revision is already locally checked out and Galaxy or Collections updates are not needed, then a sync may not be performed.
+It is important that project updates run on the instance which prepares the ansible-runner private data directory.
+This is accomplished by a project sync which is done by the dispatcher control / launch process.
+The sync will update the source tree to the correct version on the instance immediately prior to transmitting the job.
+If the needed revision is already locally checked out and Galaxy or Collections updates are not needed, then a sync may not be performed.
 
 When the sync happens, it is recorded in the database as a project update with a `launch_type` of "sync" and a `job_type` of "run". Project syncs will not change the status or version of the project; instead, they will update the source tree _only_ on the instance where they run. The only exception to this behavior is when the project is in the "never updated" state (meaning that no project updates of any type have been run), in which case a sync should fill in the project's initial revision and status, and subsequent syncs should not make such changes.
 
+All project updates run with container isolation (like jobs) and volume mount to the persistent projects folder.
+
 #### Controlling Where a Particular Job Runs
 
-By default, a job will be submitted to the `tower` queue, meaning that it can be picked up by any of the workers.
+By default, a job will be submitted to the default queue (formerly the `tower` queue).
+To see the name of the queue, view the setting `DEFAULT_EXECUTION_QUEUE_NAME`.
+Administrative actions, like project updates, will run in the control plane queue.
+The name of the control plane queue is surfaced in the setting `DEFAULT_CONTROL_PLANE_QUEUE_NAME`.
 
 
 ##### How to Restrict the Instances a Job Will Run On

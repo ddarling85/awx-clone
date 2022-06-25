@@ -5,7 +5,7 @@ from collections import namedtuple
 from unittest import mock  # noqa
 import pytest
 
-from awx.main.tasks import AWXReceptorJob
+from awx.main.tasks.receptor import AWXReceptorJob
 from awx.main.utils import (
     create_temporary_fifo,
 )
@@ -35,7 +35,8 @@ def test_containerized_job(containerized_job):
 
 
 @pytest.mark.django_db
-def test_kubectl_ssl_verification(containerized_job, execution_environment):
+def test_kubectl_ssl_verification(containerized_job, default_job_execution_environment):
+    containerized_job.execution_environment = default_job_execution_environment
     cred = containerized_job.instance_group.credential
     cred.inputs['verify_ssl'] = True
     key_material = subprocess.run('openssl genrsa 2> /dev/null', shell=True, check=True, stdout=subprocess.PIPE)

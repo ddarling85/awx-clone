@@ -1,9 +1,10 @@
 import pytest
 from unittest import mock
 
-from awx.main.models import AdHocCommand, InventoryUpdate, JobTemplate, ProjectUpdate
+from awx.main.models import AdHocCommand, InventoryUpdate, JobTemplate
+from awx.main.models.activity_stream import ActivityStream
 from awx.main.models.ha import Instance, InstanceGroup
-from awx.main.tasks import apply_cluster_membership_policies
+from awx.main.tasks.system import apply_cluster_membership_policies
 from awx.api.versioning import reverse
 
 from django.utils.timezone import now
@@ -68,33 +69,43 @@ class TestPolicyTaskScheduling:
 
 
 @pytest.mark.django_db
-def test_instance_dup(org_admin, organization, project, instance_factory, instance_group_factory, get, system_auditor):
+def test_instance_dup(org_admin, organization, project, instance_factory, instance_group_factory, get, system_auditor, instance):
     i1 = instance_factory("i1")
     i2 = instance_factory("i2")
     i3 = instance_factory("i3")
+
     ig_all = instance_group_factory("all", instances=[i1, i2, i3])
     ig_dup = instance_group_factory("duplicates", instances=[i1])
     project.organization.instance_groups.add(ig_all, ig_dup)
-    actual_num_instances = Instance.objects.active_count()
+    actual_num_instances = Instance.objects.count()
     list_response = get(reverse('api:instance_list'), user=system_auditor)
     api_num_instances_auditor = list(list_response.data.items())[0][1]
 
     list_response2 = get(reverse('api:instance_list'), user=org_admin)
     api_num_instances_oa = list(list_response2.data.items())[0][1]
 
-    assert actual_num_instances == api_num_instances_auditor
-    # Note: The org_admin will not see the default 'tower' node because it is not in it's group, as expected
+    assert api_num_instances_auditor == actual_num_instances
+    # Note: The org_admin will not see the default 'tower' node
+    # (instance fixture) because it is not in its group, as expected
     assert api_num_instances_oa == (actual_num_instances - 1)
 
 
 @pytest.mark.django_db
 def test_policy_instance_few_instances(instance_factory, instance_group_factory):
-    i1 = instance_factory("i1")
+    # we need to use node_type=execution because node_type=hybrid will implicitly
+    # create the controlplane execution group if it doesn't already exist
+    i1 = instance_factory("i1", node_type='execution')
     ig_1 = instance_group_factory("ig1", percentage=25)
     ig_2 = instance_group_factory("ig2", percentage=25)
     ig_3 = instance_group_factory("ig3", percentage=25)
     ig_4 = instance_group_factory("ig4", percentage=25)
+
+    count = ActivityStream.objects.count()
+
     apply_cluster_membership_policies()
+    # running apply_cluster_membership_policies shouldn't spam the activity stream
+    assert ActivityStream.objects.count() == count
+
     assert len(ig_1.instances.all()) == 1
     assert i1 in ig_1.instances.all()
     assert len(ig_2.instances.all()) == 1
@@ -103,8 +114,12 @@ def test_policy_instance_few_instances(instance_factory, instance_group_factory)
     assert i1 in ig_3.instances.all()
     assert len(ig_4.instances.all()) == 1
     assert i1 in ig_4.instances.all()
-    i2 = instance_factory("i2")
+
+    i2 = instance_factory("i2", node_type='execution')
+    count += 1
     apply_cluster_membership_policies()
+    assert ActivityStream.objects.count() == count
+
     assert len(ig_1.instances.all()) == 1
     assert i1 in ig_1.instances.all()
     assert len(ig_2.instances.all()) == 1
@@ -244,6 +259,41 @@ def test_policy_instance_list_explicitly_pinned(instance_factory, instance_group
 
 
 @pytest.mark.django_db
+def test_control_plane_policy_exception(controlplane_instance_group):
+    controlplane_instance_group.policy_instance_percentage = 100
+    controlplane_instance_group.policy_instance_minimum = 2
+    controlplane_instance_group.save()
+    Instance.objects.create(hostname='foo-1', node_type='execution')
+    apply_cluster_membership_policies()
+    assert 'foo-1' not in [inst.hostname for inst in controlplane_instance_group.instances.all()]
+
+
+@pytest.mark.django_db
+def test_normal_instance_group_policy_exception():
+    ig = InstanceGroup.objects.create(name='bar', policy_instance_percentage=100, policy_instance_minimum=2)
+    Instance.objects.create(hostname='foo-1', node_type='control')
+    apply_cluster_membership_policies()
+    assert 'foo-1' not in [inst.hostname for inst in ig.instances.all()]
+
+
+@pytest.mark.django_db
+def test_percentage_as_fraction_of_execution_nodes():
+    """
+    If an instance requests 50 percent of instances, then those should be 50 percent
+    of available execution nodes (1 out of 2), as opposed to 50 percent
+    of all available nodes (2 out of 4) which include unusable control nodes
+    """
+    ig = InstanceGroup.objects.create(name='bar', policy_instance_percentage=50)
+    for i in range(2):
+        Instance.objects.create(hostname=f'foo-{i}', node_type='control')
+    for i in range(2):
+        Instance.objects.create(hostname=f'bar-{i}', node_type='execution')
+    apply_cluster_membership_policies()
+    assert ig.instances.count() == 1
+    assert ig.instances.first().hostname.startswith('bar-')
+
+
+@pytest.mark.django_db
 def test_basic_instance_group_membership(instance_group_factory, default_instance_group, job_factory):
     j = job_factory()
     ig = instance_group_factory("basicA", [default_instance_group.instances.first()])
@@ -267,6 +317,12 @@ def test_inherited_instance_group_membership(instance_group_factory, default_ins
 
 
 @pytest.mark.django_db
+def test_global_instance_groups_as_defaults(controlplane_instance_group, default_instance_group, job_factory):
+    j = job_factory()
+    assert j.preferred_instance_groups == [default_instance_group, controlplane_instance_group]
+
+
+@pytest.mark.django_db
 def test_mixed_group_membership(instance_factory, instance_group_factory):
     for i in range(5):
         instance_factory("i{}".format(i))
@@ -280,13 +336,48 @@ def test_mixed_group_membership(instance_factory, instance_group_factory):
 
 @pytest.mark.django_db
 def test_instance_group_capacity(instance_factory, instance_group_factory):
-    i1 = instance_factory("i1")
-    i2 = instance_factory("i2")
-    i3 = instance_factory("i3")
+    node_capacity = 100
+    i1 = instance_factory("i1", capacity=node_capacity)
+    i2 = instance_factory("i2", capacity=node_capacity)
+    i3 = instance_factory("i3", capacity=node_capacity)
     ig_all = instance_group_factory("all", instances=[i1, i2, i3])
-    assert ig_all.capacity == 300
+    assert ig_all.capacity == node_capacity * 3
     ig_single = instance_group_factory("single", instances=[i1])
-    assert ig_single.capacity == 100
+    assert ig_single.capacity == node_capacity
+
+
+@pytest.mark.django_db
+def test_health_check_clears_errors():
+    instance = Instance.objects.create(hostname='foo-1', enabled=True, capacity=0, errors='something went wrong')
+    data = dict(version='ansible-runner-4.2', cpu=782, memory=int(39e9), uuid='asdfasdfasdfasdfasdf', errors='')
+    instance.save_health_data(**data)
+    for k, v in data.items():
+        assert getattr(instance, k) == v
+
+
+@pytest.mark.django_db
+def test_health_check_oh_no():
+    instance = Instance.objects.create(hostname='foo-2', enabled=True, capacity=52, cpu=8, memory=int(40e9))
+    instance.save_health_data('', 0, 0, errors='This it not a real instance!')
+    assert instance.capacity == instance.cpu_capacity == 0
+    assert instance.errors == 'This it not a real instance!'
+
+
+@pytest.mark.django_db
+def test_errors_field_alone():
+    instance = Instance.objects.create(hostname='foo-1', enabled=True, node_type='hop')
+
+    instance.save_health_data(errors='Node went missing!')
+    assert instance.errors == 'Node went missing!'
+    assert instance.capacity == 0
+    assert instance.memory == instance.mem_capacity == 0
+    assert instance.cpu == instance.cpu_capacity == 0
+
+    instance.save_health_data(errors='')
+    assert not instance.errors
+    assert instance.capacity == 0
+    assert instance.memory == instance.mem_capacity == 0
+    assert instance.cpu == instance.cpu_capacity == 0
 
 
 @pytest.mark.django_db
@@ -313,16 +404,6 @@ class TestInstanceGroupOrdering:
         inventory_source.instance_groups.add(ig_tmp)
         # API does not allow setting IGs on inventory source, so ignore those
         assert iu.preferred_instance_groups == [ig_inv, ig_org]
-
-    def test_project_update_instance_groups(self, instance_group_factory, project, default_instance_group):
-        pu = ProjectUpdate.objects.create(project=project, organization=project.organization)
-        assert pu.preferred_instance_groups == [default_instance_group]
-        ig_org = instance_group_factory("OrgIstGrp", [default_instance_group.instances.first()])
-        ig_tmp = instance_group_factory("TmpIstGrp", [default_instance_group.instances.first()])
-        project.organization.instance_groups.add(ig_org)
-        assert pu.preferred_instance_groups == [ig_org]
-        project.instance_groups.add(ig_tmp)
-        assert pu.preferred_instance_groups == [ig_tmp, ig_org]
 
     def test_job_instance_groups(self, instance_group_factory, inventory, project, default_instance_group):
         jt = JobTemplate.objects.create(inventory=inventory, project=project)

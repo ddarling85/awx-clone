@@ -14,7 +14,7 @@ import yaml
 # Django
 from django.conf import settings
 from django.db import models, connection
-from django.utils.translation import ugettext_lazy as _
+from django.utils.translation import gettext_lazy as _
 from django.db import transaction
 from django.core.exceptions import ValidationError
 from django.utils.timezone import now
@@ -29,13 +29,12 @@ from awx.main.constants import CLOUD_PROVIDERS
 from awx.main.consumers import emit_channel_notification
 from awx.main.fields import (
     ImplicitRoleField,
-    JSONBField,
     SmartFilterField,
     OrderedManyToManyField,
 )
 from awx.main.managers import HostManager
 from awx.main.models.base import BaseModel, CommonModelNameNotUnique, VarsDictProperty, CLOUD_INVENTORY_SOURCES, prevent_search, accepts_json
-from awx.main.models.events import InventoryUpdateEvent
+from awx.main.models.events import InventoryUpdateEvent, UnpartitionedInventoryUpdateEvent
 from awx.main.models.unified_jobs import UnifiedJob, UnifiedJobTemplate
 from awx.main.models.mixins import (
     ResourceMixin,
@@ -51,6 +50,7 @@ from awx.main.models.credential.injectors import _openstack_data
 from awx.main.utils import _inventory_updates
 from awx.main.utils.safe_yaml import sanitize_jinja
 from awx.main.utils.execution_environments import to_container_path
+from awx.main.utils.licensing import server_product_name
 
 
 __all__ = ['Inventory', 'Host', 'Group', 'InventorySource', 'InventoryUpdate', 'SmartInventoryMembership']
@@ -164,19 +164,16 @@ class Inventory(CommonModelNameNotUnique, ResourceMixin, RelatedJobsMixin):
             'admin_role',
         ]
     )
-    insights_credential = models.ForeignKey(
-        'Credential',
-        related_name='insights_inventories',
-        help_text=_('Credentials to be used by hosts belonging to this inventory when accessing Red Hat Insights API.'),
-        on_delete=models.SET_NULL,
-        blank=True,
-        null=True,
-        default=None,
-    )
     pending_deletion = models.BooleanField(
         default=False,
         editable=False,
         help_text=_('Flag indicating the inventory is being deleted.'),
+    )
+    labels = models.ManyToManyField(
+        "Label",
+        blank=True,
+        related_name='inventory_labels',
+        help_text=_('Labels associated with this inventory.'),
     )
 
     def get_absolute_url(self, request=None):
@@ -314,7 +311,12 @@ class Inventory(CommonModelNameNotUnique, ResourceMixin, RelatedJobsMixin):
             for host in hosts:
                 data['_meta']['hostvars'][host.name] = host.variables_dict
                 if towervars:
-                    tower_dict = dict(remote_tower_enabled=str(host.enabled).lower(), remote_tower_id=host.id)
+                    tower_dict = dict(
+                        remote_tower_enabled=str(host.enabled).lower(),
+                        remote_tower_id=host.id,
+                        remote_host_enabled=str(host.enabled).lower(),
+                        remote_host_id=host.id,
+                    )
                     data['_meta']['hostvars'][host.name].update(tower_dict)
 
         return data
@@ -367,16 +369,9 @@ class Inventory(CommonModelNameNotUnique, ResourceMixin, RelatedJobsMixin):
         group_pks = self.groups.values_list('pk', flat=True)
         return self.groups.exclude(parents__pk__in=group_pks).distinct()
 
-    def clean_insights_credential(self):
-        if self.kind == 'smart' and self.insights_credential:
-            raise ValidationError(_("Assignment not allowed for Smart Inventory"))
-        if self.insights_credential and self.insights_credential.credential_type.kind != 'insights':
-            raise ValidationError(_("Credential kind must be 'insights'."))
-        return self.insights_credential
-
     @transaction.atomic
     def schedule_deletion(self, user_id=None):
-        from awx.main.tasks import delete_inventory
+        from awx.main.tasks.system import delete_inventory
         from awx.main.signals import activity_stream_delete
 
         if self.pending_deletion is True:
@@ -392,7 +387,7 @@ class Inventory(CommonModelNameNotUnique, ResourceMixin, RelatedJobsMixin):
         if self.kind == 'smart' and settings.AWX_REBUILD_SMART_MEMBERSHIP:
 
             def on_commit():
-                from awx.main.tasks import update_host_smart_inventory_memberships
+                from awx.main.tasks.system import update_host_smart_inventory_memberships
 
                 update_host_smart_inventory_memberships.delay()
 
@@ -492,7 +487,7 @@ class Host(CommonModelNameNotUnique, RelatedJobsMixin):
         editable=False,
         help_text=_('Inventory source(s) that created or modified this host.'),
     )
-    ansible_facts = JSONBField(
+    ansible_facts = models.JSONField(
         blank=True,
         default=dict,
         help_text=_('Arbitrary JSON structure of most recent ansible_facts, per-host.'),
@@ -502,13 +497,6 @@ class Host(CommonModelNameNotUnique, RelatedJobsMixin):
         editable=False,
         null=True,
         help_text=_('The date and time ansible_facts was last modified.'),
-    )
-    insights_system_id = models.TextField(
-        blank=True,
-        default=None,
-        null=True,
-        db_index=True,
-        help_text=_('Red Hat Insights host unique identifier.'),
     )
 
     objects = HostManager()
@@ -568,7 +556,7 @@ class Host(CommonModelNameNotUnique, RelatedJobsMixin):
         if settings.AWX_REBUILD_SMART_MEMBERSHIP:
 
             def on_commit():
-                from awx.main.tasks import update_host_smart_inventory_memberships
+                from awx.main.tasks.system import update_host_smart_inventory_memberships
 
                 update_host_smart_inventory_memberships.delay()
 
@@ -648,7 +636,7 @@ class Group(CommonModelNameNotUnique, RelatedJobsMixin):
     @transaction.atomic
     def delete_recursive(self):
         from awx.main.utils import ignore_inventory_computed_fields
-        from awx.main.tasks import update_inventory_computed_fields
+        from awx.main.tasks.system import update_inventory_computed_fields
         from awx.main.signals import disable_activity_stream, activity_stream_delete
 
         def mark_actual():
@@ -827,7 +815,8 @@ class InventorySourceOptions(BaseModel):
         ('satellite6', _('Red Hat Satellite 6')),
         ('openstack', _('OpenStack')),
         ('rhv', _('Red Hat Virtualization')),
-        ('tower', _('Ansible Tower')),
+        ('controller', _('Red Hat Ansible Automation Platform')),
+        ('insights', _('Red Hat Insights')),
     ]
 
     # From the options of the Django management base command
@@ -1004,6 +993,10 @@ class InventorySource(UnifiedJobTemplate, InventorySourceOptions, CustomVirtualE
     )
     update_on_project_update = models.BooleanField(
         default=False,
+        help_text=_(
+            'This field is deprecated and will be removed in a future release. '
+            'In future release, functionality will be migrated to source project update_on_launch.'
+        ),
     )
     update_on_launch = models.BooleanField(
         default=False,
@@ -1235,7 +1228,7 @@ class InventoryUpdate(UnifiedJob, InventorySourceOptions, JobNotificationMixin, 
 
     @classmethod
     def _get_task_class(cls):
-        from awx.main.tasks import RunInventoryUpdate
+        from awx.main.tasks.jobs import RunInventoryUpdate
 
         return RunInventoryUpdate
 
@@ -1265,6 +1258,8 @@ class InventoryUpdate(UnifiedJob, InventorySourceOptions, JobNotificationMixin, 
 
     @property
     def event_class(self):
+        if self.has_unpartitioned_events:
+            return UnpartitionedInventoryUpdateEvent
         return InventoryUpdateEvent
 
     @property
@@ -1306,16 +1301,6 @@ class InventoryUpdate(UnifiedJob, InventorySourceOptions, JobNotificationMixin, 
             return self.global_instance_groups
         return selected_groups
 
-    @property
-    def ansible_virtualenv_path(self):
-        if self.inventory_source and self.inventory_source.custom_virtualenv:
-            return self.inventory_source.custom_virtualenv
-        if self.inventory_source and self.inventory_source.source_project:
-            project = self.inventory_source.source_project
-            if project and project.custom_virtualenv:
-                return project.custom_virtualenv
-        return settings.ANSIBLE_VENV_PATH
-
     def cancel(self, job_explanation=None, is_chain=False):
         res = super(InventoryUpdate, self).cancel(job_explanation=job_explanation, is_chain=is_chain)
         if res:
@@ -1350,6 +1335,7 @@ class PluginFileInjector(object):
     namespace = None
     collection = None
     collection_migration = '2.9'  # Starting with this version, we use collections
+    use_fqcn = False  # plugin: name versus plugin: namespace.collection.name
 
     # TODO: delete this method and update unit tests
     @classmethod
@@ -1376,7 +1362,12 @@ class PluginFileInjector(object):
         Note that a plugin value of '' should still be overridden.
         '''
         if self.plugin_name is not None:
-            source_vars['plugin'] = self.plugin_name
+            if hasattr(self, 'downstream_namespace') and server_product_name() != 'AWX':
+                source_vars['plugin'] = f'{self.downstream_namespace}.{self.downstream_collection}.{self.plugin_name}'
+            elif self.use_fqcn:
+                source_vars['plugin'] = f'{self.namespace}.{self.collection}.{self.plugin_name}'
+            else:
+                source_vars['plugin'] = self.plugin_name
         return source_vars
 
     def build_env(self, inventory_update, env, private_data_dir, private_data_files):
@@ -1387,7 +1378,7 @@ class PluginFileInjector(object):
         return env
 
     def _get_shared_env(self, inventory_update, private_data_dir, private_data_files):
-        """By default, we will apply the standard managed_by_tower injectors"""
+        """By default, we will apply the standard managed injectors"""
         injected_env = {}
         credential = inventory_update.get_cloud_credential()
         # some sources may have no credential, specifically ec2
@@ -1406,7 +1397,7 @@ class PluginFileInjector(object):
             args = []
             credential.credential_type.inject_credential(credential, injected_env, safe_env, args, private_data_dir)
             # NOTE: safe_env is handled externally to injector class by build_safe_env static method
-            # that means that managed_by_tower injectors must only inject detectable env keys
+            # that means that managed injectors must only inject detectable env keys
             # enforcement of this is accomplished by tests
         return injected_env
 
@@ -1524,12 +1515,17 @@ class rhv(PluginFileInjector):
     initial_version = '2.9'
     namespace = 'ovirt'
     collection = 'ovirt'
+    downstream_namespace = 'redhat'
+    downstream_collection = 'rhv'
 
 
 class satellite6(PluginFileInjector):
     plugin_name = 'foreman'
     namespace = 'theforeman'
     collection = 'foreman'
+    downstream_namespace = 'redhat'
+    downstream_collection = 'satellite'
+    use_fqcn = True
 
     def get_plugin_env(self, inventory_update, private_data_dir, private_data_files):
         # this assumes that this is merged
@@ -1542,18 +1538,24 @@ class satellite6(PluginFileInjector):
             ret['FOREMAN_PASSWORD'] = credential.get_input('password', default='')
         return ret
 
-    def inventory_as_dict(self, inventory_update, private_data_dir):
-        ret = super(satellite6, self).inventory_as_dict(inventory_update, private_data_dir)
-        # this inventory plugin requires the fully qualified inventory plugin name
-        ret['plugin'] = f'{self.namespace}.{self.collection}.{self.plugin_name}'
-        return ret
 
-
-class tower(PluginFileInjector):
-    plugin_name = 'tower'
+class controller(PluginFileInjector):
+    plugin_name = 'tower'  # TODO: relying on routing for now, update after EEs pick up revised collection
     base_injector = 'template'
     namespace = 'awx'
     collection = 'awx'
+    downstream_namespace = 'ansible'
+    downstream_collection = 'controller'
+
+
+class insights(PluginFileInjector):
+    plugin_name = 'insights'
+    base_injector = 'template'
+    namespace = 'redhatinsights'
+    collection = 'insights'
+    downstream_namespace = 'redhat'
+    downstream_collection = 'insights'
+    use_fqcn = True
 
 
 for cls in PluginFileInjector.__subclasses__():

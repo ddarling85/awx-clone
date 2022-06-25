@@ -15,7 +15,6 @@ from django.core.serializers.json import DjangoJSONEncoder
 from django.db.backends.sqlite3.base import SQLiteCursorWrapper
 
 # AWX
-from awx.main.fields import JSONBField
 from awx.main.models.projects import Project
 from awx.main.models.ha import Instance
 
@@ -121,7 +120,7 @@ def run_computed_fields_right_away(request):
 
 @pytest.fixture
 @mock.patch.object(Project, "update", lambda self, **kwargs: None)
-def project(instance, organization):
+def project(organization):
     prj = Project.objects.create(
         name="test-proj",
         description="test-proj-desc",
@@ -136,7 +135,7 @@ def project(instance, organization):
 
 @pytest.fixture
 @mock.patch.object(Project, "update", lambda self, **kwargs: None)
-def manual_project(instance, organization):
+def manual_project(organization):
     prj = Project.objects.create(
         name="test-manual-proj",
         description="manual-proj-desc",
@@ -196,7 +195,7 @@ def instance(settings):
 
 
 @pytest.fixture
-def organization(instance):
+def organization():
     return Organization.objects.create(name="test-org", description="test-org-desc")
 
 
@@ -266,7 +265,7 @@ def credentialtype_external():
 
     with mock.patch('awx.main.models.credential.CredentialType.plugin', new_callable=PropertyMock) as mock_plugin:
         mock_plugin.return_value = MockPlugin()
-        external_type = CredentialType(kind='external', managed_by_tower=True, name='External Service', inputs=external_type_inputs)
+        external_type = CredentialType(kind='external', managed=True, name='External Service', inputs=external_type_inputs)
         external_type.save()
         yield external_type
 
@@ -756,11 +755,6 @@ def get_db_prep_save(self, value, connection, **kwargs):
 
 
 @pytest.fixture
-def monkeypatch_jsonbfield_get_db_prep_save(mocker):
-    JSONBField.get_db_prep_save = get_db_prep_save
-
-
-@pytest.fixture
 def oauth_application(admin):
     return Application.objects.create(name='test app', user=admin, client_type='confidential', authorization_grant_type='password')
 
@@ -824,5 +818,10 @@ def slice_job_factory(slice_jt_factory):
 
 
 @pytest.fixture
-def execution_environment():
-    return ExecutionEnvironment.objects.create(name="test-ee", description="test-ee", managed_by_tower=True)
+def control_plane_execution_environment():
+    return ExecutionEnvironment.objects.create(name="Control Plane EE", managed=True)
+
+
+@pytest.fixture
+def default_job_execution_environment():
+    return ExecutionEnvironment.objects.create(name="Default Job EE", managed=False)

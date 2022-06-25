@@ -19,9 +19,9 @@ from collections import OrderedDict
 from django.conf import settings
 from django.db import models, connection
 from django.core.exceptions import NON_FIELD_ERRORS
-from django.utils.translation import ugettext_lazy as _
+from django.utils.translation import gettext_lazy as _
 from django.utils.timezone import now
-from django.utils.encoding import smart_text
+from django.utils.encoding import smart_str
 from django.contrib.contenttypes.models import ContentType
 
 # REST Framework
@@ -36,24 +36,25 @@ from awx.main.dispatch import get_local_queuename
 from awx.main.dispatch.control import Control as ControlDispatcher
 from awx.main.registrar import activity_stream_registrar
 from awx.main.models.mixins import ResourceMixin, TaskManagerUnifiedJobMixin, ExecutionEnvironmentMixin
-from awx.main.utils import (
+from awx.main.utils.common import (
     camelcase_to_underscore,
     get_model_for_type,
-    encrypt_dict,
-    decrypt_field,
     _inventory_updates,
     copy_model_by_class,
     copy_m2m_relationships,
     get_type_for_model,
     parse_yaml_or_json,
     getattr_dne,
-    polymorphic,
     schedule_task_manager,
+    get_event_partition_epoch,
+    get_capacity_type,
 )
-from awx.main.constants import ACTIVE_STATES, CAN_CANCEL
+from awx.main.utils.encryption import encrypt_dict, decrypt_field
+from awx.main.utils import polymorphic
+from awx.main.constants import ACTIVE_STATES, CAN_CANCEL, JOB_VARIABLE_PREFIXES
 from awx.main.redact import UriCleaner, REPLACE_STR
 from awx.main.consumers import emit_channel_notification
-from awx.main.fields import JSONField, JSONBField, AskForField, OrderedManyToManyField
+from awx.main.fields import AskForField, OrderedManyToManyField, JSONBlob
 
 __all__ = ['UnifiedJobTemplate', 'UnifiedJob', 'StdoutMaxBytesExceeded']
 
@@ -356,7 +357,7 @@ class UnifiedJobTemplate(PolymorphicModel, CommonModelNameNotUnique, ExecutionEn
         validated_kwargs = kwargs.copy()
         if unallowed_fields:
             if parent_field_name is None:
-                logger.warn('Fields {} are not allowed as overrides to spawn from {}.'.format(', '.join(unallowed_fields), self))
+                logger.warning('Fields {} are not allowed as overrides to spawn from {}.'.format(', '.join(unallowed_fields), self))
             for f in unallowed_fields:
                 validated_kwargs.pop(f)
 
@@ -365,8 +366,6 @@ class UnifiedJobTemplate(PolymorphicModel, CommonModelNameNotUnique, ExecutionEn
         if eager_fields:
             for fd, val in eager_fields.items():
                 setattr(unified_job, fd, val)
-
-        unified_job.execution_environment = self.resolve_execution_environment()
 
         # NOTE: slice workflow jobs _get_parent_field_name method
         # is not correct until this is set
@@ -576,7 +575,8 @@ class UnifiedJob(
     dependent_jobs = models.ManyToManyField(
         'self',
         editable=False,
-        related_name='%(class)s_blocked_jobs+',
+        related_name='%(class)s_blocked_jobs',
+        symmetrical=False,
     )
     execution_node = models.TextField(
         blank=True,
@@ -654,9 +654,9 @@ class UnifiedJob(
         editable=False,
     )
     job_env = prevent_search(
-        JSONField(
-            blank=True,
+        JSONBlob(
             default=dict,
+            blank=True,
             editable=False,
         )
     )
@@ -705,7 +705,7 @@ class UnifiedJob(
         'Credential',
         related_name='%(class)ss',
     )
-    installed_collections = JSONBField(
+    installed_collections = models.JSONField(
         blank=True,
         default=dict,
         editable=False,
@@ -717,6 +717,16 @@ class UnifiedJob(
         default='',
         editable=False,
         help_text=_("The version of Ansible Core installed in the execution environment."),
+    )
+    host_status_counts = models.JSONField(
+        blank=True,
+        null=True,
+        default=None,
+        editable=False,
+        help_text=_("Playbook stats from the Ansible playbook_on_stats event."),
+    )
+    work_unit_id = models.CharField(
+        max_length=255, blank=True, default=None, editable=False, null=True, help_text=_("The Receptor work unit ID associated with this job.")
     )
 
     def get_absolute_url(self, request=None):
@@ -738,8 +748,8 @@ class UnifiedJob(
         raise NotImplementedError  # Implement in subclasses.
 
     @property
-    def can_run_containerized(self):
-        return False
+    def capacity_type(self):
+        return get_capacity_type(self)
 
     def _get_parent_field_name(self):
         return 'unified_job_template'  # Override in subclasses.
@@ -992,8 +1002,18 @@ class UnifiedJob(
             'main_systemjob': 'system_job_id',
         }[tablename]
 
+    @property
+    def has_unpartitioned_events(self):
+        applied = get_event_partition_epoch()
+        return applied and self.created and self.created < applied
+
     def get_event_queryset(self):
-        return self.event_class.objects.filter(**{self.event_parent_key: self.id})
+        kwargs = {
+            self.event_parent_key: self.id,
+        }
+        if not self.has_unpartitioned_events:
+            kwargs['job_created'] = self.created
+        return self.event_class.objects.filter(**kwargs)
 
     @property
     def event_processing_finished(self):
@@ -1034,7 +1054,7 @@ class UnifiedJob(
             fd = tempfile.NamedTemporaryFile(
                 mode='w', prefix='{}-{}-'.format(self.model_to_str(), self.pk), suffix='.out', dir=settings.JOBOUTPUT_ROOT, encoding='utf-8'
             )
-            from awx.main.tasks import purge_old_stdout_files  # circular import
+            from awx.main.tasks.system import purge_old_stdout_files  # circular import
 
             purge_old_stdout_files.apply_async()
 
@@ -1078,14 +1098,16 @@ class UnifiedJob(
                 # function assume a str-based fd will be returned; decode
                 # .write() calls on the fly to maintain this interface
                 _write = fd.write
-                fd.write = lambda s: _write(smart_text(s))
+                fd.write = lambda s: _write(smart_str(s))
+                tbl = self._meta.db_table + 'event'
+                created_by_cond = ''
+                if self.has_unpartitioned_events:
+                    tbl = f'_unpartitioned_{tbl}'
+                else:
+                    created_by_cond = f"job_created='{self.created.isoformat()}' AND "
 
-                cursor.copy_expert(
-                    "copy (select stdout from {} where {}={} and stdout != '' order by start_line) to stdout".format(
-                        self._meta.db_table + 'event', self.event_parent_key, self.id
-                    ),
-                    fd,
-                )
+                sql = f"copy (select stdout from {tbl} where {created_by_cond}{self.event_parent_key}={self.id} and stdout != '' order by start_line) to stdout"  # nosql
+                cursor.copy_expert(sql, fd)
 
                 if hasattr(fd, 'name'):
                     # If we're dealing with a physical file, use `sed` to clean
@@ -1182,6 +1204,10 @@ class UnifiedJob(
                 pass
         return None
 
+    def get_effective_artifacts(self, **kwargs):
+        """Return unified job artifacts (from set_stats) to pass downstream in workflows"""
+        return {}
+
     def get_passwords_needed_to_start(self):
         return []
 
@@ -1191,7 +1217,7 @@ class UnifiedJob(
             try:
                 extra_data_dict = parse_yaml_or_json(extra_data, silent_failure=False)
             except Exception as e:
-                logger.warn("Exception deserializing extra vars: " + str(e))
+                logger.warning("Exception deserializing extra vars: " + str(e))
             evars = self.extra_vars_dict
             evars.update(extra_data_dict)
             self.update_fields(extra_vars=json.dumps(evars))
@@ -1259,7 +1285,7 @@ class UnifiedJob(
             id=self.id,
             name=self.name,
             url=self.get_ui_url(),
-            created_by=smart_text(self.created_by),
+            created_by=smart_str(self.created_by),
             started=self.started.isoformat() if self.started is not None else None,
             finished=self.finished.isoformat() if self.finished is not None else None,
             status=self.status,
@@ -1405,13 +1431,29 @@ class UnifiedJob(
         return list(self.unified_job_template.instance_groups.all())
 
     @property
+    def control_plane_instance_group(self):
+        from awx.main.models.ha import InstanceGroup
+
+        control_plane_instance_group = InstanceGroup.objects.filter(name=settings.DEFAULT_CONTROL_PLANE_QUEUE_NAME)
+
+        return list(control_plane_instance_group)
+
+    @property
     def global_instance_groups(self):
         from awx.main.models.ha import InstanceGroup
 
-        default_instance_group = InstanceGroup.objects.filter(name='tower')
-        if default_instance_group.exists():
-            return [default_instance_group.first()]
-        return []
+        default_instance_group_names = [settings.DEFAULT_EXECUTION_QUEUE_NAME]
+
+        if not settings.IS_K8S:
+            default_instance_group_names.append(settings.DEFAULT_CONTROL_PLANE_QUEUE_NAME)
+
+        default_instance_groups = list(InstanceGroup.objects.filter(name__in=default_instance_group_names))
+
+        # assure deterministic precedence by making sure the default group is first
+        if (not settings.IS_K8S) and default_instance_groups and default_instance_groups[0].name != settings.DEFAULT_EXECUTION_QUEUE_NAME:
+            default_instance_groups.reverse()
+
+        return default_instance_groups
 
     def awx_meta_vars(self):
         """
@@ -1419,7 +1461,7 @@ class UnifiedJob(
         by AWX, for purposes of client playbook hooks
         """
         r = {}
-        for name in ('awx', 'tower'):
+        for name in JOB_VARIABLE_PREFIXES:
             r['{}_job_id'.format(name)] = self.pk
             r['{}_job_launch_type'.format(name)] = self.launch_type
 
@@ -1428,7 +1470,7 @@ class UnifiedJob(
         wj = self.get_workflow_job()
         if wj:
             schedule = getattr_dne(wj, 'schedule')
-            for name in ('awx', 'tower'):
+            for name in JOB_VARIABLE_PREFIXES:
                 r['{}_workflow_job_id'.format(name)] = wj.pk
                 r['{}_workflow_job_name'.format(name)] = wj.name
                 r['{}_workflow_job_launch_type'.format(name)] = wj.launch_type
@@ -1439,12 +1481,12 @@ class UnifiedJob(
         if not created_by:
             schedule = getattr_dne(self, 'schedule')
             if schedule:
-                for name in ('awx', 'tower'):
+                for name in JOB_VARIABLE_PREFIXES:
                     r['{}_schedule_id'.format(name)] = schedule.pk
                     r['{}_schedule_name'.format(name)] = schedule.name
 
         if created_by:
-            for name in ('awx', 'tower'):
+            for name in JOB_VARIABLE_PREFIXES:
                 r['{}_user_id'.format(name)] = created_by.pk
                 r['{}_user_name'.format(name)] = created_by.username
                 r['{}_user_email'.format(name)] = created_by.email
@@ -1453,7 +1495,7 @@ class UnifiedJob(
 
         inventory = getattr_dne(self, 'inventory')
         if inventory:
-            for name in ('awx', 'tower'):
+            for name in JOB_VARIABLE_PREFIXES:
                 r['{}_inventory_id'.format(name)] = inventory.pk
                 r['{}_inventory_name'.format(name)] = inventory.name
 
@@ -1467,7 +1509,12 @@ class UnifiedJob(
         return False
 
     def log_lifecycle(self, state, blocked_by=None):
-        extra = {'type': self._meta.model_name, 'task_id': self.id, 'state': state}
+        extra = {
+            'type': self._meta.model_name,
+            'task_id': self.id,
+            'state': state,
+            'work_unit_id': self.work_unit_id,
+        }
         if self.unified_job_template:
             extra["template_name"] = self.unified_job_template.name
         if state == "blocked" and blocked_by:
@@ -1476,6 +1523,11 @@ class UnifiedJob(
             extra["blocked_by"] = blocked_by_msg
         else:
             msg = f"{self._meta.model_name}-{self.id} {state.replace('_', ' ')}"
+
+        if state == "controller_node_chosen":
+            extra["controller_node"] = self.controller_node or "NOT_SET"
+        elif state == "execution_node_chosen":
+            extra["execution_node"] = self.execution_node or "NOT_SET"
         logger_job_lifecycle.debug(msg, extra=extra)
 
     @property

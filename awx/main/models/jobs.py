@@ -19,7 +19,7 @@ from django.db import models
 # from django.core.cache import cache
 from django.utils.encoding import smart_str
 from django.utils.timezone import now
-from django.utils.translation import ugettext_lazy as _
+from django.utils.translation import gettext_lazy as _
 from django.core.exceptions import FieldDoesNotExist
 
 # REST Framework
@@ -37,14 +37,14 @@ from awx.main.models.base import (
     VERBOSITY_CHOICES,
     VarsDictProperty,
 )
-from awx.main.models.events import JobEvent, SystemJobEvent
+from awx.main.models.events import JobEvent, UnpartitionedJobEvent, UnpartitionedSystemJobEvent, SystemJobEvent
 from awx.main.models.unified_jobs import UnifiedJobTemplate, UnifiedJob
 from awx.main.models.notifications import (
     NotificationTemplate,
     JobNotificationMixin,
 )
 from awx.main.utils import parse_yaml_or_json, getattr_dne, NullablePromptPseudoField
-from awx.main.fields import ImplicitRoleField, JSONField, AskForField
+from awx.main.fields import ImplicitRoleField, AskForField, JSONBlob
 from awx.main.models.mixins import (
     ResourceMixin,
     SurveyJobTemplateMixin,
@@ -55,6 +55,7 @@ from awx.main.models.mixins import (
     WebhookMixin,
     WebhookTemplateMixin,
 )
+from awx.main.constants import JOB_VARIABLE_PREFIXES
 
 
 logger = logging.getLogger('awx.main.models.jobs')
@@ -129,8 +130,7 @@ class JobOptions(BaseModel):
             )
         )
     )
-    job_tags = models.CharField(
-        max_length=1024,
+    job_tags = models.TextField(
         blank=True,
         default='',
     )
@@ -546,9 +546,9 @@ class Job(UnifiedJob, JobOptions, SurveyJobMixin, JobNotificationMixin, TaskMana
         editable=False,
         through='JobHostSummary',
     )
-    artifacts = JSONField(
-        blank=True,
+    artifacts = JSONBlob(
         default=dict,
+        blank=True,
         editable=False,
     )
     scm_revision = models.CharField(
@@ -583,7 +583,7 @@ class Job(UnifiedJob, JobOptions, SurveyJobMixin, JobNotificationMixin, TaskMana
 
     @classmethod
     def _get_task_class(cls):
-        from awx.main.tasks import RunJob
+        from awx.main.tasks.jobs import RunJob
 
         return RunJob
 
@@ -601,19 +601,9 @@ class Job(UnifiedJob, JobOptions, SurveyJobMixin, JobNotificationMixin, TaskMana
         return urljoin(settings.TOWER_URL_BASE, "/#/jobs/playbook/{}".format(self.pk))
 
     @property
-    def ansible_virtualenv_path(self):
-        # the order here enforces precedence (it matters)
-        for virtualenv in (
-            self.job_template.custom_virtualenv if self.job_template else None,
-            self.project.custom_virtualenv,
-            self.organization.custom_virtualenv if self.organization else None,
-        ):
-            if virtualenv:
-                return virtualenv
-        return settings.ANSIBLE_VENV_PATH
-
-    @property
     def event_class(self):
+        if self.has_unpartitioned_events:
+            return UnpartitionedJobEvent
         return JobEvent
 
     def copy_unified_job(self, **new_prompts):
@@ -753,9 +743,11 @@ class Job(UnifiedJob, JobOptions, SurveyJobMixin, JobNotificationMixin, TaskMana
             return "$hidden due to Ansible no_log flag$"
         return artifacts
 
-    @property
-    def can_run_containerized(self):
-        return True
+    def get_effective_artifacts(self, **kwargs):
+        """Return unified job artifacts (from set_stats) to pass downstream in workflows"""
+        if isinstance(self.artifacts, dict):
+            return self.artifacts
+        return {}
 
     @property
     def is_container_group_task(self):
@@ -783,14 +775,14 @@ class Job(UnifiedJob, JobOptions, SurveyJobMixin, JobNotificationMixin, TaskMana
     def awx_meta_vars(self):
         r = super(Job, self).awx_meta_vars()
         if self.project:
-            for name in ('awx', 'tower'):
+            for name in JOB_VARIABLE_PREFIXES:
                 r['{}_project_revision'.format(name)] = self.project.scm_revision
                 r['{}_project_scm_branch'.format(name)] = self.project.scm_branch
         if self.scm_branch:
-            for name in ('awx', 'tower'):
+            for name in JOB_VARIABLE_PREFIXES:
                 r['{}_job_scm_branch'.format(name)] = self.scm_branch
         if self.job_template:
-            for name in ('awx', 'tower'):
+            for name in JOB_VARIABLE_PREFIXES:
                 r['{}_job_template_id'.format(name)] = self.job_template.pk
                 r['{}_job_template_name'.format(name)] = self.job_template.name
         return r
@@ -855,23 +847,6 @@ class Job(UnifiedJob, JobOptions, SurveyJobMixin, JobNotificationMixin, TaskMana
                             continue
                         host.ansible_facts = ansible_facts
                         host.ansible_facts_modified = now()
-                        ansible_local = ansible_facts.get('ansible_local', {}).get('insights', {})
-                        ansible_facts = ansible_facts.get('insights', {})
-                        ansible_local_system_id = ansible_local.get('system_id', None) if isinstance(ansible_local, dict) else None
-                        ansible_facts_system_id = ansible_facts.get('system_id', None) if isinstance(ansible_facts, dict) else None
-                        if ansible_local_system_id:
-                            print("Setting local {}".format(ansible_local_system_id))
-                            logger.debug(
-                                "Insights system_id {} found for host <{}, {}> in"
-                                " ansible local facts".format(ansible_local_system_id, host.inventory.id, host.name)
-                            )
-                            host.insights_system_id = ansible_local_system_id
-                        elif ansible_facts_system_id:
-                            logger.debug(
-                                "Insights system_id {} found for host <{}, {}> in"
-                                " insights facts".format(ansible_local_system_id, host.inventory.id, host.name)
-                            )
-                            host.insights_system_id = ansible_facts_system_id
                         host.save()
                         system_tracking_logger.info(
                             'New fact for inventory {} host {}'.format(smart_str(host.inventory.name), smart_str(host.name)),
@@ -916,7 +891,7 @@ class LaunchTimeConfigBase(BaseModel):
     )
     # All standard fields are stored in this dictionary field
     # This is a solution to the nullable CharField problem, specific to prompting
-    char_prompts = JSONField(blank=True, default=dict)
+    char_prompts = JSONBlob(default=dict, blank=True)
 
     def prompts_dict(self, display=False):
         data = {}
@@ -969,12 +944,12 @@ class LaunchTimeConfig(LaunchTimeConfigBase):
         abstract = True
 
     # Special case prompting fields, even more special than the other ones
-    extra_data = JSONField(blank=True, default=dict)
+    extra_data = JSONBlob(default=dict, blank=True)
     survey_passwords = prevent_search(
-        JSONField(
-            blank=True,
+        JSONBlob(
             default=dict,
             editable=False,
+            blank=True,
         )
     )
     # Credentials needed for non-unified job / unified JT models
@@ -1244,7 +1219,7 @@ class SystemJob(UnifiedJob, SystemJobOptions, JobNotificationMixin):
 
     @classmethod
     def _get_task_class(cls):
-        from awx.main.tasks import RunSystemJob
+        from awx.main.tasks.jobs import RunSystemJob
 
         return RunSystemJob
 
@@ -1259,17 +1234,17 @@ class SystemJob(UnifiedJob, SystemJobOptions, JobNotificationMixin):
 
     @property
     def event_class(self):
+        if self.has_unpartitioned_events:
+            return UnpartitionedSystemJobEvent
         return SystemJobEvent
 
     @property
     def task_impact(self):
-        if settings.IS_K8S:
-            return 0
         return 5
 
     @property
     def preferred_instance_groups(self):
-        return self.global_instance_groups
+        return self.control_plane_instance_group
 
     '''
     JobNotificationMixin

@@ -22,6 +22,8 @@ class TestInventoryScript:
         assert inventory.get_script_data(hostvars=True, towervars=True)['_meta']['hostvars']['ahost'] == {
             'remote_tower_enabled': 'true',
             'remote_tower_id': host.id,
+            'remote_host_enabled': 'true',
+            'remote_host_id': host.id,
         }
 
     def test_all_group(self, inventory):
@@ -104,9 +106,19 @@ class TestActiveCount:
 
     def test_active_count_minus_tower(self, inventory):
         inventory.hosts.create(name='locally-managed-host')
-        source = inventory.inventory_sources.create(name='tower-source', source='tower')
+        source = inventory.inventory_sources.create(name='tower-source', source='controller')
         source.hosts.create(name='remotely-managed-host', inventory=inventory)
         assert Host.objects.active_count() == 1
+
+    def test_host_case_insensitivity(self, organization):
+        inv1 = Inventory.objects.create(name='inv1', organization=organization)
+        inv2 = Inventory.objects.create(name='inv2', organization=organization)
+        assert Host.objects.active_count() == 0
+        inv1.hosts.create(name='host1')
+        inv2.hosts.create(name='Host1')
+        assert Host.objects.active_count() == 1
+        inv1.hosts.create(name='host2')
+        assert Host.objects.active_count() == 2
 
 
 @pytest.mark.django_db
@@ -209,7 +221,8 @@ class TestInventorySourceInjectors:
             ('vmware', 'community.vmware.vmware_vm_inventory'),
             ('rhv', 'ovirt.ovirt.ovirt'),
             ('satellite6', 'theforeman.foreman.foreman'),
-            ('tower', 'awx.awx.tower'),
+            ('insights', 'redhatinsights.insights.insights'),
+            ('controller', 'awx.awx.tower'),
         ],
     )
     def test_plugin_proper_names(self, source, proper_name):

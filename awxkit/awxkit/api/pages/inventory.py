@@ -1,11 +1,11 @@
 from contextlib import suppress
 import logging
 import json
-import re
 
 from awxkit.api.pages import Credential, Organization, Project, UnifiedJob, UnifiedJobTemplate
-from awxkit.utils import filter_by_class, random_title, update_payload, not_provided, PseudoNamespace, poll_until, random_utf8
+from awxkit.utils import filter_by_class, random_title, update_payload, not_provided, PseudoNamespace, poll_until
 from awxkit.api.mixins import DSAdapter, HasCreate, HasInstanceGroups, HasNotifications, HasVariables, HasCopy
+from awxkit.config import config
 from awxkit.api.resources import resources
 import awxkit.exceptions as exc
 from . import base
@@ -59,14 +59,12 @@ class Inventory(HasCopy, HasCreate, HasInstanceGroups, HasVariables, base.Base):
             organization=organization.id,
         )
 
-        optional_fields = ('host_filter', 'insights_credential', 'kind', 'variables')
+        optional_fields = ('host_filter', 'kind', 'variables')
 
         update_payload(payload, optional_fields, kwargs)
 
         if 'variables' in payload and isinstance(payload.variables, dict):
             payload.variables = json.dumps(payload.variables)
-        if 'insights_credential' in payload and isinstance(payload.insights_credential, Credential):
-            payload.insights_credential = payload.insights_credential.id
 
         return payload
 
@@ -98,6 +96,20 @@ class Inventory(HasCopy, HasCreate, HasInstanceGroups, HasVariables, base.Base):
                 return True
 
         poll_until(_wait, interval=1, timeout=60)
+
+    def silent_delete(self):
+        try:
+            if not config.prevent_teardown:
+                r = self.delete()
+                self.wait_until_deleted()
+                return r
+        except (exc.NoContent, exc.NotFound, exc.Forbidden):
+            pass
+        except (exc.BadRequest, exc.Conflict) as e:
+            if 'Resource is being used' in e.msg:
+                pass
+            else:
+                raise e
 
     def update_inventory_sources(self, wait=False):
         response = self.related.update_inventory_sources.post()
@@ -237,7 +249,7 @@ class Host(HasCreate, HasVariables, base.Base):
         variables = kwargs.get('variables', not_provided)
 
         if variables is None:
-            variables = dict(ansible_host='127.0.0.1', ansible_connection='local')
+            variables = dict(ansible_host='localhost', ansible_connection='local', ansible_python_interpreter='{{ ansible_playbook_python }}')
 
         if variables != not_provided:
             if isinstance(variables, dict):

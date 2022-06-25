@@ -10,7 +10,7 @@ from django.urls import reverse
 from django.http import HttpResponse
 from django.views.generic import View
 from django.views.generic.base import RedirectView
-from django.utils.encoding import smart_text
+from django.utils.encoding import smart_str
 from awx.api.serializers import UserSerializer
 from rest_framework.renderers import JSONRenderer
 from django.conf import settings
@@ -25,7 +25,7 @@ class BaseRedirectView(RedirectView):
     def get_redirect_url(self, *args, **kwargs):
         last_path = self.request.COOKIES.get('lastPath', '')
         last_path = urllib.parse.quote(urllib.parse.unquote(last_path).strip('"'))
-        url = reverse('ui_next:index')
+        url = reverse('ui:index')
         if last_path:
             return '%s#%s' % (url, last_path)
         else:
@@ -40,12 +40,13 @@ class CompleteView(BaseRedirectView):
     def dispatch(self, request, *args, **kwargs):
         response = super(CompleteView, self).dispatch(request, *args, **kwargs)
         if self.request.user and self.request.user.is_authenticated:
-            logger.info(smart_text(u"User {} logged in".format(self.request.user.username)))
+            logger.info(smart_str(u"User {} logged in".format(self.request.user.username)))
             response.set_cookie('userLoggedIn', 'true')
             current_user = UserSerializer(self.request.user)
-            current_user = smart_text(JSONRenderer().render(current_user.data))
+            current_user = smart_str(JSONRenderer().render(current_user.data))
             current_user = urllib.parse.quote('%s' % current_user, '')
             response.set_cookie('current_user', current_user, secure=settings.SESSION_COOKIE_SECURE or None)
+            response.setdefault('X-API-Session-Cookie-Name', getattr(settings, 'SESSION_COOKIE_NAME', 'awx_sessionid'))
         return response
 
 

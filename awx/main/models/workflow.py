@@ -11,7 +11,7 @@ from urllib.parse import urljoin
 # Django
 from django.db import connection, models
 from django.conf import settings
-from django.utils.translation import ugettext_lazy as _
+from django.utils.translation import gettext_lazy as _
 from django.core.exceptions import ObjectDoesNotExist
 
 # from django import settings as tower_settings
@@ -28,7 +28,7 @@ from awx.main.models import prevent_search, accepts_json, UnifiedJobTemplate, Un
 from awx.main.models.notifications import NotificationTemplate, JobNotificationMixin
 from awx.main.models.base import CreatedModifiedModel, VarsDictProperty
 from awx.main.models.rbac import ROLE_SINGLETON_SYSTEM_ADMINISTRATOR, ROLE_SINGLETON_SYSTEM_AUDITOR
-from awx.main.fields import ImplicitRoleField, AskForField
+from awx.main.fields import ImplicitRoleField, AskForField, JSONBlob
 from awx.main.models.mixins import (
     ResourceMixin,
     SurveyJobTemplateMixin,
@@ -40,7 +40,6 @@ from awx.main.models.mixins import (
 from awx.main.models.jobs import LaunchTimeConfigBase, LaunchTimeConfig, JobTemplate
 from awx.main.models.credential import Credential
 from awx.main.redact import REPLACE_STR
-from awx.main.fields import JSONField
 from awx.main.utils import schedule_task_manager
 
 
@@ -232,9 +231,9 @@ class WorkflowJobNode(WorkflowNodeBase):
         default=None,
         on_delete=models.CASCADE,
     )
-    ancestor_artifacts = JSONField(
-        blank=True,
+    ancestor_artifacts = JSONBlob(
         default=dict,
+        blank=True,
         editable=False,
     )
     do_not_run = models.BooleanField(
@@ -257,6 +256,10 @@ class WorkflowJobNode(WorkflowNodeBase):
             models.Index(fields=["identifier", "workflow_job"]),
             models.Index(fields=['identifier']),
         ]
+
+    @property
+    def event_processing_finished(self):
+        return True
 
     def get_absolute_url(self, request=None):
         return reverse('api:workflow_job_node_detail', kwargs={'pk': self.pk}, request=request)
@@ -315,8 +318,8 @@ class WorkflowJobNode(WorkflowNodeBase):
         for parent_node in self.get_parent_nodes():
             is_root_node = False
             aa_dict.update(parent_node.ancestor_artifacts)
-            if parent_node.job and hasattr(parent_node.job, 'artifacts'):
-                aa_dict.update(parent_node.job.artifacts)
+            if parent_node.job:
+                aa_dict.update(parent_node.job.get_effective_artifacts(parents_set=set([self.workflow_job_id])))
         if aa_dict and not is_root_node:
             self.ancestor_artifacts = aa_dict
             self.save(update_fields=['ancestor_artifacts'])
@@ -591,6 +594,9 @@ class WorkflowJobTemplate(UnifiedJobTemplate, WorkflowJobOptions, SurveyJobTempl
     def _get_related_jobs(self):
         return WorkflowJob.objects.filter(workflow_job_template=self)
 
+    def resolve_execution_environment(self):
+        return None  # EEs are not meaningful for workflows
+
 
 class WorkflowJob(UnifiedJob, WorkflowJobOptions, SurveyJobMixin, JobNotificationMixin, WebhookMixin):
     class Meta:
@@ -619,6 +625,10 @@ class WorkflowJob(UnifiedJob, WorkflowJobOptions, SurveyJobMixin, JobNotificatio
     @property
     def workflow_nodes(self):
         return self.workflow_job_nodes
+
+    @property
+    def event_processing_finished(self):
+        return True
 
     def _get_parent_field_name(self):
         if self.job_template_id:
@@ -671,6 +681,27 @@ class WorkflowJob(UnifiedJob, WorkflowJobOptions, SurveyJobMixin, JobNotificatio
             ancestors.append(wj.workflow_job_template)
             wj = wj.get_workflow_job()
         return ancestors
+
+    def get_effective_artifacts(self, **kwargs):
+        """
+        For downstream jobs of a workflow nested inside of a workflow,
+        we send aggregated artifacts from the nodes inside of the nested workflow
+        """
+        artifacts = {}
+        job_queryset = (
+            UnifiedJob.objects.filter(unified_job_node__workflow_job=self)
+            .defer('job_args', 'job_cwd', 'start_args', 'result_traceback')
+            .order_by('finished', 'id')
+            .filter(status__in=['successful', 'failed'])
+            .iterator()
+        )
+        parents_set = kwargs.get('parents_set', set())
+        new_parents_set = parents_set | {self.id}
+        for job in job_queryset:
+            if job.id in parents_set:
+                continue
+            artifacts.update(job.get_effective_artifacts(parents_set=new_parents_set))
+        return artifacts
 
     def get_notification_templates(self):
         return self.workflow_job_template.notification_templates
@@ -802,7 +833,7 @@ class WorkflowApproval(UnifiedJob, JobNotificationMixin):
         return True
 
     def send_approval_notification(self, approval_status):
-        from awx.main.tasks import send_notifications  # avoid circular import
+        from awx.main.tasks.system import send_notifications  # avoid circular import
 
         if self.workflow_job_template is None:
             return

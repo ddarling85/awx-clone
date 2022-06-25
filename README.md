@@ -1,7 +1,12 @@
+<<<<<<< HEAD
 # awx-clone
 Clone of the offical AWX repo - https://github.com/ansible/awx
 [![Gated by Zuul](https://zuul-ci.org/gated.svg)](https://ansible.softwarefactory-project.io/zuul/status) [![Code of Conduct](https://img.shields.io/badge/code%20of%20conduct-Ansible-yellow.svg)](https://docs.ansible.com/ansible/latest/community/code_of_conduct.html) [![Apache v2 License](https://img.shields.io/badge/license-Apache%202.0-brightgreen.svg)](https://github.com/ansible/awx/blob/devel/LICENSE.md) [![AWX Mailing List](https://img.shields.io/badge/mailing%20list-AWX-orange.svg)](https://groups.google.com/g/awx-project)
 [![IRC Chat](https://img.shields.io/badge/IRC-%23ansible--awx-blueviolet.svg)](irc.libera.chat - #ansible-awx)
+=======
+[![CI](https://github.com/ansible/awx/actions/workflows/ci.yml/badge.svg?branch=devel)](https://github.com/ansible/awx/actions/workflows/ci.yml) [![Code of Conduct](https://img.shields.io/badge/code%20of%20conduct-Ansible-yellow.svg)](https://docs.ansible.com/ansible/latest/community/code_of_conduct.html) [![Apache v2 License](https://img.shields.io/badge/license-Apache%202.0-brightgreen.svg)](https://github.com/ansible/awx/blob/devel/LICENSE.md) [![AWX Mailing List](https://img.shields.io/badge/mailing%20list-AWX-orange.svg)](https://groups.google.com/g/awx-project)
+[![IRC Chat - #ansible-awx](https://img.shields.io/badge/IRC-%23ansible--awx-blueviolet.svg)](https://libera.chat)
+>>>>>>> c2715d7c29f6756bb4ca143d129e0fcd20287f61
 
 <img src="https://raw.githubusercontent.com/ansible/awx-logos/master/awx/ui/client/assets/logo-login.svg?sanitize=true" width=200 alt="AWX" />
 
@@ -22,7 +27,7 @@ Contributing
 - All code submissions are made through pull requests against the `devel` branch.
 - All contributors must use git commit --signoff for any commit to be merged and agree that usage of --signoff constitutes agreement with the terms of [DCO 1.1](./DCO_1_1.md)
 - Take care to make sure no merge commits are in the submission, and use `git rebase` vs. `git merge` for this reason.
-- If submitting a large code change, it's a good idea to join the `#ansible-awx` channel on webchat.freenode.net and talk about what you would like to do or add first. This not only helps everyone know what's going on, but it also helps save time and effort if the community decides some changes are needed.
+- If submitting a large code change, it's a good idea to join the `#ansible-awx` channel on web.libera.chat and talk about what you would like to do or add first. This not only helps everyone know what's going on, but it also helps save time and effort if the community decides some changes are needed.
 
 Reporting Issues
 ----------------
@@ -39,7 +44,7 @@ Get Involved
 
 We welcome your feedback and ideas. Here's how to reach us with feedback and questions:
 
-- Join the `#ansible-awx` channel on webchat.freenode.net
+- Join the `#ansible-awx` channel on irc.libera.chat
 - Join the [mailing list](https://groups.google.com/forum/#!forum/awx-project) 
 <<<<<<< HEAD
 

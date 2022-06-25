@@ -1,4 +1,5 @@
 import glob
+import json
 import os
 
 from django.conf import settings
@@ -7,6 +8,8 @@ try:
     from pip._internal.req import parse_requirements
 except ImportError:
     from pip.req import parse_requirements
+
+from pip._internal.req.constructors import parse_req_from_line
 
 
 def test_python_and_js_licenses():
@@ -47,20 +50,51 @@ def test_python_and_js_licenses():
 
     def read_api_requirements(path):
         ret = {}
+        skip_pbr_license_check = False
         for req_file in ['requirements.txt', 'requirements_git.txt']:
             fname = '%s/%s' % (path, req_file)
 
             for reqt in parse_requirements(fname, session=''):
-                name = reqt.name
-                version = str(reqt.specifier)
+                parsed_requirement = parse_req_from_line(reqt.requirement, None)
+                name = parsed_requirement.requirement.name
+                version = str(parsed_requirement.requirement.specifier)
                 if version.startswith('=='):
                     version = version[2:]
-                if reqt.link:
-                    (name, version) = reqt.link.filename.split('@', 1)
+                if parsed_requirement.link:
+                    if str(parsed_requirement.link).startswith(('http://', 'https://')):
+                        (name, version) = str(parsed_requirement.requirement).split('==', 1)
+                    else:
+                        (name, version) = parsed_requirement.link.filename.split('@', 1)
                     if name.endswith('.git'):
                         name = name[:-4]
+                    if name == 'receptor':
+                        name = 'receptorctl'
+                    if name == 'ansible-runner':
+                        skip_pbr_license_check = True
                 ret[name] = {'name': name, 'version': version}
+        if 'pbr' in ret and skip_pbr_license_check:
+            del ret['pbr']
         return ret
+
+    def read_ui_requirements(path):
+        def json_deps(jsondata):
+            ret = {}
+            deps = jsondata.get('dependencies', {})
+            for key in deps.keys():
+                key = key.lower()
+                devonly = deps[key].get('dev', False)
+                if not devonly:
+                    if key not in ret.keys():
+                        depname = key.replace('/', '-')
+                        if depname[0] == '@':
+                            depname = depname[1:]
+                        ret[depname] = {'name': depname, 'version': deps[key]['version']}
+                        ret.update(json_deps(deps[key]))
+            return ret
+
+        with open('%s/package-lock.json' % path) as f:
+            jsondata = json.load(f)
+            return json_deps(jsondata)
 
     def remediate_licenses_and_requirements(licenses, requirements):
         errors = []
@@ -88,9 +122,12 @@ def test_python_and_js_licenses():
 
     base_dir = settings.BASE_DIR
     api_licenses = index_licenses('%s/../docs/licenses' % base_dir)
+    ui_licenses = index_licenses('%s/../docs/licenses/ui' % base_dir)
     api_requirements = read_api_requirements('%s/../requirements' % base_dir)
+    ui_requirements = read_ui_requirements('%s/ui' % base_dir)
 
     errors = []
+    errors += remediate_licenses_and_requirements(ui_licenses, ui_requirements)
     errors += remediate_licenses_and_requirements(api_licenses, api_requirements)
     if errors:
         raise Exception('Included licenses not consistent with requirements:\n%s' % '\n'.join(errors))

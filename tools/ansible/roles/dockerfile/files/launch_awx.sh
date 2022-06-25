@@ -13,6 +13,15 @@ if [ -n "${AWX_KUBE_DEVEL}" ]; then
     export SDB_NOTIFY_HOST=$MY_POD_IP
 fi
 
-awx-manage collectstatic --noinput --clear
+set -e
 
-supervisord -c /etc/supervisord.conf
+wait-for-migrations
+
+# This file will be re-written when the dispatcher calls reconfigure_rsyslog(),
+# but it needs to exist when supervisor initially starts rsyslog to prevent the
+# container from crashing. This was the most minimal config I could get working.
+cat << EOF > /var/lib/awx/rsyslog/rsyslog.conf
+action(type="omfile" file="/dev/null")
+EOF
+
+exec supervisord -c /etc/supervisord.conf

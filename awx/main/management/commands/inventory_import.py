@@ -10,13 +10,13 @@ import subprocess
 import sys
 import time
 import traceback
-import shutil
+from collections import OrderedDict
 
 # Django
 from django.conf import settings
 from django.core.management.base import BaseCommand, CommandError
 from django.db import connection, transaction
-from django.utils.encoding import smart_text
+from django.utils.encoding import smart_str
 
 # DRF error class to distinguish license exceptions
 from rest_framework.exceptions import PermissionDenied
@@ -37,20 +37,20 @@ from awx.main.utils.pglock import advisory_lock
 logger = logging.getLogger('awx.main.commands.inventory_import')
 
 LICENSE_EXPIRED_MESSAGE = '''\
-License expired.
-See http://www.ansible.com/renew for license extension information.'''
+Subscription expired.
+Contact us (https://www.redhat.com/contact) for subscription extension information.'''
 
 LICENSE_NON_EXISTANT_MESSAGE = '''\
-No license.
-See http://www.ansible.com/renew for license information.'''
+No subscription.
+Contact us (https://www.redhat.com/contact) for subscription information.'''
 
 LICENSE_MESSAGE = '''\
-Number of licensed instances exceeded, would bring available instances to %(new_count)d, system is licensed for %(instance_count)d.
-See http://www.ansible.com/renew for license extension information.'''
+%(new_count)d instances have been automated, system is subscribed for %(instance_count)d.
+Contact us (https://www.redhat.com/contact) for upgrade information.'''
 
 DEMO_LICENSE_MESSAGE = '''\
-Demo mode free license count exceeded, would bring available instances to %(new_count)d, demo mode allows %(instance_count)d.
-See http://www.ansible.com/renew for licensing information.'''
+Demo mode free subscription count exceeded. Current automated instances are %(new_count)d, demo mode allows %(instance_count)d.
+Contact us (https://www.redhat.com/contact) for subscription information.'''
 
 
 def functioning_dir(path):
@@ -67,31 +67,33 @@ class AnsibleInventoryLoader(object):
         /usr/bin/ansible/ansible-inventory -i hosts --list
     """
 
-    def __init__(self, source, venv_path=None, verbosity=0):
+    def __init__(self, source, verbosity=0):
         self.source = source
         self.verbosity = verbosity
-        if venv_path:
-            self.venv_path = venv_path
-        else:
-            self.venv_path = settings.ANSIBLE_VENV_PATH
-
-    def get_path_to_ansible_inventory(self):
-        venv_exe = os.path.join(self.venv_path, 'bin', 'ansible-inventory')
-        if os.path.exists(venv_exe):
-            return venv_exe
-        elif os.path.exists(os.path.join(self.venv_path, 'bin', 'ansible')):
-            # if bin/ansible exists but bin/ansible-inventory doesn't, it's
-            # probably a really old version of ansible that doesn't support
-            # ansible-inventory
-            raise RuntimeError("{} does not exist (please upgrade to ansible >= 2.4)".format(venv_exe))
-        return shutil.which('ansible-inventory')
 
     def get_base_args(self):
         bargs = ['podman', 'run', '--user=root', '--quiet']
         bargs.extend(['-v', '{0}:{0}:Z'.format(self.source)])
         for key, value in STANDARD_INVENTORY_UPDATE_ENV.items():
             bargs.extend(['-e', '{0}={1}'.format(key, value)])
-        bargs.extend([get_default_execution_environment().image])
+        ee = get_default_execution_environment()
+
+        if settings.IS_K8S:
+            logger.warning('This command is not able to run on kubernetes-based deployment. This action should be done using the API.')
+            sys.exit(1)
+
+        if ee.credential:
+            process = subprocess.run(['podman', 'image', 'exists', ee.image], capture_output=True)
+            if process.returncode != 0:
+                logger.warning(
+                    f'The default execution environment (id={ee.id}, name={ee.name}, image={ee.image}) is not available on this node. '
+                    'The image needs to be available locally before using this command, due to registry authentication. '
+                    'To pull this image, either run a job on this node or manually pull the image.'
+                )
+                sys.exit(1)
+
+        bargs.extend([ee.image])
+
         bargs.extend(['ansible-inventory', '-i', self.source])
         bargs.extend(['--playbook-dir', functioning_dir(self.source)])
         if self.verbosity:
@@ -107,8 +109,8 @@ class AnsibleInventoryLoader(object):
 
         proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         stdout, stderr = proc.communicate()
-        stdout = smart_text(stdout)
-        stderr = smart_text(stderr)
+        stdout = smart_str(stdout)
+        stderr = smart_str(stderr)
 
         if proc.returncode != 0:
             raise RuntimeError('%s failed (rc=%d) with stdout:\n%s\nstderr:\n%s' % ('ansible-inventory', proc.returncode, stdout, stderr))
@@ -126,9 +128,7 @@ class AnsibleInventoryLoader(object):
 
     def load(self):
         base_args = self.get_base_args()
-
         logger.info('Reading Ansible inventory source: %s', self.source)
-
         return self.command_to_json(base_args)
 
 
@@ -143,7 +143,6 @@ class Command(BaseCommand):
     def add_arguments(self, parser):
         parser.add_argument('--inventory-name', dest='inventory_name', type=str, default=None, metavar='n', help='name of inventory to sync')
         parser.add_argument('--inventory-id', dest='inventory_id', type=int, default=None, metavar='i', help='id of inventory to sync')
-        parser.add_argument('--venv', dest='venv', type=str, default=None, help='absolute path to the AWX custom virtualenv to use')
         parser.add_argument('--overwrite', dest='overwrite', action='store_true', default=False, help='overwrite the destination hosts and groups')
         parser.add_argument('--overwrite-vars', dest='overwrite_vars', action='store_true', default=False, help='overwrite (rather than merge) variables')
         parser.add_argument('--keep-vars', dest='keep_vars', action='store_true', default=False, help='DEPRECATED legacy option, has no effect')
@@ -154,7 +153,7 @@ class Command(BaseCommand):
             type=str,
             default=None,
             metavar='v',
-            help='host variable used to ' 'set/clear enabled flag when host is online/offline, may ' 'be specified as "foo.bar" to traverse nested dicts.',
+            help='host variable used to set/clear enabled flag when host is online/offline, may be specified as "foo.bar" to traverse nested dicts.',
         )
         parser.add_argument(
             '--enabled-value',
@@ -162,7 +161,7 @@ class Command(BaseCommand):
             type=str,
             default=None,
             metavar='v',
-            help='value of host variable ' 'specified by --enabled-var that indicates host is ' 'enabled/online.',
+            help='value of host variable specified by --enabled-var that indicates host is enabled/online.',
         )
         parser.add_argument(
             '--group-filter',
@@ -170,7 +169,7 @@ class Command(BaseCommand):
             type=str,
             default=None,
             metavar='regex',
-            help='regular expression ' 'to filter group name(s); only matches are imported.',
+            help='regular expression to filter group name(s); only matches are imported.',
         )
         parser.add_argument(
             '--host-filter',
@@ -178,14 +177,14 @@ class Command(BaseCommand):
             type=str,
             default=None,
             metavar='regex',
-            help='regular expression ' 'to filter host name(s); only matches are imported.',
+            help='regular expression to filter host name(s); only matches are imported.',
         )
         parser.add_argument(
             '--exclude-empty-groups',
             dest='exclude_empty_groups',
             action='store_true',
             default=False,
-            help='when set, ' 'exclude all groups that have no child groups, hosts, or ' 'variables.',
+            help='when set, exclude all groups that have no child groups, hosts, or variables.',
         )
         parser.add_argument(
             '--instance-id-var',
@@ -193,7 +192,7 @@ class Command(BaseCommand):
             type=str,
             default=None,
             metavar='v',
-            help='host variable that ' 'specifies the unique, immutable instance ID, may be ' 'specified as "foo.bar" to traverse nested dicts.',
+            help='host variable that specifies the unique, immutable instance ID, may be specified as "foo.bar" to traverse nested dicts.',
         )
 
     def set_logging_level(self, verbosity):
@@ -225,7 +224,7 @@ class Command(BaseCommand):
                     from_dict = instance_id
                 if instance_id:
                     break
-        return smart_text(instance_id)
+        return smart_str(instance_id)
 
     def _get_enabled(self, from_dict, default=None):
         """
@@ -286,12 +285,13 @@ class Command(BaseCommand):
         self.db_instance_id_map = {}
         if self.instance_id_var:
             host_qs = self.inventory_source.hosts.all()
-            host_qs = host_qs.filter(instance_id='', variables__contains=self.instance_id_var.split('.')[0])
-            for host in host_qs:
-                instance_id = self._get_instance_id(host.variables_dict)
-                if not instance_id:
-                    continue
-                self.db_instance_id_map[instance_id] = host.pk
+            for instance_id_part in reversed(self.instance_id_var.split(',')):
+                host_qs = host_qs.filter(instance_id='', variables__contains=instance_id_part.split('.')[0])
+                for host in host_qs:
+                    instance_id = self._get_instance_id(host.variables_dict)
+                    if not instance_id:
+                        continue
+                    self.db_instance_id_map[instance_id] = host.pk
 
     def _build_mem_instance_id_map(self):
         """
@@ -317,7 +317,7 @@ class Command(BaseCommand):
             self._cached_host_pk_set = frozenset(self.inventory_source.hosts.values_list('pk', flat=True))
         return self._cached_host_pk_set
 
-    def _delete_hosts(self):
+    def _delete_hosts(self, pk_mem_host_map):
         """
         For each host in the database that is NOT in the local list, delete
         it. When importing from a cloud inventory source attached to a
@@ -326,25 +326,10 @@ class Command(BaseCommand):
         """
         if settings.SQL_DEBUG:
             queries_before = len(connection.queries)
+
         hosts_qs = self.inventory_source.hosts
-        # Build list of all host pks, remove all that should not be deleted.
-        del_host_pks = set(self._existing_host_pks())  # makes mutable copy
-        if self.instance_id_var:
-            all_instance_ids = list(self.mem_instance_id_map.keys())
-            instance_ids = []
-            for offset in range(0, len(all_instance_ids), self._batch_size):
-                instance_ids = all_instance_ids[offset : (offset + self._batch_size)]
-                for host_pk in hosts_qs.filter(instance_id__in=instance_ids).values_list('pk', flat=True):
-                    del_host_pks.discard(host_pk)
-            for host_pk in set([v for k, v in self.db_instance_id_map.items() if k in instance_ids]):
-                del_host_pks.discard(host_pk)
-            all_host_names = list(set(self.mem_instance_id_map.values()) - set(self.all_group.all_hosts.keys()))
-        else:
-            all_host_names = list(self.all_group.all_hosts.keys())
-        for offset in range(0, len(all_host_names), self._batch_size):
-            host_names = all_host_names[offset : (offset + self._batch_size)]
-            for host_pk in hosts_qs.filter(name__in=host_names).values_list('pk', flat=True):
-                del_host_pks.discard(host_pk)
+        del_host_pks = hosts_qs.exclude(pk__in=pk_mem_host_map.keys()).values_list('pk', flat=True)
+
         # Now delete all remaining hosts in batches.
         all_del_pks = sorted(list(del_host_pks))
         for offset in range(0, len(all_del_pks), self._batch_size):
@@ -585,7 +570,63 @@ class Command(BaseCommand):
                 logger.debug('Host "%s" is now disabled', mem_host.name)
         self._batch_add_m2m(self.inventory_source.hosts, db_host)
 
-    def _create_update_hosts(self):
+    def _build_pk_mem_host_map(self):
+        """
+        Creates and returns a data structure that maps DB hosts to in-memory host that
+        they correspond to - meaning that those hosts will be updated to in-memory host values
+        """
+        mem_host_pk_map = OrderedDict()  # keys are mem_host name, values are matching DB host pk
+        host_pks_updated = set()  # same as items of mem_host_pk_map but used for efficiency
+        mem_host_pk_map_by_id = {}  # incomplete mapping by new instance_id to be sorted and pushed to mem_host_pk_map
+        mem_host_instance_id_map = {}
+        for k, v in self.all_group.all_hosts.items():
+            instance_id = self._get_instance_id(v.variables)
+            if instance_id in self.db_instance_id_map:
+                mem_host_pk_map_by_id[self.db_instance_id_map[instance_id]] = v
+            elif instance_id:
+                mem_host_instance_id_map[instance_id] = v
+
+        # Update all existing hosts where we know the PK based on instance_id.
+        all_host_pks = sorted(mem_host_pk_map_by_id.keys())
+        for offset in range(0, len(all_host_pks), self._batch_size):
+            host_pks = all_host_pks[offset : (offset + self._batch_size)]
+            for db_host in self.inventory.hosts.only('pk').filter(pk__in=host_pks):
+                if db_host.pk in host_pks_updated:
+                    continue
+                mem_host = mem_host_pk_map_by_id[db_host.pk]
+                mem_host_pk_map[mem_host.name] = db_host.pk
+                host_pks_updated.add(db_host.pk)
+
+        # Update all existing hosts where we know the DB (the prior) instance_id.
+        all_instance_ids = sorted(mem_host_instance_id_map.keys())
+        for offset in range(0, len(all_instance_ids), self._batch_size):
+            instance_ids = all_instance_ids[offset : (offset + self._batch_size)]
+            for db_host in self.inventory.hosts.only('pk', 'instance_id').filter(instance_id__in=instance_ids):
+                if db_host.pk in host_pks_updated:
+                    continue
+                mem_host = mem_host_instance_id_map[db_host.instance_id]
+                mem_host_pk_map[mem_host.name] = db_host.pk
+                host_pks_updated.add(db_host.pk)
+
+        # Update all existing hosts by name.
+        all_host_names = sorted(self.all_group.all_hosts.keys())
+        for offset in range(0, len(all_host_names), self._batch_size):
+            host_names = all_host_names[offset : (offset + self._batch_size)]
+            for db_host in self.inventory.hosts.only('pk', 'name').filter(name__in=host_names):
+                if db_host.pk in host_pks_updated:
+                    continue
+                mem_host = self.all_group.all_hosts[db_host.name]
+                mem_host_pk_map[mem_host.name] = db_host.pk
+                host_pks_updated.add(db_host.pk)
+
+        # Rotate the dictionary so that lookups are done by the host pk
+        pk_mem_host_map = OrderedDict()
+        for name, host_pk in mem_host_pk_map.items():
+            pk_mem_host_map[host_pk] = name
+
+        return pk_mem_host_map  # keys are DB host pk, keys are matching mem host name
+
+    def _create_update_hosts(self, pk_mem_host_map):
         """
         For each host in the local list, create it if it doesn't exist in the
         database.  Otherwise, update/replace database variables from the
@@ -594,57 +635,22 @@ class Command(BaseCommand):
         """
         if settings.SQL_DEBUG:
             queries_before = len(connection.queries)
-        host_pks_updated = set()
-        mem_host_pk_map = {}
-        mem_host_instance_id_map = {}
-        mem_host_name_map = {}
-        mem_host_names_to_update = set(self.all_group.all_hosts.keys())
-        for k, v in self.all_group.all_hosts.items():
-            mem_host_name_map[k] = v
-            instance_id = self._get_instance_id(v.variables)
-            if instance_id in self.db_instance_id_map:
-                mem_host_pk_map[self.db_instance_id_map[instance_id]] = v
-            elif instance_id:
-                mem_host_instance_id_map[instance_id] = v
 
-        # Update all existing hosts where we know the PK based on instance_id.
-        all_host_pks = sorted(mem_host_pk_map.keys())
+        updated_mem_host_names = set()
+
+        all_host_pks = sorted(pk_mem_host_map.keys())
         for offset in range(0, len(all_host_pks), self._batch_size):
             host_pks = all_host_pks[offset : (offset + self._batch_size)]
             for db_host in self.inventory.hosts.filter(pk__in=host_pks):
-                if db_host.pk in host_pks_updated:
-                    continue
-                mem_host = mem_host_pk_map[db_host.pk]
+                mem_host_name = pk_mem_host_map[db_host.pk]
+                mem_host = self.all_group.all_hosts[mem_host_name]
                 self._update_db_host_from_mem_host(db_host, mem_host)
-                host_pks_updated.add(db_host.pk)
-                mem_host_names_to_update.discard(mem_host.name)
+                updated_mem_host_names.add(mem_host.name)
 
-        # Update all existing hosts where we know the instance_id.
-        all_instance_ids = sorted(mem_host_instance_id_map.keys())
-        for offset in range(0, len(all_instance_ids), self._batch_size):
-            instance_ids = all_instance_ids[offset : (offset + self._batch_size)]
-            for db_host in self.inventory.hosts.filter(instance_id__in=instance_ids):
-                if db_host.pk in host_pks_updated:
-                    continue
-                mem_host = mem_host_instance_id_map[db_host.instance_id]
-                self._update_db_host_from_mem_host(db_host, mem_host)
-                host_pks_updated.add(db_host.pk)
-                mem_host_names_to_update.discard(mem_host.name)
-
-        # Update all existing hosts by name.
-        all_host_names = sorted(mem_host_name_map.keys())
-        for offset in range(0, len(all_host_names), self._batch_size):
-            host_names = all_host_names[offset : (offset + self._batch_size)]
-            for db_host in self.inventory.hosts.filter(name__in=host_names):
-                if db_host.pk in host_pks_updated:
-                    continue
-                mem_host = mem_host_name_map[db_host.name]
-                self._update_db_host_from_mem_host(db_host, mem_host)
-                host_pks_updated.add(db_host.pk)
-                mem_host_names_to_update.discard(mem_host.name)
+        mem_host_names_to_create = set(self.all_group.all_hosts.keys()) - updated_mem_host_names
 
         # Create any new hosts.
-        for mem_host_name in sorted(mem_host_names_to_update):
+        for mem_host_name in sorted(mem_host_names_to_create):
             mem_host = self.all_group.all_hosts[mem_host_name]
             import_vars = mem_host.variables
             host_desc = import_vars.pop('_awx_description', 'imported')
@@ -743,13 +749,14 @@ class Command(BaseCommand):
         self._batch_size = 500
         self._build_db_instance_id_map()
         self._build_mem_instance_id_map()
+        pk_mem_host_map = self._build_pk_mem_host_map()
         if self.overwrite:
-            self._delete_hosts()
+            self._delete_hosts(pk_mem_host_map)
             self._delete_groups()
             self._delete_group_children_and_hosts()
         self._update_inventory()
         self._create_update_groups()
-        self._create_update_hosts()
+        self._create_update_hosts(pk_mem_host_map)
         self._create_update_group_children()
         self._create_update_group_hosts()
 
@@ -773,29 +780,22 @@ class Command(BaseCommand):
         instance_count = license_info.get('instance_count', 0)
         free_instances = license_info.get('free_instances', 0)
         time_remaining = license_info.get('time_remaining', 0)
+        automated_count = license_info.get('automated_instances', 0)
         hard_error = license_info.get('trial', False) is True or license_info['instance_count'] == 10
-        new_count = Host.objects.active_count()
         if time_remaining <= 0:
             if hard_error:
                 logger.error(LICENSE_EXPIRED_MESSAGE)
-                raise PermissionDenied("License has expired!")
+                raise PermissionDenied("Subscription has expired!")
             else:
                 logger.warning(LICENSE_EXPIRED_MESSAGE)
-        # special check for tower-type inventory sources
-        # but only if running the plugin
-        TOWER_SOURCE_FILES = ['tower.yml', 'tower.yaml']
-        if self.inventory_source.source == 'tower' and any(f in self.inventory_source.source_path for f in TOWER_SOURCE_FILES):
-            # only if this is the 2nd call to license check, we cannot compare before running plugin
-            if hasattr(self, 'all_group'):
-                self.remote_tower_license_compare(local_license_type)
         if free_instances < 0:
             d = {
-                'new_count': new_count,
+                'new_count': automated_count,
                 'instance_count': instance_count,
             }
             if hard_error:
                 logger.error(LICENSE_MESSAGE % d)
-                raise PermissionDenied('License count exceeded!')
+                raise PermissionDenied('Subscription count exceeded!')
             else:
                 logger.warning(LICENSE_MESSAGE % d)
 
@@ -836,7 +836,6 @@ class Command(BaseCommand):
                 raise CommandError('--source is required')
             verbosity = int(options.get('verbosity', 1))
             self.set_logging_level(verbosity)
-            venv_path = options.get('venv', None)
 
             # Load inventory object based on name or ID.
             if inventory_id:
@@ -866,7 +865,7 @@ class Command(BaseCommand):
                     _eager_fields=dict(job_args=json.dumps(sys.argv), job_env=dict(os.environ.items()), job_cwd=os.getcwd())
                 )
 
-            data = AnsibleInventoryLoader(source=source, venv_path=venv_path, verbosity=verbosity).load()
+            data = AnsibleInventoryLoader(source=source, verbosity=verbosity).load()
 
             logger.debug('Finished loading from source: %s', source)
 
@@ -1033,4 +1032,4 @@ class Command(BaseCommand):
             if settings.SQL_DEBUG:
                 queries_this_import = connection.queries[queries_before:]
                 sqltime = sum(float(x['time']) for x in queries_this_import)
-                logger.warning('Inventory import required %d queries ' 'taking %0.3fs', len(queries_this_import), sqltime)
+                logger.warning('Inventory import required %d queries taking %0.3fs', len(queries_this_import), sqltime)

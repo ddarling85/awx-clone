@@ -13,7 +13,7 @@ from socket import SHUT_RDWR
 from django.db import connection
 from django.conf import settings
 from django.http import Http404
-from django.utils.translation import ugettext_lazy as _
+from django.utils.translation import gettext_lazy as _
 
 # Django REST Framework
 from rest_framework.exceptions import PermissionDenied
@@ -23,10 +23,10 @@ from rest_framework import status
 
 # AWX
 from awx.api.generics import APIView, GenericAPIView, ListAPIView, RetrieveUpdateDestroyAPIView
-from awx.api.permissions import IsSuperUser
+from awx.api.permissions import IsSystemAdminOrAuditor
 from awx.api.versioning import reverse
 from awx.main.utils import camelcase_to_underscore
-from awx.main.tasks import handle_setting_changes
+from awx.main.tasks.system import handle_setting_changes
 from awx.conf.models import Setting
 from awx.conf.serializers import SettingCategorySerializer, SettingSingletonSerializer
 from awx.conf import settings_registry
@@ -150,7 +150,7 @@ class SettingLoggingTest(GenericAPIView):
     name = _('Logging Connectivity Test')
     model = Setting
     serializer_class = SettingSingletonSerializer
-    permission_classes = (IsSuperUser,)
+    permission_classes = (IsSystemAdminOrAuditor,)
     filter_backends = []
 
     def post(self, request, *args, **kwargs):

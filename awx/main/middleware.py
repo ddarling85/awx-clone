@@ -14,7 +14,7 @@ from django.db import connection
 from django.shortcuts import redirect
 from django.apps import apps
 from django.utils.deprecation import MiddlewareMixin
-from django.utils.translation import ugettext_lazy as _
+from django.utils.translation import gettext_lazy as _
 from django.urls import reverse, resolve
 
 from awx.main.utils.named_url_graph import generate_graph, GraphNode
@@ -24,6 +24,17 @@ from awx.main.utils.profiling import AWXProfiler
 
 logger = logging.getLogger('awx.main.middleware')
 perf_logger = logging.getLogger('awx.analytics.performance')
+
+
+class SettingsCacheMiddleware(MiddlewareMixin):
+    """
+    Clears the in-memory settings cache at the beginning of a request.
+    We do this so that a script can POST to /api/v2/settings/all/ and then
+    right away GET /api/v2/settings/all/ and see the updated value.
+    """
+
+    def process_request(self, request):
+        settings._awx_conf_memoizedcache.clear()
 
 
 class TimingMiddleware(threading.local, MiddlewareMixin):
@@ -46,7 +57,7 @@ class TimingMiddleware(threading.local, MiddlewareMixin):
         response['X-API-Total-Time'] = '%0.3fs' % total_time
         if settings.AWX_REQUEST_PROFILE:
             response['X-API-Profile-File'] = self.prof.stop()
-        perf_logger.info(
+        perf_logger.debug(
             f'request: {request}, response_time: {response["X-API-Total-Time"]}',
             extra=dict(python_objects=dict(request=request, response=response, X_API_TOTAL_TIME=response["X-API-Total-Time"])),
         )
@@ -103,7 +114,7 @@ def _customize_graph():
 
 
 class URLModificationMiddleware(MiddlewareMixin):
-    def __init__(self, get_response=None):
+    def __init__(self, get_response):
         models = [m for m in apps.get_app_config('main').get_models() if hasattr(m, 'get_absolute_url')]
         generate_graph(models)
         _customize_graph()
@@ -180,11 +191,7 @@ class URLModificationMiddleware(MiddlewareMixin):
         return '/'.join(url_units)
 
     def process_request(self, request):
-        if hasattr(request, 'environ') and 'REQUEST_URI' in request.environ:
-            old_path = urllib.parse.urlsplit(request.environ['REQUEST_URI']).path
-            old_path = old_path[request.path.find(request.path_info) :]
-        else:
-            old_path = request.path_info
+        old_path = request.path_info
         new_path = self._convert_named_url(old_path)
         if request.path_info != new_path:
             request.environ['awx.named_url_rewritten'] = request.path
@@ -197,4 +204,4 @@ class MigrationRanCheckMiddleware(MiddlewareMixin):
         executor = MigrationExecutor(connection)
         plan = executor.migration_plan(executor.loader.graph.leaf_nodes())
         if bool(plan) and getattr(resolve(request.path), 'url_name', '') != 'migrations_notran':
-            return redirect(reverse("ui_next:migrations_notran"))
+            return redirect(reverse("ui:migrations_notran"))

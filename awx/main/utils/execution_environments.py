@@ -6,24 +6,39 @@ from django.conf import settings
 from awx.main.models.execution_environments import ExecutionEnvironment
 
 
+def get_control_plane_execution_environment():
+    return ExecutionEnvironment.objects.filter(organization=None, managed=True).first()
+
+
 def get_default_execution_environment():
     if settings.DEFAULT_EXECUTION_ENVIRONMENT is not None:
         return settings.DEFAULT_EXECUTION_ENVIRONMENT
-    return ExecutionEnvironment.objects.filter(organization=None, managed_by_tower=True).first()
+    installed_default = ExecutionEnvironment.objects.filter(
+        image__in=[ee['image'] for ee in settings.GLOBAL_JOB_EXECUTION_ENVIRONMENTS], organization=None, managed=False
+    ).first()
+    if installed_default:
+        return installed_default
+    return ExecutionEnvironment.objects.filter(organization=None, managed=False).first()
 
 
 def get_default_pod_spec():
+    ee = get_default_execution_environment()
+    if ee is None:
+        raise RuntimeError("Unable to find an execution environment.")
 
     return {
         "apiVersion": "v1",
         "kind": "Pod",
         "metadata": {"namespace": settings.AWX_CONTAINER_GROUP_DEFAULT_NAMESPACE},
         "spec": {
+            "serviceAccountName": "default",
+            "automountServiceAccountToken": False,
             "containers": [
                 {
-                    "image": get_default_execution_environment().image,
+                    "image": ee.image,
                     "name": 'worker',
                     "args": ['ansible-runner', 'worker', '--private-data-dir=/runner'],
+                    "resources": {"requests": {"cpu": "250m", "memory": "100Mi"}},
                 }
             ],
         },
@@ -43,17 +58,9 @@ def to_container_path(path, private_data_dir):
     """
     if not os.path.isabs(private_data_dir):
         raise RuntimeError('The private_data_dir path must be absolute')
-    if private_data_dir != path and Path(private_data_dir) not in Path(path).resolve().parents:
-        raise RuntimeError(f'Cannot convert path {path} unless it is a subdir of {private_data_dir}')
-    return path.replace(private_data_dir, CONTAINER_ROOT, 1)
-
-
-def to_host_path(path, private_data_dir):
-    """Given a path inside of the EE container, this gives the absolute path
-    on the host machine within the private_data_dir
-    """
-    if not os.path.isabs(private_data_dir):
-        raise RuntimeError('The private_data_dir path must be absolute')
-    if CONTAINER_ROOT != path and Path(CONTAINER_ROOT) not in Path(path).resolve().parents:
-        raise RuntimeError(f'Cannot convert path {path} unless it is a subdir of {CONTAINER_ROOT}')
-    return path.replace(CONTAINER_ROOT, private_data_dir, 1)
+    # due to how tempfile.mkstemp works, we are probably passed a resolved path, but unresolved private_data_dir
+    resolved_path = Path(path).resolve()
+    resolved_pdd = Path(private_data_dir).resolve()
+    if resolved_pdd != resolved_path and resolved_pdd not in resolved_path.parents:
+        raise RuntimeError(f'Cannot convert path {resolved_path} unless it is a subdir of {resolved_pdd}')
+    return str(resolved_path).replace(str(resolved_pdd), CONTAINER_ROOT, 1)

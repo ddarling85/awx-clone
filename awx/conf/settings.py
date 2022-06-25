@@ -1,7 +1,6 @@
 # Python
 import contextlib
 import logging
-import sys
 import threading
 import time
 import os
@@ -23,15 +22,15 @@ import cachetools
 # AWX
 from awx.main.utils import encrypt_field, decrypt_field
 from awx.conf import settings_registry
+from awx.conf.fields import PrimaryKeyRelatedField
 from awx.conf.models import Setting
-from awx.conf.migrations._reencrypt import decrypt_field as old_decrypt_field
 
 # FIXME: Gracefully handle when settings are accessed before the database is
 # ready (or during migrations).
 
 logger = logging.getLogger('awx.conf.settings')
 
-SETTING_MEMORY_TTL = 5 if 'callback_receiver' in ' '.join(sys.argv) else 0
+SETTING_MEMORY_TTL = 5
 
 # Store a special value to indicate when a setting is not set in the database.
 SETTING_CACHE_NOTSET = '___notset___'
@@ -81,17 +80,16 @@ def _ctit_db_wrapper(trans_safe=False):
         yield
     except DBError as exc:
         if trans_safe:
-            if 'migrate' not in sys.argv and 'check_migrations' not in sys.argv:
-                level = logger.exception
-                if isinstance(exc, ProgrammingError):
-                    if 'relation' in str(exc) and 'does not exist' in str(exc):
-                        # this generally means we can't fetch Tower configuration
-                        # because the database hasn't actually finished migrating yet;
-                        # this is usually a sign that a service in a container (such as ws_broadcast)
-                        # has come up *before* the database has finished migrating, and
-                        # especially that the conf.settings table doesn't exist yet
-                        level = logger.debug
-                level('Database settings are not available, using defaults.')
+            level = logger.exception
+            if isinstance(exc, ProgrammingError):
+                if 'relation' in str(exc) and 'does not exist' in str(exc):
+                    # this generally means we can't fetch Tower configuration
+                    # because the database hasn't actually finished migrating yet;
+                    # this is usually a sign that a service in a container (such as ws_broadcast)
+                    # has come up *before* the database has finished migrating, and
+                    # especially that the conf.settings table doesn't exist yet
+                    level = logger.debug
+            level('Database settings are not available, using defaults.')
         else:
             logger.exception('Error modifying something related to database settings.')
     finally:
@@ -235,6 +233,8 @@ class SettingsWrapper(UserSettingsHolder):
         self.__dict__['_awx_conf_init_readonly'] = False
         self.__dict__['cache'] = EncryptedCacheProxy(cache, registry)
         self.__dict__['registry'] = registry
+        self.__dict__['_awx_conf_memoizedcache'] = cachetools.TTLCache(maxsize=2048, ttl=SETTING_MEMORY_TTL)
+        self.__dict__['_awx_conf_memoizedcache_lock'] = threading.Lock()
 
         # record the current pid so we compare it post-fork for
         # processes like the dispatcher and callback receiver
@@ -298,13 +298,7 @@ class SettingsWrapper(UserSettingsHolder):
                 continue
             if self.registry.is_setting_encrypted(setting.key):
                 setting_ids[setting.key] = setting.id
-                try:
-                    value = decrypt_field(setting, 'value')
-                except ValueError as e:
-                    # TODO: Remove in Tower 3.3
-                    logger.debug('encountered error decrypting field: %s - attempting fallback to old', e)
-                    value = old_decrypt_field(setting, 'value')
-
+                value = decrypt_field(setting, 'value')
             else:
                 value = setting.value
             settings_to_cache[setting.key] = get_cache_value(value)
@@ -403,12 +397,20 @@ class SettingsWrapper(UserSettingsHolder):
     def SETTINGS_MODULE(self):
         return self._get_default('SETTINGS_MODULE')
 
-    @cachetools.cached(cache=cachetools.TTLCache(maxsize=2048, ttl=SETTING_MEMORY_TTL))
+    @cachetools.cachedmethod(
+        cache=lambda self: self.__dict__['_awx_conf_memoizedcache'],
+        key=lambda *args, **kwargs: SettingsWrapper.hashkey(*args, **kwargs),
+        lock=lambda self: self.__dict__['_awx_conf_memoizedcache_lock'],
+    )
+    def _get_local_with_cache(self, name):
+        """Get value while accepting the in-memory cache if key is available"""
+        with _ctit_db_wrapper(trans_safe=True):
+            return self._get_local(name)
+
     def __getattr__(self, name):
         value = empty
         if name in self.all_supported_settings:
-            with _ctit_db_wrapper(trans_safe=True):
-                value = self._get_local(name)
+            value = self._get_local_with_cache(name)
         if value is not empty:
             return value
         return self._get_default(name)
@@ -420,9 +422,9 @@ class SettingsWrapper(UserSettingsHolder):
             raise ImproperlyConfigured('Setting "{}" is read only.'.format(name))
 
         try:
-            data = field.to_representation(value)
+            data = None if value is None and isinstance(field, PrimaryKeyRelatedField) else field.to_representation(value)
             setting_value = field.run_validation(data)
-            db_value = field.to_representation(setting_value)
+            db_value = None if setting_value is None and isinstance(field, PrimaryKeyRelatedField) else field.to_representation(setting_value)
         except Exception as e:
             logger.exception('Unable to assign value "%r" to setting "%s".', value, name, exc_info=True)
             raise e
@@ -481,6 +483,23 @@ class SettingsWrapper(UserSettingsHolder):
                 set_locally = Setting.objects.filter(key=setting, user__isnull=True).exists()
         set_on_default = getattr(self.default_settings, 'is_overridden', lambda s: False)(setting)
         return set_locally or set_on_default
+
+    @classmethod
+    def hashkey(cls, *args, **kwargs):
+        """
+        Usage of @cachetools.cached has changed to @cachetools.cachedmethod
+        The previous cachetools decorator called the hash function and passed in (self, key).
+        The new cachtools decorator calls the hash function with just (key).
+        Ideally, we would continue to pass self, however, the cachetools decorator interface
+        does not allow us to.
+
+        This hashkey function is to maintain that the key generated looks like
+        ('<SettingsWrapper>', key). The thought is that maybe it is important to namespace
+        our cache to the SettingsWrapper scope in case some other usage of this cache exists.
+        I can not think of how any other system could and would use our private cache, but
+        for safety sake we are ensuring the key schema does not change.
+        """
+        return cachetools.keys.hashkey(f"<{cls.__name__}>", *args, **kwargs)
 
 
 def __getattr_without_cache__(self, name):

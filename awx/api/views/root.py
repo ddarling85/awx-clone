@@ -8,11 +8,11 @@ import operator
 from collections import OrderedDict
 
 from django.conf import settings
-from django.utils.encoding import smart_text
+from django.utils.encoding import smart_str
 from django.utils.decorators import method_decorator
 from django.views.decorators.csrf import ensure_csrf_cookie
 from django.template.loader import render_to_string
-from django.utils.translation import ugettext_lazy as _
+from django.utils.translation import gettext_lazy as _
 
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
@@ -30,6 +30,7 @@ from awx.api.versioning import reverse, drf_reverse
 from awx.main.constants import PRIVILEGE_ESCALATION_METHODS
 from awx.main.models import Project, Organization, Instance, InstanceGroup, JobTemplate
 from awx.main.utils import set_environ
+from awx.main.utils.licensing import get_licenser
 
 logger = logging.getLogger('awx.api.views.root')
 
@@ -106,7 +107,6 @@ class ApiVersionRootView(APIView):
         data['hosts'] = reverse('api:host_list', request=request)
         data['job_templates'] = reverse('api:job_template_list', request=request)
         data['jobs'] = reverse('api:job_list', request=request)
-        data['job_events'] = reverse('api:job_event_list', request=request)
         data['ad_hoc_commands'] = reverse('api:ad_hoc_command_list', request=request)
         data['system_job_templates'] = reverse('api:system_job_template_list', request=request)
         data['system_jobs'] = reverse('api:system_job_list', request=request)
@@ -123,6 +123,7 @@ class ApiVersionRootView(APIView):
         data['workflow_approvals'] = reverse('api:workflow_approval_list', request=request)
         data['workflow_job_template_nodes'] = reverse('api:workflow_job_template_node_list', request=request)
         data['workflow_job_nodes'] = reverse('api:workflow_job_node_list', request=request)
+        data['mesh_visualizer'] = reverse('api:mesh_visualizer_view', request=request)
         return Response(data)
 
 
@@ -149,16 +150,24 @@ class ApiV2PingView(APIView):
         response = {'ha': is_ha_environment(), 'version': get_awx_version(), 'active_node': settings.CLUSTER_HOST_ID, 'install_uuid': settings.INSTALL_UUID}
 
         response['instances'] = []
-        for instance in Instance.objects.all():
+        for instance in Instance.objects.exclude(node_type='hop'):
             response['instances'].append(
-                dict(node=instance.hostname, uuid=instance.uuid, heartbeat=instance.modified, capacity=instance.capacity, version=instance.version)
+                dict(
+                    node=instance.hostname,
+                    node_type=instance.node_type,
+                    uuid=instance.uuid,
+                    heartbeat=instance.last_seen,
+                    capacity=instance.capacity,
+                    version=instance.version,
+                )
             )
-            sorted(response['instances'], key=operator.itemgetter('node'))
+            response['instances'] = sorted(response['instances'], key=operator.itemgetter('node'))
         response['instance_groups'] = []
         for instance_group in InstanceGroup.objects.prefetch_related('instances'):
             response['instance_groups'].append(
                 dict(name=instance_group.name, capacity=instance_group.capacity, instances=[x.hostname for x in instance_group.instances.all()])
             )
+            response['instance_groups'] = sorted(response['instance_groups'], key=lambda x: x['name'].lower())
         return Response(response)
 
 
@@ -174,8 +183,6 @@ class ApiV2SubscriptionView(APIView):
             self.permission_denied(request)  # Raises PermissionDenied exception.
 
     def post(self, request):
-        from awx.main.utils.common import get_licenser
-
         data = request.data.copy()
         if data.get('subscriptions_password') == '$encrypted$':
             data['subscriptions_password'] = settings.SUBSCRIPTIONS_PASSWORD
@@ -198,7 +205,7 @@ class ApiV2SubscriptionView(APIView):
             elif isinstance(exc, (ValueError, OSError)) and exc.args:
                 msg = exc.args[0]
             else:
-                logger.exception(smart_text(u"Invalid subscription submitted."), extra=dict(actor=request.user.username))
+                logger.exception(smart_str(u"Invalid subscription submitted."), extra=dict(actor=request.user.username))
             return Response({"error": msg}, status=status.HTTP_400_BAD_REQUEST)
 
         return Response(validated)
@@ -223,7 +230,6 @@ class ApiV2AttachView(APIView):
         user = getattr(settings, 'SUBSCRIPTIONS_USERNAME', None)
         pw = getattr(settings, 'SUBSCRIPTIONS_PASSWORD', None)
         if pool_id and user and pw:
-            from awx.main.utils.common import get_licenser
 
             data = request.data.copy()
             try:
@@ -240,7 +246,7 @@ class ApiV2AttachView(APIView):
                 elif isinstance(exc, (ValueError, OSError)) and exc.args:
                     msg = exc.args[0]
                 else:
-                    logger.exception(smart_text(u"Invalid subscription submitted."), extra=dict(actor=request.user.username))
+                    logger.exception(smart_str(u"Invalid subscription submitted."), extra=dict(actor=request.user.username))
                 return Response({"error": msg}, status=status.HTTP_400_BAD_REQUEST)
         for sub in validated:
             if sub['pool_id'] == pool_id:
@@ -264,8 +270,6 @@ class ApiV2ConfigView(APIView):
 
     def get(self, request, format=None):
         '''Return various sitewide configuration settings'''
-
-        from awx.main.utils.common import get_licenser
 
         license_data = get_licenser().validate()
 
@@ -302,7 +306,9 @@ class ApiV2ConfigView(APIView):
         ):
             data.update(
                 dict(
-                    project_base_dir=settings.PROJECTS_ROOT, project_local_paths=Project.get_local_path_choices(), custom_virtualenvs=get_custom_venv_choices()
+                    project_base_dir=settings.PROJECTS_ROOT,
+                    project_local_paths=Project.get_local_path_choices(),
+                    custom_virtualenvs=get_custom_venv_choices(),
                 )
             )
         elif JobTemplate.accessible_objects(request.user, 'admin_role').exists():
@@ -316,10 +322,8 @@ class ApiV2ConfigView(APIView):
         try:
             data_actual = json.dumps(request.data)
         except Exception:
-            logger.info(smart_text(u"Invalid JSON submitted for license."), extra=dict(actor=request.user.username))
+            logger.info(smart_str(u"Invalid JSON submitted for license."), extra=dict(actor=request.user.username))
             return Response({"error": _("Invalid JSON")}, status=status.HTTP_400_BAD_REQUEST)
-
-        from awx.main.utils.common import get_licenser
 
         license_data = json.loads(data_actual)
         if 'license_key' in license_data:
@@ -342,7 +346,7 @@ class ApiV2ConfigView(APIView):
             try:
                 license_data_validated = get_licenser().license_from_manifest(license_data)
             except Exception:
-                logger.warning(smart_text(u"Invalid subscription submitted."), extra=dict(actor=request.user.username))
+                logger.warning(smart_str(u"Invalid subscription submitted."), extra=dict(actor=request.user.username))
                 return Response({"error": _("Invalid License")}, status=status.HTTP_400_BAD_REQUEST)
         else:
             license_data_validated = get_licenser().validate()
@@ -353,7 +357,7 @@ class ApiV2ConfigView(APIView):
                 settings.TOWER_URL_BASE = "{}://{}".format(request.scheme, request.get_host())
             return Response(license_data_validated)
 
-        logger.warning(smart_text(u"Invalid subscription submitted."), extra=dict(actor=request.user.username))
+        logger.warning(smart_str(u"Invalid subscription submitted."), extra=dict(actor=request.user.username))
         return Response({"error": _("Invalid subscription")}, status=status.HTTP_400_BAD_REQUEST)
 
     def delete(self, request):

@@ -2,26 +2,26 @@
 # All Rights Reserved.
 
 # Python
+from datetime import timedelta
 import json
 import yaml
 import logging
 import os
+import subprocess
 import re
 import stat
 import urllib.parse
 import threading
 import contextlib
 import tempfile
-import psutil
 from functools import reduce, wraps
-
-from decimal import Decimal
 
 # Django
 from django.core.exceptions import ObjectDoesNotExist, FieldDoesNotExist
 from django.utils.dateparse import parse_datetime
-from django.utils.translation import ugettext_lazy as _
+from django.utils.translation import gettext_lazy as _
 from django.utils.functional import cached_property
+from django.db import connection, transaction, ProgrammingError
 from django.db.models.fields.related import ForeignObjectRel, ManyToManyField
 from django.db.models.fields.related_descriptors import ForwardManyToOneDescriptor, ManyToManyDescriptor
 from django.db.models.query import QuerySet
@@ -33,6 +33,7 @@ from django.core.cache import cache as django_cache
 from rest_framework.exceptions import ParseError
 from django.utils.encoding import smart_str
 from django.utils.text import slugify
+from django.utils.timezone import now
 from django.apps import apps
 
 # AWX
@@ -46,7 +47,6 @@ __all__ = [
     'underscore_to_camelcase',
     'memoize',
     'memoize_delete',
-    'get_licenser',
     'get_awx_http_client_headers',
     'get_awx_version',
     'update_scm_url',
@@ -68,9 +68,6 @@ __all__ = [
     'set_current_apps',
     'extract_ansible_vars',
     'get_search_fields',
-    'get_system_task_capacity',
-    'get_cpu_capacity',
-    'get_mem_capacity',
     'model_to_dict',
     'NullablePromptPseudoField',
     'model_instance_diff',
@@ -87,6 +84,7 @@ __all__ = [
     'create_temporary_fifo',
     'truncate_stdout',
     'deepmerge',
+    'get_event_partition_epoch',
     'cleanup_new_process',
 ]
 
@@ -205,6 +203,13 @@ def memoize_delete(function_name):
     return cache.delete(function_name)
 
 
+@memoize(ttl=3600 * 24)  # in practice, we only need this to load once at process startup time
+def get_event_partition_epoch():
+    from django.db.migrations.recorder import MigrationRecorder
+
+    return MigrationRecorder.Migration.objects.filter(app='main', name='0144_event_partitions').first().applied
+
+
 def get_awx_version():
     """
     Return AWX version as reported by setuptools.
@@ -226,18 +231,6 @@ def get_awx_http_client_headers():
         'User-Agent': '{} {} ({})'.format('AWX' if license == 'open' else 'Red Hat Ansible Automation Platform', get_awx_version(), license),
     }
     return headers
-
-
-def get_licenser(*args, **kwargs):
-    from awx.main.utils.licensing import Licenser, OpenLicense
-
-    try:
-        if os.path.exists('/var/lib/awx/.tower_version'):
-            return Licenser(*args, **kwargs)
-        else:
-            return OpenLicense()
-    except Exception as e:
-        raise ValueError(_('Error importing License: %s') % e)
 
 
 def update_scm_url(scm_type, url, username=True, password=True, check_special_cases=True, scp_format=False):
@@ -352,7 +345,7 @@ def get_allowed_fields(obj, serializer_mapping):
     fields_excluded = ACTIVITY_STREAM_FIELD_EXCLUSIONS.get(model_name, [])
     # see definition of from_db for CredentialType
     # injection logic of any managed types are incompatible with activity stream
-    if model_name == 'credentialtype' and obj.managed_by_tower and obj.namespace:
+    if model_name == 'credentialtype' and obj.managed and obj.namespace:
         fields_excluded.extend(['inputs', 'injectors'])
     if fields_excluded:
         allowed_fields = [f for f in allowed_fields if f not in fields_excluded]
@@ -565,6 +558,20 @@ def get_model_for_type(type_name):
     return apps.get_model(use_app, model_str)
 
 
+def get_capacity_type(uj):
+    '''Used for UnifiedJob.capacity_type property, static method will work for partial objects'''
+    model_name = uj._meta.concrete_model._meta.model_name
+    if model_name in ('job', 'inventoryupdate', 'adhoccommand', 'jobtemplate', 'inventorysource'):
+        return 'execution'
+    elif model_name == 'workflowjob':
+        return None
+    elif model_name.startswith('unified'):
+        raise RuntimeError(f'Capacity type is undefined for {model_name} model')
+    elif model_name in ('projectupdate', 'systemjob', 'project', 'systemjobtemplate'):
+        return 'control'
+    raise RuntimeError(f'Capacity type does not apply to {model_name} model')
+
+
 def prefetch_page_capabilities(model, page, prefetch_list, user):
     """
     Given a `page` list of objects, a nested dictionary of user_capabilities
@@ -685,21 +692,59 @@ def parse_yaml_or_json(vars_str, silent_failure=True):
     return vars_dict
 
 
-def get_cpu_capacity():
-    from django.conf import settings
+def convert_cpu_str_to_decimal_cpu(cpu_str):
+    """Convert a string indicating cpu units to decimal.
 
-    settings_forkcpu = getattr(settings, 'SYSTEM_TASK_FORKS_CPU', None)
-    env_forkcpu = os.getenv('SYSTEM_TASK_FORKS_CPU', None)
+    Useful for dealing with cpu setting that may be expressed in units compatible with
+    kubernetes.
+
+    See https://kubernetes.io/docs/tasks/configure-pod-container/assign-cpu-resource/#cpu-units
+    """
+    cpu = cpu_str
+    millicores = False
+
+    if cpu_str[-1] == 'm':
+        cpu = cpu_str[:-1]
+        millicores = True
+
+    try:
+        cpu = float(cpu)
+    except ValueError:
+        cpu = 1.0
+        millicores = False
+        logger.warning(f"Could not convert SYSTEM_TASK_ABS_CPU {cpu_str} to a decimal number, falling back to default of 1 cpu")
+
+    if millicores:
+        cpu = cpu / 1000
+
+    # Per kubernetes docs, fractional CPU less than .1 are not allowed
+    return max(0.1, round(cpu, 1))
+
+
+def get_corrected_cpu(cpu_count):  # formerlly get_cpu_capacity
+    """Some environments will do a correction to the reported CPU number
+    because the given OpenShift value is a lie
+    """
+    from django.conf import settings
 
     settings_abscpu = getattr(settings, 'SYSTEM_TASK_ABS_CPU', None)
     env_abscpu = os.getenv('SYSTEM_TASK_ABS_CPU', None)
 
     if env_abscpu is not None:
-        return 0, int(env_abscpu)
+        return convert_cpu_str_to_decimal_cpu(env_abscpu)
     elif settings_abscpu is not None:
-        return 0, int(settings_abscpu)
+        return convert_cpu_str_to_decimal_cpu(settings_abscpu)
 
-    cpu = psutil.cpu_count()
+    return cpu_count  # no correction
+
+
+def get_cpu_effective_capacity(cpu_count):
+    from django.conf import settings
+
+    cpu_count = get_corrected_cpu(cpu_count)
+
+    settings_forkcpu = getattr(settings, 'SYSTEM_TASK_FORKS_CPU', None)
+    env_forkcpu = os.getenv('SYSTEM_TASK_FORKS_CPU', None)
 
     if env_forkcpu:
         forkcpu = int(env_forkcpu)
@@ -707,57 +752,96 @@ def get_cpu_capacity():
         forkcpu = int(settings_forkcpu)
     else:
         forkcpu = 4
-    return (cpu, cpu * forkcpu)
+
+    return max(1, int(cpu_count * forkcpu))
 
 
-def get_mem_capacity():
+def convert_mem_str_to_bytes(mem_str):
+    """Convert string with suffix indicating units to memory in bytes (base 2)
+
+    Useful for dealing with memory setting that may be expressed in units compatible with
+    kubernetes.
+
+    See https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/#meaning-of-memory
+    """
+    # If there is no suffix, the memory sourced from the request is in bytes
+    if mem_str.isdigit():
+        return int(mem_str)
+
+    conversions = {
+        'Ei': lambda x: x * 2**60,
+        'E': lambda x: x * 10**18,
+        'Pi': lambda x: x * 2**50,
+        'P': lambda x: x * 10**15,
+        'Ti': lambda x: x * 2**40,
+        'T': lambda x: x * 10**12,
+        'Gi': lambda x: x * 2**30,
+        'G': lambda x: x * 10**9,
+        'Mi': lambda x: x * 2**20,
+        'M': lambda x: x * 10**6,
+        'Ki': lambda x: x * 2**10,
+        'K': lambda x: x * 10**3,
+    }
+    mem = 0
+    mem_unit = None
+    for i, char in enumerate(mem_str):
+        if not char.isdigit():
+            mem_unit = mem_str[i:]
+            mem = int(mem_str[:i])
+            break
+    if not mem_unit or mem_unit not in conversions.keys():
+        error = f"Unsupported value for SYSTEM_TASK_ABS_MEM: {mem_str}, memory must be expressed in bytes or with known suffix: {conversions.keys()}. Falling back to 1 byte"
+        logger.warning(error)
+        return 1
+    return max(1, conversions[mem_unit](mem))
+
+
+def get_corrected_memory(memory):
     from django.conf import settings
-
-    settings_forkmem = getattr(settings, 'SYSTEM_TASK_FORKS_MEM', None)
-    env_forkmem = os.getenv('SYSTEM_TASK_FORKS_MEM', None)
 
     settings_absmem = getattr(settings, 'SYSTEM_TASK_ABS_MEM', None)
     env_absmem = os.getenv('SYSTEM_TASK_ABS_MEM', None)
 
+    # Runner returns memory in bytes
+    # so we convert memory from settings to bytes as well.
     if env_absmem is not None:
-        return 0, int(env_absmem)
+        return convert_mem_str_to_bytes(env_absmem)
     elif settings_absmem is not None:
-        return 0, int(settings_absmem)
+        return convert_mem_str_to_bytes(settings_absmem)
 
-    if env_forkmem:
-        forkmem = int(env_forkmem)
-    elif settings_forkmem:
-        forkmem = int(settings_forkmem)
-    else:
-        forkmem = 100
-
-    mem = psutil.virtual_memory().total
-    return (mem, max(1, ((mem // 1024 // 1024) - 2048) // forkmem))
+    return memory
 
 
-def get_system_task_capacity(scale=Decimal(1.0), cpu_capacity=None, mem_capacity=None):
-    """
-    Measure system memory and use it as a baseline for determining the system's capacity
-    """
+def get_mem_effective_capacity(mem_bytes):
     from django.conf import settings
 
-    settings_forks = getattr(settings, 'SYSTEM_TASK_FORKS_CAPACITY', None)
-    env_forks = os.getenv('SYSTEM_TASK_FORKS_CAPACITY', None)
+    mem_bytes = get_corrected_memory(mem_bytes)
 
-    if env_forks:
-        return int(env_forks)
-    elif settings_forks:
-        return int(settings_forks)
+    settings_mem_mb_per_fork = getattr(settings, 'SYSTEM_TASK_FORKS_MEM', None)
+    env_mem_mb_per_fork = os.getenv('SYSTEM_TASK_FORKS_MEM', None)
 
-    if cpu_capacity is None:
-        _, cpu_cap = get_cpu_capacity()
+    if env_mem_mb_per_fork:
+        mem_mb_per_fork = int(env_mem_mb_per_fork)
+    elif settings_mem_mb_per_fork:
+        mem_mb_per_fork = int(settings_mem_mb_per_fork)
     else:
-        cpu_cap = cpu_capacity
-    if mem_capacity is None:
-        _, mem_cap = get_mem_capacity()
-    else:
-        mem_cap = mem_capacity
-    return min(mem_cap, cpu_cap) + ((max(mem_cap, cpu_cap) - min(mem_cap, cpu_cap)) * scale)
+        mem_mb_per_fork = 100
+
+    # Per docs, deduct 2GB of memory from the available memory
+    # to cover memory consumption of background tasks when redis/web etc are colocated with
+    # the other control processes
+    memory_penalty_bytes = 2147483648
+    if settings.IS_K8S:
+        # In k8s, this is dealt with differently because
+        # redis and the web containers have their own memory allocation
+        memory_penalty_bytes = 0
+
+    # convert memory to megabytes because our setting of how much memory we
+    # should allocate per fork is in megabytes
+    mem_mb = (mem_bytes - memory_penalty_bytes) // 2**20
+    max_forks_based_on_memory = mem_mb // mem_mb_per_fork
+
+    return max(1, max_forks_based_on_memory)
 
 
 _inventory_updates = threading.local()
@@ -890,28 +974,33 @@ def get_current_apps():
     return current_apps
 
 
-def get_custom_venv_choices(custom_paths=None):
+def get_custom_venv_choices():
     from django.conf import settings
 
-    custom_paths = custom_paths or settings.CUSTOM_VENV_PATHS
-    all_venv_paths = [settings.BASE_VENV_PATH] + custom_paths
+    all_venv_paths = settings.CUSTOM_VENV_PATHS + [settings.BASE_VENV_PATH]
     custom_venv_choices = []
 
-    for custom_venv_path in all_venv_paths:
-        try:
-            if os.path.exists(custom_venv_path):
-                custom_venv_choices.extend(
-                    [
-                        os.path.join(custom_venv_path, x, '')
-                        for x in os.listdir(custom_venv_path)
-                        if x != 'awx'
-                        and os.path.isdir(os.path.join(custom_venv_path, x))
-                        and os.path.exists(os.path.join(custom_venv_path, x, 'bin', 'activate'))
-                    ]
-                )
-        except Exception:
-            logger.exception("Encountered an error while discovering custom virtual environments.")
+    for venv_path in all_venv_paths:
+        if os.path.exists(venv_path):
+            for d in os.listdir(venv_path):
+                if venv_path == settings.BASE_VENV_PATH and d == 'awx':
+                    continue
+
+                if os.path.exists(os.path.join(venv_path, d, 'bin', 'pip')):
+                    custom_venv_choices.append(os.path.join(venv_path, d))
+
     return custom_venv_choices
+
+
+def get_custom_venv_pip_freeze(venv_path):
+    pip_path = os.path.join(venv_path, 'bin', 'pip')
+
+    try:
+        freeze_data = subprocess.run([pip_path, "freeze"], capture_output=True)
+        pip_data = (freeze_data.stdout).decode('UTF-8')
+        return pip_data
+    except Exception:
+        logger.exception("Encountered an error while trying to run 'pip freeze' for custom virtual environments:")
 
 
 def is_ansible_variable(key):
@@ -1024,6 +1113,31 @@ def deepmerge(a, b):
         return b
 
 
+def create_partition(tblname, start=None):
+    """Creates new partition table for events.  By default it covers the current hour."""
+    if start is None:
+        start = now()
+
+    start = start.replace(microsecond=0, second=0, minute=0)
+    end = start + timedelta(hours=1)
+
+    start_timestamp = str(start)
+    end_timestamp = str(end)
+
+    partition_label = start.strftime('%Y%m%d_%H')
+
+    try:
+        with transaction.atomic():
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    f'CREATE TABLE IF NOT EXISTS {tblname}_{partition_label} '
+                    f'PARTITION OF {tblname} '
+                    f'FOR VALUES FROM (\'{start_timestamp}\') to (\'{end_timestamp}\');'
+                )
+    except ProgrammingError as e:
+        logger.debug(f'Caught known error due to existing partition: {e}')
+
+
 def cleanup_new_process(func):
     """
     Cleanup django connection, cache connection, before executing new thread or processes entry point, func.
@@ -1031,8 +1145,11 @@ def cleanup_new_process(func):
 
     @wraps(func)
     def wrapper_cleanup_new_process(*args, **kwargs):
+        from awx.conf.settings import SettingsWrapper  # noqa
+
         django_connection.close()
         django_cache.close()
+        SettingsWrapper.initialize()
         return func(*args, **kwargs)
 
     return wrapper_cleanup_new_process

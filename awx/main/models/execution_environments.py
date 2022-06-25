@@ -1,8 +1,9 @@
 from django.db import models
-from django.utils.translation import ugettext_lazy as _
+from django.utils.translation import gettext_lazy as _
 
 from awx.api.versioning import reverse
 from awx.main.models.base import CommonModel
+from awx.main.validators import validate_container_image_name
 
 
 __all__ = ['ExecutionEnvironment']
@@ -31,8 +32,9 @@ class ExecutionEnvironment(CommonModel):
         max_length=1024,
         verbose_name=_('image location'),
         help_text=_("The full image location, including the container registry, image name, and version tag."),
+        validators=[validate_container_image_name],
     )
-    managed_by_tower = models.BooleanField(default=False, editable=False)
+    managed = models.BooleanField(default=False, editable=False)
     credential = models.ForeignKey(
         'Credential',
         related_name='%(class)ss',

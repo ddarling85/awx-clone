@@ -1,11 +1,14 @@
 # AWX settings file
 
 import os
+import base64
 
 
 def get_secret():
     if os.path.exists("/etc/tower/SECRET_KEY"):
         return open('/etc/tower/SECRET_KEY', 'rb').read().strip()
+    else:
+        return base64.encodebytes(os.urandom(32)).decode().rstrip()
 
 
 ADMINS = ()
@@ -13,8 +16,6 @@ ADMINS = ()
 STATIC_ROOT = '/var/lib/awx/public/static'
 
 PROJECTS_ROOT = '/var/lib/awx/projects'
-
-AWX_ANSIBLE_COLLECTIONS_PATHS = '/var/lib/awx/vendor/awx_ansible_collections'
 
 JOBOUTPUT_ROOT = '/var/lib/awx/job_status'
 
@@ -46,6 +47,7 @@ LOGGING['handlers']['console'] = {
     '()': 'logging.StreamHandler',
     'level': 'DEBUG',
     'formatter': 'simple',
+    'filters': ['guid'],
 }
 
 LOGGING['loggers']['django.request']['handlers'] = ['console']
@@ -64,6 +66,9 @@ LOGGING['handlers']['tower_warnings'] = {'class': 'logging.NullHandler'}
 LOGGING['handlers']['rbac_migrations'] = {'class': 'logging.NullHandler'}
 LOGGING['handlers']['system_tracking_migrations'] = {'class': 'logging.NullHandler'}
 LOGGING['handlers']['management_playbooks'] = {'class': 'logging.NullHandler'}
+LOGGING['handlers']['dispatcher'] = {'class': 'logging.NullHandler'}
+LOGGING['handlers']['job_lifecycle'] = {'class': 'logging.NullHandler'}
+LOGGING['handlers']['wsbroadcast'] = {'class': 'logging.NullHandler'}
 
 DATABASES = {
     'default': {
