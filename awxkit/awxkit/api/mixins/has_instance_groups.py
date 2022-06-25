@@ -1,9 +1,9 @@
-from awxkit.utils import suppress
+from contextlib import suppress
+
 import awxkit.exceptions as exc
 
 
 class HasInstanceGroups(object):
-
     def add_instance_group(self, instance_group):
         with suppress(exc.NoContent):
             self.related['instance_groups'].post(dict(id=instance_group.id))

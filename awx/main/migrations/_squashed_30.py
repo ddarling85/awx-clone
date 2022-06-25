@@ -2,7 +2,6 @@ from django.db import (
     migrations,
     models,
 )
-import jsonfield.fields
 import awx.main.fields
 
 from awx.main.migrations import _save_password_keys
@@ -30,7 +29,7 @@ SQUASHED_30 = {
         migrations.AddField(
             model_name='job',
             name='survey_passwords',
-            field=jsonfield.fields.JSONField(default=dict, editable=False, blank=True),
+            field=awx.main.fields.JSONBlob(default=dict, editable=False, blank=True),
         ),
     ],
     '0031_v302_migrate_survey_passwords': [
@@ -42,7 +41,9 @@ SQUASHED_30 = {
         migrations.AlterField(
             model_name='credential',
             name='admin_role',
-            field=awx.main.fields.ImplicitRoleField(related_name='+', parent_role=['singleton:system_administrator', 'organization.admin_role'], to='main.Role', null='True'),
+            field=awx.main.fields.ImplicitRoleField(
+                related_name='+', parent_role=['singleton:system_administrator', 'organization.admin_role'], to='main.Role', null='True'
+            ),
         ),
         migrations.AlterField(
             model_name='credential',

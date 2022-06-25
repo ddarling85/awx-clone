@@ -7,7 +7,7 @@ import json
 from django.http import HttpResponse, HttpResponseRedirect
 from django.shortcuts import render
 from django.utils.html import format_html
-from django.utils.translation import ugettext_lazy as _
+from django.utils.translation import gettext_lazy as _
 from django.views.decorators.csrf import csrf_exempt
 
 # Django REST Framework
@@ -47,9 +47,11 @@ def handle_error(request, status=404, **kwargs):
     # browsable error page for browser clients or a simple JSON response for any
     # other clients.
     if request.path.startswith('/api/'):
+
         class APIException(exceptions.APIException):
             status_code = status
             default_detail = kwargs['content']
+
         api_error_view = ApiErrorView.as_view(exception_class=APIException)
         response = api_error_view(request)
         if hasattr(response, 'render'):

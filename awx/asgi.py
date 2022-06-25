@@ -4,11 +4,12 @@ import os
 import logging
 import django
 from awx import __version__ as tower_version
+
 # Prepare the AWX environment.
 from awx import prepare_env, MODE
 from channels.routing import get_default_application  # noqa
-prepare_env() # NOQA
 
+prepare_env()  # NOQA
 
 
 """
@@ -25,10 +26,12 @@ if MODE == 'production':
     try:
         fd = open("/var/lib/awx/.tower_version", "r")
         if fd.read().strip() != tower_version:
-            raise Exception()
-    except Exception:
-        logger.error("Missing or incorrect metadata for Tower version.  Ensure Tower was installed using the setup playbook.")
-        raise Exception("Missing or incorrect metadata for Tower version.  Ensure Tower was installed using the setup playbook.")
+            raise ValueError()
+    except FileNotFoundError:
+        pass
+    except ValueError as e:
+        logger.error("Missing or incorrect metadata for controller version.  Ensure controller was installed using the setup playbook.")
+        raise Exception("Missing or incorrect metadata for controller version.  Ensure controller was installed using the setup playbook.") from e
 
 
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "awx.settings")

@@ -1,6 +1,6 @@
-import contextlib
+from contextlib import contextmanager, suppress
 
-from awxkit import api, utils, exceptions
+from awxkit import api, exceptions
 from awxkit.config import config
 
 
@@ -31,9 +31,21 @@ def _delete_all(endpoint):
 
 
 def delete_all(v):
-    for endpoint in (v.unified_jobs, v.job_templates, v.workflow_job_templates, v.notification_templates,
-                     v.projects, v.inventory, v.hosts, v.inventory_scripts, v.labels, v.credentials,
-                     v.teams, v.users, v.organizations, v.schedules):
+    for endpoint in (
+        v.unified_jobs,
+        v.job_templates,
+        v.workflow_job_templates,
+        v.notification_templates,
+        v.projects,
+        v.inventory,
+        v.hosts,
+        v.labels,
+        v.credentials,
+        v.teams,
+        v.users,
+        v.organizations,
+        v.schedules,
+    ):
         _delete_all(endpoint)
 
 
@@ -43,7 +55,7 @@ def check_related(resource):
         if related in examined:
             continue
         print(related)
-        with utils.suppress(exceptions.NotFound):
+        with suppress(exceptions.NotFound):
             child_related = related.get()
             examined.append(related)
             if 'results' in child_related and child_related.results:
@@ -53,12 +65,12 @@ def check_related(resource):
                     if not isinstance(_related, api.page.TentativePage) or _related in examined:
                         continue
                     print(_related)
-                    with utils.suppress(exceptions.NotFound):
+                    with suppress(exceptions.NotFound):
                         _related.get()
                         examined.append(_related)
 
 
-@contextlib.contextmanager
+@contextmanager
 def as_user(v, username, password=None):
     """Context manager to allow running tests as an alternative login user."""
     access_token = False
@@ -83,14 +95,14 @@ def as_user(v, username, password=None):
             # requests doesn't provide interface for retrieving
             # domain segregated cookies other than iterating.
             for cookie in connection.session.cookies:
-                if cookie.name == 'sessionid':
+                if cookie.name == connection.session_cookie_name:
                     session_id = cookie.value
                     domain = cookie.domain
                     break
             if session_id:
-                del connection.session.cookies['sessionid']
+                del connection.session.cookies[connection.session_cookie_name]
             if access_token:
-                kwargs = dict(token=access_token, auth_type='Bearer')
+                kwargs = dict(token=access_token)
             else:
                 kwargs = connection.get_session_requirements()
         else:
@@ -102,9 +114,9 @@ def as_user(v, username, password=None):
         if config.use_sessions:
             if access_token:
                 connection.session.auth = None
-            del connection.session.cookies['sessionid']
+            del connection.session.cookies[connection.session_cookie_name]
             if session_id:
-                connection.session.cookies.set('sessionid', session_id, domain=domain)
+                connection.session.cookies.set(connection.session_cookie_name, session_id, domain=domain)
         else:
             connection.session.auth = previous_auth
 

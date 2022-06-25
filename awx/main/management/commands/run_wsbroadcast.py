@@ -10,7 +10,6 @@ from datetime import datetime as dt
 
 from django.core.management.base import BaseCommand
 from django.db import connection
-from django.db.models import Q
 from django.db.migrations.executor import MigrationExecutor
 
 from awx.main.analytics.broadcast_websocket import (
@@ -27,8 +26,7 @@ class Command(BaseCommand):
     help = 'Launch the websocket broadcaster'
 
     def add_arguments(self, parser):
-        parser.add_argument('--status', dest='status', action='store_true',
-                            help='print the internal state of any running broadcast websocket')
+        parser.add_argument('--status', dest='status', action='store_true', help='print the internal state of any running broadcast websocket')
 
     @classmethod
     def display_len(cls, s):
@@ -58,7 +56,7 @@ class Command(BaseCommand):
     def get_connection_status(cls, me, hostnames, data):
         host_stats = [('hostname', 'state', 'start time', 'duration (sec)')]
         for h in hostnames:
-            connection_color = '91'    # red
+            connection_color = '91'  # red
             h_safe = safe_name(h)
             prefix = f'awx_{h_safe}'
             connection_state = data.get(f'{prefix}_connection', 'N/A')
@@ -67,7 +65,7 @@ class Command(BaseCommand):
             if connection_state is None:
                 connection_state = 'unknown'
             if connection_state == 'connected':
-                connection_color = '92' # green
+                connection_color = '92'  # green
                 connection_started = data.get(f'{prefix}_connection_start', 'Error')
                 if connection_started != 'Error':
                     connection_started = datetime.datetime.fromtimestamp(connection_started)
@@ -99,27 +97,29 @@ class Command(BaseCommand):
 
         executor = MigrationExecutor(connection)
         migrating = bool(executor.migration_plan(executor.loader.graph.leaf_nodes()))
-        registered = False
 
-        if not migrating:
-            try:
-                Instance.objects.me()
-                registered = True
-            except RuntimeError:
-                pass
+        # In containerized deployments, migrations happen in the task container,
+        # and the services running there don't start until migrations are
+        # finished.
+        # *This* service runs in the web container, and it's possible that it can
+        # start _before_ migrations are finished, thus causing issues with the ORM
+        # queries it makes (specifically, conf.settings queries).
+        # This block is meant to serve as a sort of bail-out for the situation
+        # where migrations aren't yet finished (similar to the migration
+        # detection middleware that the uwsgi processes have) or when instance
+        # registration isn't done yet
+        if migrating:
+            logger.info('AWX is currently migrating, retry in 10s...')
+            time.sleep(10)
+            return
 
-        if migrating or not registered:
-            # In containerized deployments, migrations happen in the task container,
-            # and the services running there don't start until migrations are
-            # finished.
-            # *This* service runs in the web container, and it's possible that it can
-            # start _before_ migrations are finished, thus causing issues with the ORM
-            # queries it makes (specifically, conf.settings queries).
-            # This block is meant to serve as a sort of bail-out for the situation
-            # where migrations aren't yet finished (similar to the migration
-            # detection middleware that the uwsgi processes have) or when instance
-            # registration isn't done yet
-            logger.error('AWX is currently installing/upgrading.  Trying again in 5s...')
+        try:
+            me = Instance.objects.me()
+            logger.info('Active instance with hostname {} is registered.'.format(me.hostname))
+        except RuntimeError as e:
+            # the CLUSTER_HOST_ID in the task, and web instance must match and
+            # ensure network connectivity between the task and web instance
+            logger.info('Unable to return currently active instance: {}, retry in 5s...'.format(e))
             time.sleep(5)
             return
 
@@ -141,7 +141,7 @@ class Command(BaseCommand):
                     data[family.name] = family.samples[0].value
 
             me = Instance.objects.me()
-            hostnames = [i.hostname for i in Instance.objects.exclude(Q(hostname=me.hostname) | Q(rampart_groups__controller__isnull=False))]
+            hostnames = [i.hostname for i in Instance.objects.exclude(hostname=me.hostname)]
 
             host_stats = Command.get_connection_status(me, hostnames, data)
             lines = Command._format_lines(host_stats)

@@ -3,6 +3,7 @@ import logging
 import atexit
 import json
 import ssl
+import datetime
 
 from queue import Queue, Empty
 from urllib.parse import urlparse
@@ -50,7 +51,9 @@ class WSClient(object):
 
     # Subscription group types
 
-    def __init__(self, token=None, hostname='', port=443, secure=True, session_id=None, csrftoken=None):
+    def __init__(
+        self, token=None, hostname='', port=443, secure=True, session_id=None, csrftoken=None, add_received_time=False, session_cookie_name='awx_sessionid'
+    ):
         # delay this import, because this is an optional dependency
         import websocket
 
@@ -77,22 +80,20 @@ class WSClient(object):
         if self.token is not None:
             auth_cookie = 'token="{0.token}";'.format(self)
         elif self.session_id is not None:
-            auth_cookie = 'sessionid="{0.session_id}"'.format(self)
+            auth_cookie = '{1}="{0.session_id}"'.format(self, session_cookie_name)
             if self.csrftoken:
                 auth_cookie += ';csrftoken={0.csrftoken}'.format(self)
         else:
             auth_cookie = ''
         pref = 'wss://' if self._use_ssl else 'ws://'
         url = '{0}{1.hostname}:{1.port}/websocket/'.format(pref, self)
-        self.ws = websocket.WebSocketApp(url,
-                                         on_open=self._on_open,
-                                         on_message=self._on_message,
-                                         on_error=self._on_error,
-                                         on_close=self._on_close,
-                                         cookie=auth_cookie)
+        self.ws = websocket.WebSocketApp(
+            url, on_open=self._on_open, on_message=self._on_message, on_error=self._on_error, on_close=self._on_close, cookie=auth_cookie
+        )
         self._message_cache = []
         self._should_subscribe_to_pending_job = False
         self._pending_unsubscribe = threading.Event()
+        self._add_received_time = add_received_time
 
     def connect(self):
         wst = threading.Thread(target=self._ws_run_forever, args=(self.ws, {"cert_reqs": ssl.CERT_NONE}))
@@ -198,13 +199,11 @@ class WSClient(object):
     def _on_message(self, message):
         message = json.loads(message)
         log.debug('received message: {}'.format(message))
+        if self._add_received_time:
+            message['received_time'] = datetime.datetime.utcnow()
 
-        if all([message.get('group_name') == 'jobs',
-                message.get('status') == 'pending',
-                message.get('unified_job_id'),
-                self._should_subscribe_to_pending_job]):
-            if bool(message.get('project_id')) == (
-                    self._should_subscribe_to_pending_job['events'] == 'project_update_events'):
+        if all([message.get('group_name') == 'jobs', message.get('status') == 'pending', message.get('unified_job_id'), self._should_subscribe_to_pending_job]):
+            if bool(message.get('project_id')) == (self._should_subscribe_to_pending_job['events'] == 'project_update_events'):
                 self._update_subscription(message['unified_job_id'])
 
         ret = self._recv_queue.put(message)

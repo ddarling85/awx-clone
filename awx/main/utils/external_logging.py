@@ -1,6 +1,6 @@
 import os
 import shutil
-import tempfile 
+import tempfile
 import urllib.parse as urlparse
 
 from django.conf import settings
@@ -18,6 +18,7 @@ def construct_rsyslog_conf_template(settings=settings):
     timeout = getattr(settings, 'LOG_AGGREGATOR_TCP_TIMEOUT', 5)
     max_disk_space = getattr(settings, 'LOG_AGGREGATOR_MAX_DISK_USAGE_GB', 1)
     spool_directory = getattr(settings, 'LOG_AGGREGATOR_MAX_DISK_USAGE_PATH', '/var/lib/awx').rstrip('/')
+    error_log_file = getattr(settings, 'LOG_AGGREGATOR_RSYSLOGD_ERROR_LOG_FILE', '')
 
     if not os.access(spool_directory, os.W_OK):
         spool_directory = '/var/lib/awx'
@@ -25,15 +26,17 @@ def construct_rsyslog_conf_template(settings=settings):
     max_bytes = settings.MAX_EVENT_RES_DATA
     if settings.LOG_AGGREGATOR_RSYSLOGD_DEBUG:
         parts.append('$DebugLevel 2')
-    parts.extend([
-        '$WorkDirectory /var/lib/awx/rsyslog',
-        f'$MaxMessageSize {max_bytes}',
-        '$IncludeConfig /var/lib/awx/rsyslog/conf.d/*.conf',
-        f'main_queue(queue.spoolDirectory="{spool_directory}" queue.maxdiskspace="{max_disk_space}g" queue.type="Disk" queue.filename="awx-external-logger-backlog")',  # noqa
-        'module(load="imuxsock" SysSock.Use="off")',
-        'input(type="imuxsock" Socket="' + settings.LOGGING['handlers']['external_logger']['address'] + '" unlink="on")',
-        'template(name="awx" type="string" string="%rawmsg-after-pri%")',
-    ])
+    parts.extend(
+        [
+            '$WorkDirectory /var/lib/awx/rsyslog',
+            f'$MaxMessageSize {max_bytes}',
+            '$IncludeConfig /var/lib/awx/rsyslog/conf.d/*.conf',
+            f'main_queue(queue.spoolDirectory="{spool_directory}" queue.maxdiskspace="{max_disk_space}g" queue.type="Disk" queue.filename="awx-external-logger-backlog")',  # noqa
+            'module(load="imuxsock" SysSock.Use="off")',
+            'input(type="imuxsock" Socket="' + settings.LOGGING['handlers']['external_logger']['address'] + '" unlink="on" RateLimit.Burst="0")',
+            'template(name="awx" type="string" string="%rawmsg-after-pri%")',
+        ]
+    )
 
     def escape_quotes(x):
         return x.replace('"', '\\"')
@@ -42,13 +45,12 @@ def construct_rsyslog_conf_template(settings=settings):
         parts.append('action(type="omfile" file="/dev/null")')  # rsyslog needs *at least* one valid action to start
         tmpl = '\n'.join(parts)
         return tmpl
-        
+
     if protocol.startswith('http'):
-        scheme = 'https'
         # urlparse requires '//' to be provided if scheme is not specified
         original_parsed = urlparse.urlsplit(host)
         if (not original_parsed.scheme and not host.startswith('//')) or original_parsed.hostname is None:
-            host = '%s://%s' % (scheme, host) if scheme else '//%s' % host
+            host = 'https://%s' % (host)
         parsed = urlparse.urlsplit(host)
 
         host = escape_quotes(parsed.hostname)
@@ -74,9 +76,10 @@ def construct_rsyslog_conf_template(settings=settings):
             f'skipverifyhost="{skip_verify}"',
             'action.resumeRetryCount="-1"',
             'template="awx"',
-            'errorfile="/var/log/tower/rsyslog.err"',
-            f'action.resumeInterval="{timeout}"'
+            f'action.resumeInterval="{timeout}"',
         ]
+        if error_log_file:
+            params.append(f'errorfile="{error_log_file}"')
         if parsed.path:
             path = urlparse.quote(parsed.path[1:], safe='/=')
             if parsed.query:
@@ -114,9 +117,10 @@ def construct_rsyslog_conf_template(settings=settings):
 def reconfigure_rsyslog():
     tmpl = construct_rsyslog_conf_template()
     # Write config to a temp file then move it to preserve atomicity
-    with tempfile.TemporaryDirectory(prefix='rsyslog-conf-') as temp_dir:
+    with tempfile.TemporaryDirectory(dir='/var/lib/awx/rsyslog/', prefix='rsyslog-conf-') as temp_dir:
         path = temp_dir + '/rsyslog.conf.temp'
         with open(path, 'w') as f:
+            os.chmod(path, 0o640)
             f.write(tmpl + '\n')
         shutil.move(path, '/var/lib/awx/rsyslog/rsyslog.conf')
     supervisor_service_command(command='restart', service='awx-rsyslogd')

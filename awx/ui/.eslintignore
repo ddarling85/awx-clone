@@ -1,19 +1,11 @@
-Gruntfile.js
-karma.*.js
+jest.*.js
 webpack.*.js
-nightwatch.*.js
 
 etc
 coverage
-grunt-tasks
+build
 node_modules
-po
-static
-templates
-
-client/src/**/*.js
-client/assets/**/*.js
-test/spec/**/*.js
-
-!client/src/app.start.js
-!client/src/vendor.js
+dist
+images
+instrumented
+*test*.js

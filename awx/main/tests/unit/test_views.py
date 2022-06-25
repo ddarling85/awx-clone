@@ -57,12 +57,11 @@ def test_views_have_search_fields(all_views):
             views_missing_search.append(view)
 
     if views_missing_search:
-        raise Exception('{} views do not have search fields defined:\n{}'.format(
-            len(views_missing_search),
-            '\n'.join([
-                v.__class__.__name__ + ' (model: {})'.format(getattr(v, 'model', type(None)).__name__)
-                for v in views_missing_search
-            ]))
+        raise Exception(
+            '{} views do not have search fields defined:\n{}'.format(
+                len(views_missing_search),
+                '\n'.join([v.__class__.__name__ + ' (model: {})'.format(getattr(v, 'model', type(None)).__name__) for v in views_missing_search]),
+            )
         )
 
 
@@ -74,6 +73,8 @@ def test_global_creation_always_possible(all_views):
     views_by_model = {}
     for View in all_views:
         if not getattr(View, 'deprecated', False) and issubclass(View, ListAPIView) and hasattr(View, 'model'):
+            if type(View.model) is property:
+                continue  # special case for JobEventChildrenList
             views_by_model.setdefault(View.model, []).append(View)
     for model, views in views_by_model.items():
         creatable = False
@@ -87,7 +88,6 @@ def test_global_creation_always_possible(all_views):
                 creatable_view = View
         if not creatable or not global_view:
             continue
-        assert 'POST' in global_view().allowed_methods, (
-            'Resource {} should be creatable in global list view {}. '
-            'Can be created now in {}'.format(model, global_view, creatable_view)
+        assert 'POST' in global_view().allowed_methods, 'Resource {} should be creatable in global list view {}. ' 'Can be created now in {}'.format(
+            model, global_view, creatable_view
         )

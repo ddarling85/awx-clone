@@ -10,7 +10,7 @@ from awx.main.utils.common import set_current_apps
 
 def migrate_to_static_inputs(apps, schema_editor):
     set_current_apps(apps)
-    CredentialType.setup_tower_managed_defaults()
+    CredentialType.setup_tower_managed_defaults(apps)
 
 
 class Migration(migrations.Migration):
@@ -25,5 +25,5 @@ class Migration(migrations.Migration):
             name='namespace',
             field=models.CharField(default=None, editable=False, max_length=1024, null=True),
         ),
-        migrations.RunPython(migrate_to_static_inputs)
+        migrations.RunPython(migrate_to_static_inputs),
     ]

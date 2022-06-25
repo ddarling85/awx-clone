@@ -4,16 +4,20 @@ import datetime
 import logging
 from collections import defaultdict
 
-from django.db import models, DatabaseError, connection
+from django.conf import settings
+from django.core.exceptions import ObjectDoesNotExist
+from django.db import models, DatabaseError
 from django.utils.dateparse import parse_datetime
 from django.utils.text import Truncator
 from django.utils.timezone import utc, now
-from django.utils.translation import ugettext_lazy as _
-from django.utils.encoding import force_text
+from django.utils.translation import gettext_lazy as _
+from django.utils.encoding import force_str
 
 from awx.api.versioning import reverse
 from awx.main import consumers
-from awx.main.fields import JSONField
+from awx.main.fields import JSONBlob
+from awx.main.managers import DeferJobCreatedManager
+from awx.main.constants import MINIMAL_EVENTS
 from awx.main.models.base import CreatedModifiedModel
 from awx.main.utils import ignore_inventory_computed_fields, camelcase_to_underscore
 
@@ -22,8 +26,7 @@ analytics_logger = logging.getLogger('awx.analytics.job_events')
 logger = logging.getLogger('awx.main.models.events')
 
 
-__all__ = ['JobEvent', 'ProjectUpdateEvent', 'AdHocCommandEvent',
-           'InventoryUpdateEvent', 'SystemJobEvent']
+__all__ = ['JobEvent', 'ProjectUpdateEvent', 'AdHocCommandEvent', 'InventoryUpdateEvent', 'SystemJobEvent']
 
 
 def sanitize_event_keys(kwargs, valid_keys):
@@ -33,9 +36,7 @@ def sanitize_event_keys(kwargs, valid_keys):
             kwargs.pop(key)
 
     # Truncate certain values over 1k
-    for key in [
-        'play', 'role', 'task', 'playbook'
-    ]:
+    for key in ['play', 'role', 'task', 'playbook']:
         if isinstance(kwargs.get('event_data', {}).get(key), str):
             if len(kwargs['event_data'][key]) > 1024:
                 kwargs['event_data'][key] = Truncator(kwargs['event_data'][key]).chars(1024)
@@ -58,6 +59,8 @@ def create_host_status_counts(event_data):
 
 
 def emit_event_detail(event):
+    if settings.UI_LIVE_UPDATES_ENABLED is False and event.event not in MINIMAL_EVENTS:
+        return
     cls = event.__class__
     relation = {
         JobEvent: 'job_id',
@@ -96,22 +99,34 @@ def emit_event_detail(event):
             'play': getattr(event, 'play', ''),
             'role': getattr(event, 'role', ''),
             'task': getattr(event, 'task', ''),
-        }
+        },
     )
 
 
-
-
 class BasePlaybookEvent(CreatedModifiedModel):
-    '''
+    """
     An event/message logged from a playbook callback for each host.
-    '''
+    """
 
     VALID_KEYS = [
-        'event', 'event_data', 'playbook', 'play', 'role', 'task', 'created',
-        'counter', 'uuid', 'stdout', 'parent_uuid', 'start_line', 'end_line',
-        'host_id', 'host_name', 'verbosity',
+        'event',
+        'event_data',
+        'playbook',
+        'play',
+        'role',
+        'task',
+        'created',
+        'counter',
+        'uuid',
+        'stdout',
+        'parent_uuid',
+        'start_line',
+        'end_line',
+        'host_id',
+        'host_name',
+        'verbosity',
     ]
+    WRAPUP_EVENT = 'playbook_on_stats'
 
     class Meta:
         abstract = True
@@ -178,7 +193,6 @@ class BasePlaybookEvent(CreatedModifiedModel):
         (2, 'playbook_on_not_import_for_host', _('internal: on Not Import for Host'), False),
         (1, 'playbook_on_play_start', _('Play Started'), False),
         (1, 'playbook_on_stats', _('Playbook Complete'), False),
-
         # Additional event types for captured stdout not directly related to
         # playbook or runner events.
         (0, 'debug', _('Debug'), False),
@@ -196,10 +210,7 @@ class BasePlaybookEvent(CreatedModifiedModel):
         max_length=100,
         choices=EVENT_CHOICES,
     )
-    event_data = JSONField(
-        blank=True,
-        default=dict,
-    )
+    event_data = JSONBlob(default=dict, blank=True)
     failed = models.BooleanField(
         default=False,
         editable=False,
@@ -255,6 +266,10 @@ class BasePlaybookEvent(CreatedModifiedModel):
     )
     created = models.DateTimeField(
         null=True,
+        default=None,
+        editable=False,
+    )
+    modified = models.DateTimeField(
         default=None,
         editable=False,
         db_index=True,
@@ -329,49 +344,53 @@ class BasePlaybookEvent(CreatedModifiedModel):
             try:
                 failures_dict = event_data.get('failures', {})
                 dark_dict = event_data.get('dark', {})
-                self.failed = bool(sum(failures_dict.values()) +
-                                   sum(dark_dict.values()))
+                self.failed = bool(sum(failures_dict.values()) + sum(dark_dict.values()))
                 changed_dict = event_data.get('changed', {})
                 self.changed = bool(sum(changed_dict.values()))
             except (AttributeError, TypeError):
                 pass
 
             if isinstance(self, JobEvent):
-                hostnames = self._hostnames()
-                self._update_host_summary_from_stats(hostnames)
-                if self.job.inventory:
-                    try:
-                        self.job.inventory.update_computed_fields()
-                    except DatabaseError:
-                        logger.exception('Computed fields database error saving event {}'.format(self.pk))
+                try:
+                    job = self.job
+                except ObjectDoesNotExist:
+                    job = None
+                if job:
+                    hostnames = self._hostnames()
+                    self._update_host_summary_from_stats(set(hostnames))
+                    if job.inventory:
+                        try:
+                            job.inventory.update_computed_fields()
+                        except DatabaseError:
+                            logger.exception('Computed fields database error saving event {}'.format(self.pk))
 
-                # find parent links and progagate changed=T and failed=T
-                changed = self.job.job_events.filter(changed=True).exclude(parent_uuid=None).only('parent_uuid').values_list('parent_uuid', flat=True).distinct()  # noqa
-                failed = self.job.job_events.filter(failed=True).exclude(parent_uuid=None).only('parent_uuid').values_list('parent_uuid', flat=True).distinct()  # noqa
+                    # find parent links and progagate changed=T and failed=T
+                    changed = (
+                        job.get_event_queryset()
+                        .filter(changed=True)
+                        .exclude(parent_uuid=None)
+                        .only('parent_uuid')
+                        .values_list('parent_uuid', flat=True)
+                        .distinct()
+                    )  # noqa
+                    failed = (
+                        job.get_event_queryset()
+                        .filter(failed=True)
+                        .exclude(parent_uuid=None)
+                        .only('parent_uuid')
+                        .values_list('parent_uuid', flat=True)
+                        .distinct()
+                    )  # noqa
 
-                JobEvent.objects.filter(
-                    job_id=self.job_id, uuid__in=changed
-                ).update(changed=True)
-                JobEvent.objects.filter(
-                    job_id=self.job_id, uuid__in=failed
-                ).update(failed=True)
-
-                # send success/failure notifications when we've finished handling the playbook_on_stats event
-                from awx.main.tasks import handle_success_and_failure_notifications  # circular import
-
-                def _send_notifications():
-                    handle_success_and_failure_notifications.apply_async([self.job.id])
-                connection.on_commit(_send_notifications)
-
+                    job.get_event_queryset().filter(uuid__in=changed).update(changed=True)
+                    job.get_event_queryset().filter(uuid__in=failed).update(failed=True)
 
         for field in ('playbook', 'play', 'task', 'role'):
-            value = force_text(event_data.get(field, '')).strip()
+            value = force_str(event_data.get(field, '')).strip()
             if value != getattr(self, field):
                 setattr(self, field, value)
-        analytics_logger.info(
-            'Event data saved.',
-            extra=dict(python_objects=dict(job_event=self))
-        )
+        if settings.LOG_AGGREGATOR_ENABLED:
+            analytics_logger.info('Event data saved.', extra=dict(python_objects=dict(job_event=self)))
 
     @classmethod
     def create_from_data(cls, **kwargs):
@@ -407,6 +426,16 @@ class BasePlaybookEvent(CreatedModifiedModel):
         except (KeyError, ValueError):
             kwargs.pop('created', None)
 
+        # same as above, for job_created
+        # TODO: if this approach, identical to above, works, can convert to for loop
+        try:
+            if not isinstance(kwargs['job_created'], datetime.datetime):
+                kwargs['job_created'] = parse_datetime(kwargs['job_created'])
+            if not kwargs['job_created'].tzinfo:
+                kwargs['job_created'] = kwargs['job_created'].replace(tzinfo=utc)
+        except (KeyError, ValueError):
+            kwargs.pop('job_created', None)
+
         host_map = kwargs.pop('host_map', {})
 
         sanitize_event_keys(kwargs, cls.VALID_KEYS)
@@ -414,6 +443,11 @@ class BasePlaybookEvent(CreatedModifiedModel):
         event = cls(**kwargs)
         if workflow_job_id:
             setattr(event, 'workflow_job_id', workflow_job_id)
+        # shouldn't job_created _always_ be present?
+        # if it's not, how could we save the event to the db?
+        job_created = kwargs.pop('job_created', None)
+        if job_created:
+            setattr(event, 'job_created', job_created)
         setattr(event, 'host_map', host_map)
         event._update_from_event_data()
         return event
@@ -424,29 +458,33 @@ class BasePlaybookEvent(CreatedModifiedModel):
 
 
 class JobEvent(BasePlaybookEvent):
-    '''
+    """
     An event/message logged from the callback when running a job.
-    '''
+    """
 
-    VALID_KEYS = BasePlaybookEvent.VALID_KEYS + ['job_id', 'workflow_job_id']
+    VALID_KEYS = BasePlaybookEvent.VALID_KEYS + ['job_id', 'workflow_job_id', 'job_created']
+    JOB_REFERENCE = 'job_id'
+
+    objects = DeferJobCreatedManager()
 
     class Meta:
         app_label = 'main'
         ordering = ('pk',)
         index_together = [
-            ('job', 'event'),
-            ('job', 'uuid'),
-            ('job', 'start_line'),
-            ('job', 'end_line'),
-            ('job', 'parent_uuid'),
+            ('job', 'job_created', 'event'),
+            ('job', 'job_created', 'uuid'),
+            ('job', 'job_created', 'parent_uuid'),
+            ('job', 'job_created', 'counter'),
         ]
 
     id = models.BigAutoField(auto_created=True, primary_key=True, serialize=False, verbose_name='ID')
     job = models.ForeignKey(
         'Job',
         related_name='job_events',
-        on_delete=models.CASCADE,
+        null=True,
+        on_delete=models.DO_NOTHING,
         editable=False,
+        db_index=False,
     )
     host = models.ForeignKey(
         'Host',
@@ -466,6 +504,7 @@ class JobEvent(BasePlaybookEvent):
         default='',
         editable=False,
     )
+    job_created = models.DateTimeField(null=True, editable=False)
 
     def get_absolute_url(self, request=None):
         return reverse('api:job_event_detail', kwargs={'pk': self.pk}, request=request)
@@ -484,19 +523,24 @@ class JobEvent(BasePlaybookEvent):
 
     def _update_host_summary_from_stats(self, hostnames):
         with ignore_inventory_computed_fields():
-            if not self.job or not self.job.inventory:
+            try:
+                if not self.job or not self.job.inventory:
+                    logger.info('Event {} missing job or inventory, host summaries not updated'.format(self.pk))
+                    return
+            except ObjectDoesNotExist:
                 logger.info('Event {} missing job or inventory, host summaries not updated'.format(self.pk))
                 return
             job = self.job
 
-            from awx.main.models import Host, JobHostSummary  # circular import
-            all_hosts = Host.objects.filter(
-                pk__in=self.host_map.values()
-            ).only('id')
+            from awx.main.models import Host, JobHostSummary, HostMetric  # circular import
+
+            all_hosts = Host.objects.filter(pk__in=self.host_map.values()).only('id', 'name')
             existing_host_ids = set(h.id for h in all_hosts)
 
             summaries = dict()
+            updated_hosts_list = list()
             for host in hostnames:
+                updated_hosts_list.append(host.lower())
                 host_id = self.host_map.get(host, None)
                 if host_id not in existing_host_ids:
                     host_id = None
@@ -506,9 +550,7 @@ class JobEvent(BasePlaybookEvent):
                         host_stats[stat] = self.event_data.get(stat, {}).get(host, 0)
                     except AttributeError:  # in case event_data[stat] isn't a dict.
                         pass
-                summary = JobHostSummary(
-                    created=now(), modified=now(), job_id=job.id, host_id=host_id, host_name=host, **host_stats
-                )
+                summary = JobHostSummary(created=now(), modified=now(), job_id=job.id, host_id=host_id, host_name=host, **host_stats)
                 summary.failed = bool(summary.dark or summary.failures)
                 summaries[(host_id, host)] = summary
 
@@ -516,66 +558,90 @@ class JobEvent(BasePlaybookEvent):
 
             # update the last_job_id and last_job_host_summary_id
             # in single queries
-            host_mapping = dict(
-                (summary['host_id'], summary['id'])
-                for summary in JobHostSummary.objects.filter(job_id=job.id).values('id', 'host_id')
-            )
+            host_mapping = dict((summary['host_id'], summary['id']) for summary in JobHostSummary.objects.filter(job_id=job.id).values('id', 'host_id'))
+            updated_hosts = set()
             for h in all_hosts:
-                h.last_job_id = job.id
+                # if the hostname *shows up* in the playbook_on_stats event
+                if h.name in hostnames:
+                    h.last_job_id = job.id
+                    updated_hosts.add(h)
                 if h.id in host_mapping:
                     h.last_job_host_summary_id = host_mapping[h.id]
-            Host.objects.bulk_update(all_hosts, ['last_job_id', 'last_job_host_summary_id'])
+                    updated_hosts.add(h)
 
+            Host.objects.bulk_update(list(updated_hosts), ['last_job_id', 'last_job_host_summary_id'], batch_size=100)
+
+            # bulk-create
+            current_time = now()
+            HostMetric.objects.bulk_create(
+                [HostMetric(hostname=hostname, last_automation=current_time) for hostname in updated_hosts_list], ignore_conflicts=True, batch_size=100
+            )
+            HostMetric.objects.filter(hostname__in=updated_hosts_list).update(last_automation=current_time)
 
     @property
     def job_verbosity(self):
         return self.job.verbosity
 
 
+class UnpartitionedJobEvent(JobEvent):
+    class Meta:
+        proxy = True
+
+
+UnpartitionedJobEvent._meta.db_table = '_unpartitioned_' + JobEvent._meta.db_table  # noqa
+
+
 class ProjectUpdateEvent(BasePlaybookEvent):
 
-    VALID_KEYS = BasePlaybookEvent.VALID_KEYS + ['project_update_id', 'workflow_job_id']
+    VALID_KEYS = BasePlaybookEvent.VALID_KEYS + ['project_update_id', 'workflow_job_id', 'job_created']
+    JOB_REFERENCE = 'project_update_id'
+
+    objects = DeferJobCreatedManager()
 
     class Meta:
         app_label = 'main'
         ordering = ('pk',)
         index_together = [
-            ('project_update', 'event'),
-            ('project_update', 'uuid'),
-            ('project_update', 'start_line'),
-            ('project_update', 'end_line'),
+            ('project_update', 'job_created', 'event'),
+            ('project_update', 'job_created', 'uuid'),
+            ('project_update', 'job_created', 'counter'),
         ]
 
     id = models.BigAutoField(auto_created=True, primary_key=True, serialize=False, verbose_name='ID')
     project_update = models.ForeignKey(
         'ProjectUpdate',
         related_name='project_update_events',
-        on_delete=models.CASCADE,
+        on_delete=models.DO_NOTHING,
         editable=False,
+        db_index=False,
     )
+    job_created = models.DateTimeField(null=True, editable=False)
 
     @property
     def host_name(self):
         return 'localhost'
 
 
-class BaseCommandEvent(CreatedModifiedModel):
-    '''
-    An event/message logged from a command for each host.
-    '''
+class UnpartitionedProjectUpdateEvent(ProjectUpdateEvent):
+    class Meta:
+        proxy = True
 
-    VALID_KEYS = [
-        'event_data', 'created', 'counter', 'uuid', 'stdout', 'start_line',
-        'end_line', 'verbosity'
-    ]
+
+UnpartitionedProjectUpdateEvent._meta.db_table = '_unpartitioned_' + ProjectUpdateEvent._meta.db_table  # noqa
+
+
+class BaseCommandEvent(CreatedModifiedModel):
+    """
+    An event/message logged from a command for each host.
+    """
+
+    VALID_KEYS = ['event_data', 'created', 'counter', 'uuid', 'stdout', 'start_line', 'end_line', 'verbosity']
+    WRAPUP_EVENT = 'EOF'
 
     class Meta:
         abstract = True
 
-    event_data = JSONField(
-        blank=True,
-        default=dict,
-    )
+    event_data = JSONBlob(default=dict, blank=True)
     uuid = models.CharField(
         max_length=1024,
         default='',
@@ -600,6 +666,16 @@ class BaseCommandEvent(CreatedModifiedModel):
     end_line = models.PositiveIntegerField(
         default=0,
         editable=False,
+    )
+    created = models.DateTimeField(
+        null=True,
+        default=None,
+        editable=False,
+    )
+    modified = models.DateTimeField(
+        default=None,
+        editable=False,
+        db_index=True,
     )
 
     def __str__(self):
@@ -638,9 +714,9 @@ class BaseCommandEvent(CreatedModifiedModel):
         return event
 
     def get_event_display(self):
-        '''
+        """
         Needed for __unicode__
-        '''
+        """
         return self.event
 
     def get_event_display2(self):
@@ -655,18 +731,19 @@ class BaseCommandEvent(CreatedModifiedModel):
 
 class AdHocCommandEvent(BaseCommandEvent):
 
-    VALID_KEYS = BaseCommandEvent.VALID_KEYS + [
-        'ad_hoc_command_id', 'event', 'host_name', 'host_id', 'workflow_job_id'
-    ]
+    VALID_KEYS = BaseCommandEvent.VALID_KEYS + ['ad_hoc_command_id', 'event', 'host_name', 'host_id', 'workflow_job_id', 'job_created']
+    WRAPUP_EVENT = 'playbook_on_stats'  # exception to BaseCommandEvent
+    JOB_REFERENCE = 'ad_hoc_command_id'
+
+    objects = DeferJobCreatedManager()
 
     class Meta:
         app_label = 'main'
         ordering = ('-pk',)
         index_together = [
-            ('ad_hoc_command', 'event'),
-            ('ad_hoc_command', 'uuid'),
-            ('ad_hoc_command', 'start_line'),
-            ('ad_hoc_command', 'end_line'),
+            ('ad_hoc_command', 'job_created', 'event'),
+            ('ad_hoc_command', 'job_created', 'uuid'),
+            ('ad_hoc_command', 'job_created', 'counter'),
         ]
 
     EVENT_TYPES = [
@@ -685,7 +762,6 @@ class AdHocCommandEvent(BaseCommandEvent):
         # ('runner_on_async_failed', _('Host Async Failure'), True),
         # Tower does not yet support --diff mode.
         # ('runner_on_file_diff', _('File Difference'), False),
-
         # Additional event types for captured stdout not directly related to
         # runner events.
         ('debug', _('Debug'), False),
@@ -714,8 +790,9 @@ class AdHocCommandEvent(BaseCommandEvent):
     ad_hoc_command = models.ForeignKey(
         'AdHocCommand',
         related_name='ad_hoc_command_events',
-        on_delete=models.CASCADE,
+        on_delete=models.DO_NOTHING,
         editable=False,
+        db_index=False,
     )
     host = models.ForeignKey(
         'Host',
@@ -730,6 +807,7 @@ class AdHocCommandEvent(BaseCommandEvent):
         default='',
         editable=False,
     )
+    job_created = models.DateTimeField(null=True, editable=False)
 
     def get_absolute_url(self, request=None):
         return reverse('api:ad_hoc_command_event_detail', kwargs={'pk': self.pk}, request=request)
@@ -742,32 +820,41 @@ class AdHocCommandEvent(BaseCommandEvent):
         if isinstance(res, dict) and res.get('changed', False):
             self.changed = True
 
-        analytics_logger.info(
-            'Event data saved.',
-            extra=dict(python_objects=dict(job_event=self))
-        )
+        analytics_logger.info('Event data saved.', extra=dict(python_objects=dict(job_event=self)))
+
+
+class UnpartitionedAdHocCommandEvent(AdHocCommandEvent):
+    class Meta:
+        proxy = True
+
+
+UnpartitionedAdHocCommandEvent._meta.db_table = '_unpartitioned_' + AdHocCommandEvent._meta.db_table  # noqa
 
 
 class InventoryUpdateEvent(BaseCommandEvent):
 
-    VALID_KEYS = BaseCommandEvent.VALID_KEYS + ['inventory_update_id', 'workflow_job_id']
+    VALID_KEYS = BaseCommandEvent.VALID_KEYS + ['inventory_update_id', 'workflow_job_id', 'job_created']
+    JOB_REFERENCE = 'inventory_update_id'
+
+    objects = DeferJobCreatedManager()
 
     class Meta:
         app_label = 'main'
         ordering = ('-pk',)
         index_together = [
-            ('inventory_update', 'uuid'),
-            ('inventory_update', 'start_line'),
-            ('inventory_update', 'end_line'),
+            ('inventory_update', 'job_created', 'uuid'),
+            ('inventory_update', 'job_created', 'counter'),
         ]
 
     id = models.BigAutoField(auto_created=True, primary_key=True, serialize=False, verbose_name='ID')
     inventory_update = models.ForeignKey(
         'InventoryUpdate',
         related_name='inventory_update_events',
-        on_delete=models.CASCADE,
+        on_delete=models.DO_NOTHING,
         editable=False,
+        db_index=False,
     )
+    job_created = models.DateTimeField(null=True, editable=False)
 
     @property
     def event(self):
@@ -782,26 +869,38 @@ class InventoryUpdateEvent(BaseCommandEvent):
         return False
 
 
+class UnpartitionedInventoryUpdateEvent(InventoryUpdateEvent):
+    class Meta:
+        proxy = True
+
+
+UnpartitionedInventoryUpdateEvent._meta.db_table = '_unpartitioned_' + InventoryUpdateEvent._meta.db_table  # noqa
+
+
 class SystemJobEvent(BaseCommandEvent):
 
-    VALID_KEYS = BaseCommandEvent.VALID_KEYS + ['system_job_id']
+    VALID_KEYS = BaseCommandEvent.VALID_KEYS + ['system_job_id', 'job_created']
+    JOB_REFERENCE = 'system_job_id'
+
+    objects = DeferJobCreatedManager()
 
     class Meta:
         app_label = 'main'
         ordering = ('-pk',)
         index_together = [
-            ('system_job', 'uuid'),
-            ('system_job', 'start_line'),
-            ('system_job', 'end_line'),
+            ('system_job', 'job_created', 'uuid'),
+            ('system_job', 'job_created', 'counter'),
         ]
 
     id = models.BigAutoField(auto_created=True, primary_key=True, serialize=False, verbose_name='ID')
     system_job = models.ForeignKey(
         'SystemJob',
         related_name='system_job_events',
-        on_delete=models.CASCADE,
+        on_delete=models.DO_NOTHING,
         editable=False,
+        db_index=False,
     )
+    job_created = models.DateTimeField(null=True, editable=False)
 
     @property
     def event(self):
@@ -814,3 +913,11 @@ class SystemJobEvent(BaseCommandEvent):
     @property
     def changed(self):
         return False
+
+
+class UnpartitionedSystemJobEvent(SystemJobEvent):
+    class Meta:
+        proxy = True
+
+
+UnpartitionedSystemJobEvent._meta.db_table = '_unpartitioned_' + SystemJobEvent._meta.db_table  # noqa

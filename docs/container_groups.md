@@ -1,13 +1,11 @@
 # Container Groups
 
-In a traditional AWX installation, jobs (ansible-playbook runs) are executed
-either directly on a member of the cluster or on a pre-provisioned "isolated"
-node. 
-
-The concept of a Container Group (working name) allows for job environments to
-be provisioned on-demand as a Pod that exists only for the duration of the
-playbook run. This is known as the ephemeral execution model and ensures a clean
-environment for every job run. 
+In a traditional AWX installation, jobs (ansible-playbook runs) are
+executed directly on a member of the cluster.  The concept of a
+Container Group (working name) allows for job environments to be
+provisioned on-demand as a Pod that exists only for the duration of
+the playbook run. This is known as the ephemeral execution model and
+ensures a clean environment for every job run.
 
 In some cases it is desireable to have the execution environment be "always-on",
 this is is done by manually creating an instance through the AWX API or UI. 
@@ -45,7 +43,7 @@ This will allow the UI to implement whatever fields necessary, because
 any custom fields (think 'image' or 'namespace') can be "serialized" as valid
 `Pod` JSON or YAML. A full list of options can be found in the Kubernetes
 documentation
-[here](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.15/#pod-v1-core).
+[here](https://kubernetes.io/docs/reference/kubernetes-api/workload-resources/pod-v1/).
 
 ```bash
 cat > api_request.json <<EOF

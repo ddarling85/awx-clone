@@ -9,7 +9,7 @@ from awx.main.utils.common import set_current_apps
 
 def create_new_credential_types(apps, schema_editor):
     set_current_apps(apps)
-    CredentialType.setup_tower_managed_defaults()
+    CredentialType.setup_tower_managed_defaults(apps)
 
 
 class Migration(migrations.Migration):
@@ -22,7 +22,9 @@ class Migration(migrations.Migration):
         migrations.AddField(
             model_name='instancegroup',
             name='credential',
-            field=models.ForeignKey(blank=True, default=None, null=True, on_delete=django.db.models.deletion.SET_NULL, related_name='instancegroups', to='main.Credential'),
+            field=models.ForeignKey(
+                blank=True, default=None, null=True, on_delete=django.db.models.deletion.SET_NULL, related_name='instancegroups', to='main.Credential'
+            ),
         ),
         migrations.AddField(
             model_name='instancegroup',
@@ -32,7 +34,20 @@ class Migration(migrations.Migration):
         migrations.AlterField(
             model_name='credentialtype',
             name='kind',
-            field=models.CharField(choices=[('ssh', 'Machine'), ('vault', 'Vault'), ('net', 'Network'), ('scm', 'Source Control'), ('cloud', 'Cloud'), ('token', 'Personal Access Token'), ('insights', 'Insights'), ('external', 'External'), ('kubernetes', 'Kubernetes')], max_length=32),
+            field=models.CharField(
+                choices=[
+                    ('ssh', 'Machine'),
+                    ('vault', 'Vault'),
+                    ('net', 'Network'),
+                    ('scm', 'Source Control'),
+                    ('cloud', 'Cloud'),
+                    ('token', 'Personal Access Token'),
+                    ('insights', 'Insights'),
+                    ('external', 'External'),
+                    ('kubernetes', 'Kubernetes'),
+                ],
+                max_length=32,
+            ),
         ),
-        migrations.RunPython(create_new_credential_types)
+        migrations.RunPython(create_new_credential_types),
     ]

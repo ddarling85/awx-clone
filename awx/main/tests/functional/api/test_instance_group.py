@@ -4,6 +4,7 @@ import pytest
 
 from awx.api.versioning import reverse
 from awx.main.models import (
+    ActivityStream,
     Instance,
     InstanceGroup,
     ProjectUpdate,
@@ -13,20 +14,22 @@ from awx.main.utils import camelcase_to_underscore
 
 @pytest.fixture
 def tower_instance_group():
-    ig = InstanceGroup(name='tower')
+    ig = InstanceGroup(name='default')
     ig.save()
     return ig
 
 
 @pytest.fixture
 def instance():
-    instance = Instance.objects.create(hostname='iso')
-    return instance
+    return Instance.objects.create(hostname='instance')
 
 
 @pytest.fixture
-def non_iso_instance():
-    return Instance.objects.create(hostname='iamnotanisolatedinstance')
+def node_type_instance():
+    def fn(hostname, node_type):
+        return Instance.objects.create(hostname=hostname, node_type=node_type)
+
+    return fn
 
 
 @pytest.fixture
@@ -37,18 +40,10 @@ def instance_group(job_factory):
 
 
 @pytest.fixture
-def isolated_instance_group(instance_group, instance):
-    ig = InstanceGroup(name="iso", controller=instance_group)
-    ig.save()
-    ig.instances.set([instance])
-    ig.save()
-    return ig
-
-
-@pytest.fixture
 def containerized_instance_group(instance_group, kube_credential):
     ig = InstanceGroup(name="container")
     ig.credential = kube_credential
+    ig.is_container_group = True
     ig.save()
     return ig
 
@@ -61,6 +56,7 @@ def create_job_factory(job_factory, instance_group):
         j.instance_group = instance_group
         j.save()
         return j
+
     return fn
 
 
@@ -72,6 +68,7 @@ def create_project_update_factory(instance_group, project):
         pu.instance_group = instance_group
         pu.save()
         return pu
+
     return fn
 
 
@@ -92,26 +89,6 @@ def instance_group_jobs_successful(instance_group, create_job_factory, create_pr
 @pytest.fixture(scope='function')
 def source_model(request):
     return request.getfixturevalue(request.param)
-
-
-@pytest.mark.django_db
-def test_instance_group_is_controller(instance_group, isolated_instance_group, non_iso_instance):
-    assert not isolated_instance_group.is_controller
-    assert instance_group.is_controller
-
-    instance_group.instances.set([non_iso_instance])
-
-    assert instance_group.is_controller
-
-
-@pytest.mark.django_db
-def test_instance_group_is_isolated(instance_group, isolated_instance_group):
-    assert not instance_group.is_isolated
-    assert isolated_instance_group.is_isolated
-
-    isolated_instance_group.instances.set([])
-
-    assert isolated_instance_group.is_isolated
 
 
 @pytest.mark.django_db
@@ -137,7 +114,9 @@ def test_delete_instance_group_jobs_running(delete, instance_group_jobs_running,
 
 
 @pytest.mark.django_db
-def test_delete_rename_tower_instance_group_prevented(delete, options, tower_instance_group, instance_group, user, patch):
+def test_delete_rename_tower_instance_group_prevented(
+    delete, options, tower_instance_group, instance_group, user, patch, control_plane_execution_environment, default_job_execution_environment
+):
     url = reverse("api:instance_group_detail", kwargs={'pk': tower_instance_group.pk})
     super_user = user('bob', True)
 
@@ -149,8 +128,8 @@ def test_delete_rename_tower_instance_group_prevented(delete, options, tower_ins
     assert 'GET' in resp.data['actions']
     assert 'PUT' in resp.data['actions']
 
-    # Rename 'tower' instance group denied
-    patch(url, {'name': 'tower_prime'}, super_user, expect=400)
+    # Rename 'default' instance group denied
+    patch(url, {'name': 'default_prime'}, super_user, expect=400)
 
     # Rename, other instance group OK
     url = reverse("api:instance_group_detail", kwargs={'pk': instance_group.pk})
@@ -158,77 +137,15 @@ def test_delete_rename_tower_instance_group_prevented(delete, options, tower_ins
 
 
 @pytest.mark.django_db
-def test_prevent_delete_iso_and_control_groups(delete, isolated_instance_group, admin):
-    iso_url = reverse("api:instance_group_detail", kwargs={'pk': isolated_instance_group.pk})
-    controller_url = reverse("api:instance_group_detail", kwargs={'pk': isolated_instance_group.controller.pk})
-    delete(iso_url, None, admin, expect=403)
-    delete(controller_url, None, admin, expect=403)
-
-
-@pytest.mark.django_db
-def test_prevent_isolated_instance_added_to_non_isolated_instance_group(post, admin, instance, instance_group, isolated_instance_group):
-    url = reverse("api:instance_group_instance_list", kwargs={'pk': instance_group.pk})
-
-    assert True is instance.is_isolated()
-    resp = post(url, {'associate': True, 'id': instance.id}, admin, expect=400)
-    assert u"Isolated instances may not be added or removed from instances groups via the API." == resp.data['error']
-
-
-@pytest.mark.django_db
-def test_prevent_isolated_instance_added_to_non_isolated_instance_group_via_policy_list(patch, admin, instance, instance_group, isolated_instance_group):
-    url = reverse("api:instance_group_detail", kwargs={'pk': instance_group.pk})
-
-    assert True is instance.is_isolated()
-    resp = patch(url, {'policy_instance_list': [instance.hostname]}, user=admin, expect=400)
-    assert [u"Isolated instances may not be added or removed from instances groups via the API."] == resp.data['policy_instance_list']
-    assert instance_group.policy_instance_list == []
-
-
-@pytest.mark.django_db
-def test_prevent_isolated_instance_removal_from_isolated_instance_group(post, admin, instance, instance_group, isolated_instance_group):
-    url = reverse("api:instance_group_instance_list", kwargs={'pk': isolated_instance_group.pk})
-
-    assert True is instance.is_isolated()
-    resp = post(url, {'disassociate': True, 'id': instance.id}, admin, expect=400)
-    assert u"Isolated instances may not be added or removed from instances groups via the API." == resp.data['error']
-
-
-@pytest.mark.django_db
-def test_prevent_non_isolated_instance_added_to_isolated_instance_group(
-        post, admin, non_iso_instance, isolated_instance_group):
-    url = reverse("api:instance_group_instance_list", kwargs={'pk': isolated_instance_group.pk})
-
-    assert False is non_iso_instance.is_isolated()
-    resp = post(url, {'associate': True, 'id': non_iso_instance.id}, admin, expect=400)
-    assert u"Isolated instance group membership may not be managed via the API." == resp.data['error']
-
-
-@pytest.mark.django_db
-def test_prevent_non_isolated_instance_added_to_isolated_instance_group_via_policy_list(
-        patch, admin, non_iso_instance, isolated_instance_group):
-    url = reverse("api:instance_group_detail", kwargs={'pk': isolated_instance_group.pk})
-
-    assert False is non_iso_instance.is_isolated()
-    resp = patch(url, {'policy_instance_list': [non_iso_instance.hostname]}, user=admin, expect=400)
-    assert [u"Isolated instance group membership may not be managed via the API."] == resp.data['policy_instance_list']
-    assert isolated_instance_group.policy_instance_list == []
-
-
-@pytest.mark.django_db
-@pytest.mark.parametrize(
-    'source_model', ['job_template', 'inventory', 'organization'], indirect=True
-)
+@pytest.mark.parametrize('source_model', ['job_template', 'inventory', 'organization'], indirect=True)
 def test_instance_group_order_persistence(get, post, admin, source_model):
     # create several instance groups in random order
     total = 5
     pks = list(range(total))
     random.shuffle(pks)
-    instances = [InstanceGroup.objects.create(name='iso-%d' % i) for i in pks]
+    instances = [InstanceGroup.objects.create(name='group-%d' % i) for i in pks]
     view_name = camelcase_to_underscore(source_model.__class__.__name__)
-    url = reverse(
-        'api:{}_instance_groups_list'.format(view_name),
-        kwargs={'pk': source_model.pk}
-    )
+    url = reverse('api:{}_instance_groups_list'.format(view_name), kwargs={'pk': source_model.pk})
 
     # associate them all
     for instance in instances:
@@ -255,24 +172,22 @@ def test_instance_group_update_fields(patch, instance, instance_group, admin, co
     # policy_instance_ variables can only be updated in instance groups that are NOT containerized
     # instance group (not containerized)
     ig_url = reverse("api:instance_group_detail", kwargs={'pk': instance_group.pk})
-    assert not instance_group.is_containerized
-    assert not containerized_instance_group.is_isolated
-    resp = patch(ig_url, {'policy_instance_percentage':15}, admin, expect=200)
+    assert not instance_group.is_container_group
+    resp = patch(ig_url, {'policy_instance_percentage': 15}, admin, expect=200)
     assert 15 == resp.data['policy_instance_percentage']
-    resp = patch(ig_url, {'policy_instance_minimum':15}, admin, expect=200)
+    resp = patch(ig_url, {'policy_instance_minimum': 15}, admin, expect=200)
     assert 15 == resp.data['policy_instance_minimum']
-    resp = patch(ig_url, {'policy_instance_list':[instance.hostname]}, admin)
+    resp = patch(ig_url, {'policy_instance_list': [instance.hostname]}, admin)
     assert [instance.hostname] == resp.data['policy_instance_list']
 
     # containerized instance group
     cg_url = reverse("api:instance_group_detail", kwargs={'pk': containerized_instance_group.pk})
-    assert containerized_instance_group.is_containerized
-    assert not containerized_instance_group.is_isolated
-    resp = patch(cg_url, {'policy_instance_percentage':15}, admin, expect=400)
+    assert containerized_instance_group.is_container_group
+    resp = patch(cg_url, {'policy_instance_percentage': 15}, admin, expect=400)
     assert ["Containerized instances may not be managed via the API"] == resp.data['policy_instance_percentage']
-    resp = patch(cg_url, {'policy_instance_minimum':15}, admin, expect=400)
+    resp = patch(cg_url, {'policy_instance_minimum': 15}, admin, expect=400)
     assert ["Containerized instances may not be managed via the API"] == resp.data['policy_instance_minimum']
-    resp = patch(cg_url, {'policy_instance_list':[instance.hostname]}, admin)
+    resp = patch(cg_url, {'policy_instance_list': [instance.hostname]}, admin)
     assert ["Containerized instances may not be managed via the API"] == resp.data['policy_instance_list']
 
 
@@ -287,8 +202,116 @@ def test_containerized_group_default_fields(instance_group, kube_credential):
     assert ig.policy_instance_minimum == 5
     assert ig.policy_instance_percentage == 5
     ig.credential = kube_credential
+    ig.is_container_group = True
     ig.save()
     assert ig.policy_instance_list == []
     assert ig.policy_instance_minimum == 0
     assert ig.policy_instance_percentage == 0
-    
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize('node_type', ['control', 'hybrid', 'execution'])
+def test_instance_attach_to_instance_group(post, instance_group, node_type_instance, admin, node_type):
+    instance = node_type_instance(hostname=node_type, node_type=node_type)
+
+    count = ActivityStream.objects.count()
+
+    url = reverse(f'api:instance_group_instance_list', kwargs={'pk': instance_group.pk})
+    post(url, {'associate': True, 'id': instance.id}, admin, expect=204 if node_type != 'control' else 400)
+
+    new_activity = ActivityStream.objects.all()[count:]
+    if node_type != 'control':
+        assert len(new_activity) == 2  # the second is an update of the instance group policy
+        new_activity = new_activity[0]
+        assert new_activity.operation == 'associate'
+        assert new_activity.object1 == 'instance_group'
+        assert new_activity.object2 == 'instance'
+        assert new_activity.instance.first() == instance
+        assert new_activity.instance_group.first() == instance_group
+    else:
+        assert not new_activity
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize('node_type', ['control', 'hybrid', 'execution'])
+def test_instance_unattach_from_instance_group(post, instance_group, node_type_instance, admin, node_type):
+    instance = node_type_instance(hostname=node_type, node_type=node_type)
+    instance_group.instances.add(instance)
+
+    count = ActivityStream.objects.count()
+
+    url = reverse(f'api:instance_group_instance_list', kwargs={'pk': instance_group.pk})
+    post(url, {'disassociate': True, 'id': instance.id}, admin, expect=204 if node_type != 'control' else 400)
+
+    new_activity = ActivityStream.objects.all()[count:]
+    if node_type != 'control':
+        assert len(new_activity) == 1
+        new_activity = new_activity[0]
+        assert new_activity.operation == 'disassociate'
+        assert new_activity.object1 == 'instance_group'
+        assert new_activity.object2 == 'instance'
+        assert new_activity.instance.first() == instance
+        assert new_activity.instance_group.first() == instance_group
+    else:
+        assert not new_activity
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize('node_type', ['control', 'hybrid', 'execution'])
+def test_instance_group_attach_to_instance(post, instance_group, node_type_instance, admin, node_type):
+    instance = node_type_instance(hostname=node_type, node_type=node_type)
+
+    count = ActivityStream.objects.count()
+
+    url = reverse(f'api:instance_instance_groups_list', kwargs={'pk': instance.pk})
+    post(url, {'associate': True, 'id': instance_group.id}, admin, expect=204 if node_type != 'control' else 400)
+
+    new_activity = ActivityStream.objects.all()[count:]
+    if node_type != 'control':
+        assert len(new_activity) == 2  # the second is an update of the instance group policy
+        new_activity = new_activity[0]
+        assert new_activity.operation == 'associate'
+        assert new_activity.object1 == 'instance'
+        assert new_activity.object2 == 'instance_group'
+        assert new_activity.instance.first() == instance
+        assert new_activity.instance_group.first() == instance_group
+    else:
+        assert not new_activity
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize('node_type', ['control', 'hybrid', 'execution'])
+def test_instance_group_unattach_from_instance(post, instance_group, node_type_instance, admin, node_type):
+    instance = node_type_instance(hostname=node_type, node_type=node_type)
+    instance_group.instances.add(instance)
+
+    count = ActivityStream.objects.count()
+
+    url = reverse(f'api:instance_instance_groups_list', kwargs={'pk': instance.pk})
+    post(url, {'disassociate': True, 'id': instance_group.id}, admin, expect=204 if node_type != 'control' else 400)
+
+    new_activity = ActivityStream.objects.all()[count:]
+    if node_type != 'control':
+        assert len(new_activity) == 1
+        new_activity = new_activity[0]
+        assert new_activity.operation == 'disassociate'
+        assert new_activity.object1 == 'instance'
+        assert new_activity.object2 == 'instance_group'
+        assert new_activity.instance.first() == instance
+        assert new_activity.instance_group.first() == instance_group
+    else:
+        assert not new_activity
+
+
+@pytest.mark.django_db
+def test_cannot_remove_controlplane_hybrid_instances(post, controlplane_instance_group, node_type_instance, admin_user):
+    instance = node_type_instance(hostname='hybrid_node', node_type='hybrid')
+    controlplane_instance_group.instances.add(instance)
+
+    url = reverse('api:instance_group_instance_list', kwargs={'pk': controlplane_instance_group.pk})
+    r = post(url, {'disassociate': True, 'id': instance.id}, admin_user, expect=400)
+    assert 'Cannot disassociate hybrid node' in str(r.data)
+
+    url = reverse('api:instance_instance_groups_list', kwargs={'pk': instance.pk})
+    r = post(url, {'disassociate': True, 'id': controlplane_instance_group.id}, admin_user, expect=400)
+    assert f'Cannot disassociate hybrid instance' in str(r.data)

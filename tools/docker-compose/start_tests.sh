@@ -5,5 +5,10 @@ cd /awx_devel
 make clean
 make awx-link
 
-cp awx/settings/local_settings.py.docker_compose awx/settings/local_settings.py
-make "${1:-test}"
+cp tools/docker-compose/ansible/roles/sources/files/local_settings.py awx/settings/local_settings.py
+
+if [[ ! $@ ]]; then
+    make test
+else
+    make $@
+fi

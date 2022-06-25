@@ -9,15 +9,13 @@ from urllib.parse import urljoin
 from django.conf import settings
 from django.db import models
 from django.utils.text import Truncator
-from django.utils.translation import ugettext_lazy as _
+from django.utils.translation import gettext_lazy as _
 from django.core.exceptions import ValidationError
 
 # AWX
 from awx.api.versioning import reverse
-from awx.main.models.base import (
-    prevent_search, AD_HOC_JOB_TYPE_CHOICES, VERBOSITY_CHOICES, VarsDictProperty
-)
-from awx.main.models.events import AdHocCommandEvent
+from awx.main.models.base import prevent_search, AD_HOC_JOB_TYPE_CHOICES, VERBOSITY_CHOICES, VarsDictProperty
+from awx.main.models.events import AdHocCommandEvent, UnpartitionedAdHocCommandEvent
 from awx.main.models.unified_jobs import UnifiedJob
 from awx.main.models.notifications import JobNotificationMixin, NotificationTemplate
 
@@ -27,7 +25,6 @@ __all__ = ['AdHocCommand']
 
 
 class AdHocCommand(UnifiedJob, JobNotificationMixin):
-
     class Meta(object):
         app_label = 'main'
         ordering = ('id',)
@@ -84,10 +81,12 @@ class AdHocCommand(UnifiedJob, JobNotificationMixin):
         editable=False,
         through='AdHocCommandEvent',
     )
-    extra_vars = prevent_search(models.TextField(
-        blank=True,
-        default='',
-    ))
+    extra_vars = prevent_search(
+        models.TextField(
+            blank=True,
+            default='',
+        )
+    )
 
     extra_vars_dict = VarsDictProperty('extra_vars', True)
 
@@ -128,6 +127,8 @@ class AdHocCommand(UnifiedJob, JobNotificationMixin):
 
     @property
     def event_class(self):
+        if self.has_unpartitioned_events:
+            return UnpartitionedAdHocCommandEvent
         return AdHocCommandEvent
 
     @property
@@ -143,20 +144,13 @@ class AdHocCommand(UnifiedJob, JobNotificationMixin):
 
     @classmethod
     def _get_task_class(cls):
-        from awx.main.tasks import RunAdHocCommand
+        from awx.main.tasks.jobs import RunAdHocCommand
+
         return RunAdHocCommand
 
-    @classmethod
-    def supports_isolation(cls):
-        return True
-
     @property
-    def is_containerized(self):
-        return bool(self.instance_group and self.instance_group.is_containerized)
-
-    @property
-    def can_run_containerized(self):
-        return True
+    def is_container_group_task(self):
+        return bool(self.instance_group and self.instance_group.is_container_group)
 
     def get_absolute_url(self, request=None):
         return reverse('api:ad_hoc_command_detail', kwargs={'pk': self.pk}, request=request)
@@ -166,12 +160,8 @@ class AdHocCommand(UnifiedJob, JobNotificationMixin):
 
     @property
     def notification_templates(self):
-        all_orgs = set()
-        for h in self.hosts.all():
-            all_orgs.add(h.inventory.organization)
-        active_templates = dict(error=set(),
-                                success=set(),
-                                started=set())
+        all_orgs = {h.inventory.organization for h in self.hosts.all()}
+        active_templates = dict(error=set(), success=set(), started=set())
         base_notification_templates = NotificationTemplate.objects
         for org in all_orgs:
             for templ in base_notification_templates.filter(organization_notification_templates_for_errors=org):
@@ -192,14 +182,26 @@ class AdHocCommand(UnifiedJob, JobNotificationMixin):
     def task_impact(self):
         # NOTE: We sorta have to assume the host count matches and that forks default to 5
         from awx.main.models.inventory import Host
-        count_hosts = Host.objects.filter( enabled=True, inventory__ad_hoc_commands__pk=self.pk).count()
+
+        count_hosts = Host.objects.filter(enabled=True, inventory__ad_hoc_commands__pk=self.pk).count()
         return min(count_hosts, 5 if self.forks == 0 else self.forks) + 1
 
     def copy(self):
         data = {}
-        for field in ('job_type', 'inventory_id', 'limit', 'credential_id',
-                      'module_name', 'module_args', 'forks', 'verbosity',
-                      'extra_vars', 'become_enabled', 'diff_mode'):
+        for field in (
+            'job_type',
+            'inventory_id',
+            'limit',
+            'credential_id',
+            'execution_environment_id',
+            'module_name',
+            'module_args',
+            'forks',
+            'verbosity',
+            'extra_vars',
+            'become_enabled',
+            'diff_mode',
+        ):
             data[field] = getattr(self, field)
         return AdHocCommand.objects.create(**data)
 
@@ -229,6 +231,7 @@ class AdHocCommand(UnifiedJob, JobNotificationMixin):
     '''
     JobNotificationMixin
     '''
+
     def get_notification_templates(self):
         return self.notification_templates
 

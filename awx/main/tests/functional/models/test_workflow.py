@@ -1,4 +1,3 @@
-
 # Python
 import pytest
 from unittest import mock
@@ -20,6 +19,7 @@ from awx.api.views import WorkflowJobTemplateNodeSuccessNodesList
 # Django
 from django.test import TransactionTestCase
 from django.core.exceptions import ValidationError
+from django.utils.timezone import now
 
 
 class TestWorkflowDAGFunctional(TransactionTestCase):
@@ -52,11 +52,11 @@ class TestWorkflowDAGFunctional(TransactionTestCase):
         return wfj
 
     def test_build_WFJT_dag(self):
-        '''
+        """
         Test that building the graph uses 4 queries
          1 to get the nodes
          3 to get the related success, failure, and always connections
-        '''
+        """
         dag = WorkflowDAG()
         wfj = self.workflow_job()
         with self.assertNumQueries(4):
@@ -114,7 +114,7 @@ class TestWorkflowDAGFunctional(TransactionTestCase):
 
 
 @pytest.mark.django_db
-class TestWorkflowDNR():
+class TestWorkflowDNR:
     @pytest.fixture
     def workflow_job_fn(self):
         def fn(states=['new', 'new', 'new', 'new', 'new', 'new']):
@@ -150,10 +150,20 @@ class TestWorkflowDNR():
             nodes[2].success_nodes.add(nodes[5])
             nodes[4].failure_nodes.add(nodes[5])
             return wfj, nodes
+
         return fn
 
     def test_workflow_dnr_because_parent(self, workflow_job_fn):
-        wfj, nodes = workflow_job_fn(states=['successful', None, None, None, None, None,])
+        wfj, nodes = workflow_job_fn(
+            states=[
+                'successful',
+                None,
+                None,
+                None,
+                None,
+                None,
+            ]
+        )
         dag = WorkflowDAG(workflow_job=wfj)
         workflow_nodes = dag.mark_dnr_nodes()
         assert 2 == len(workflow_nodes)
@@ -196,8 +206,7 @@ class TestWorkflowJob:
         wfj = WorkflowJob.objects.create(name='test-wf-job')
         job = Job.objects.create(name='test-job', artifacts={'b': 43})
         # Workflow job nodes
-        job_node = WorkflowJobNode.objects.create(workflow_job=wfj, job=job,
-                                                  ancestor_artifacts={'a': 42})
+        job_node = WorkflowJobNode.objects.create(workflow_job=wfj, job=job, ancestor_artifacts={'a': 42})
         queued_node = WorkflowJobNode.objects.create(workflow_job=wfj, unified_job_template=job_template)
         # Connect old job -> new job
         mocker.patch.object(queued_node, 'get_parent_nodes', lambda: [job_node])
@@ -213,8 +222,7 @@ class TestWorkflowJob:
         wfj = WorkflowJob.objects.create(name='test-wf-job')
         update = ProjectUpdate.objects.create(name='test-update', project=project)
         # Workflow job nodes
-        project_node = WorkflowJobNode.objects.create(workflow_job=wfj, job=update,
-                                                      ancestor_artifacts={'a': 42, 'b': 43})
+        project_node = WorkflowJobNode.objects.create(workflow_job=wfj, job=update, ancestor_artifacts={'a': 42, 'b': 43})
         queued_node = WorkflowJobNode.objects.create(workflow_job=wfj, unified_job_template=job_template)
         # Connect project update -> new job
         mocker.patch.object(queued_node, 'get_parent_nodes', lambda: [project_node])
@@ -226,8 +234,7 @@ class TestWorkflowJob:
 class TestWorkflowJobTemplate:
     @pytest.fixture
     def wfjt(self, workflow_job_template_factory, organization):
-        wfjt = workflow_job_template_factory(
-            'test', organization=organization).workflow_job_template
+        wfjt = workflow_job_template_factory('test', organization=organization).workflow_job_template
         wfjt.organization = organization
         nodes = [WorkflowJobTemplateNode.objects.create(workflow_job_template=wfjt) for i in range(0, 3)]
         nodes[0].success_nodes.add(nodes[1])
@@ -276,23 +283,16 @@ class TestWorkflowJobTemplatePrompts:
     """These are tests for prompts that live on the workflow job template model
     not the node, prompts apply for entire workflow
     """
+
     @pytest.fixture
     def wfjt_prompts(self):
         return WorkflowJobTemplate.objects.create(
-            ask_inventory_on_launch=True,
-            ask_variables_on_launch=True,
-            ask_limit_on_launch=True,
-            ask_scm_branch_on_launch=True
+            ask_inventory_on_launch=True, ask_variables_on_launch=True, ask_limit_on_launch=True, ask_scm_branch_on_launch=True
         )
 
     @pytest.fixture
     def prompts_data(self, inventory):
-        return dict(
-            inventory=inventory,
-            extra_vars={'foo': 'bar'},
-            limit='webservers',
-            scm_branch='release-3.3'
-        )
+        return dict(inventory=inventory, extra_vars={'foo': 'bar'}, limit='webservers', scm_branch='release-3.3')
 
     def test_apply_workflow_job_prompts(self, workflow_job_template, wfjt_prompts, prompts_data, inventory):
         # null or empty fields used
@@ -317,7 +317,6 @@ class TestWorkflowJobTemplatePrompts:
         assert workflow_job.inventory == inventory
         assert workflow_job.scm_branch == 'bar'
 
-
     @pytest.mark.django_db
     def test_process_workflow_job_prompts(self, inventory, workflow_job_template, wfjt_prompts, prompts_data):
         accepted, rejected, errors = workflow_job_template._accept_or_ignore_job_kwargs(**prompts_data)
@@ -329,41 +328,30 @@ class TestWorkflowJobTemplatePrompts:
         assert rejected == {}
         assert not errors
 
-
     @pytest.mark.django_db
     def test_set_all_the_prompts(self, post, organization, inventory, org_admin):
         r = post(
-            url = reverse('api:workflow_job_template_list'),
-            data = dict(
+            url=reverse('api:workflow_job_template_list'),
+            data=dict(
                 name='My new workflow',
                 organization=organization.id,
                 inventory=inventory.id,
                 limit='foooo',
                 ask_limit_on_launch=True,
                 scm_branch='bar',
-                ask_scm_branch_on_launch=True
+                ask_scm_branch_on_launch=True,
             ),
-            user = org_admin,
-            expect = 201
+            user=org_admin,
+            expect=201,
         )
         wfjt = WorkflowJobTemplate.objects.get(id=r.data['id'])
-        assert wfjt.char_prompts == {
-            'limit': 'foooo', 'scm_branch': 'bar'
-        }
+        assert wfjt.char_prompts == {'limit': 'foooo', 'scm_branch': 'bar'}
         assert wfjt.ask_scm_branch_on_launch is True
         assert wfjt.ask_limit_on_launch is True
 
         launch_url = r.data['related']['launch']
         with mock.patch('awx.main.queue.CallbackQueueDispatcher.dispatch', lambda self, obj: None):
-            r = post(
-                url = launch_url,
-                data = dict(
-                    scm_branch = 'prompt_branch',
-                    limit = 'prompt_limit'
-                ),
-                user = org_admin,
-                expect=201
-            )
+            r = post(url=launch_url, data=dict(scm_branch='prompt_branch', limit='prompt_limit'), user=org_admin, expect=201)
         assert r.data['limit'] == 'prompt_limit'
         assert r.data['scm_branch'] == 'prompt_branch'
 
@@ -373,32 +361,15 @@ def test_workflow_ancestors(organization):
     # Spawn order of templates grandparent -> parent -> child
     # create child WFJT and workflow job
     child = WorkflowJobTemplate.objects.create(organization=organization, name='child')
-    child_job = WorkflowJob.objects.create(
-        workflow_job_template=child,
-        launch_type='workflow'
-    )
+    child_job = WorkflowJob.objects.create(workflow_job_template=child, launch_type='workflow')
     # create parent WFJT and workflow job, and link it up
     parent = WorkflowJobTemplate.objects.create(organization=organization, name='parent')
-    parent_job = WorkflowJob.objects.create(
-        workflow_job_template=parent,
-        launch_type='workflow'
-    )
-    WorkflowJobNode.objects.create(
-        workflow_job=parent_job,
-        unified_job_template=child,
-        job=child_job
-    )
+    parent_job = WorkflowJob.objects.create(workflow_job_template=parent, launch_type='workflow')
+    WorkflowJobNode.objects.create(workflow_job=parent_job, unified_job_template=child, job=child_job)
     # create grandparent WFJT and workflow job and link it up
     grandparent = WorkflowJobTemplate.objects.create(organization=organization, name='grandparent')
-    grandparent_job = WorkflowJob.objects.create(
-        workflow_job_template=grandparent,
-        launch_type='schedule'
-    )
-    WorkflowJobNode.objects.create(
-        workflow_job=grandparent_job,
-        unified_job_template=parent,
-        job=parent_job
-    )
+    grandparent_job = WorkflowJob.objects.create(workflow_job_template=grandparent, launch_type='schedule')
+    WorkflowJobNode.objects.create(workflow_job=grandparent_job, unified_job_template=parent, job=parent_job)
     # ancestors method gives a list of WFJT ids
     assert child_job.get_ancestor_workflows() == [parent, grandparent]
 
@@ -407,14 +378,42 @@ def test_workflow_ancestors(organization):
 def test_workflow_ancestors_recursion_prevention(organization):
     # This is toxic database data, this tests that it doesn't create an infinite loop
     wfjt = WorkflowJobTemplate.objects.create(organization=organization, name='child')
-    wfj = WorkflowJob.objects.create(
-        workflow_job_template=wfjt,
-        launch_type='workflow'
-    )
-    WorkflowJobNode.objects.create(
-        workflow_job=wfj,
-        unified_job_template=wfjt,
-        job=wfj  # well, this is a problem
-    )
+    wfj = WorkflowJob.objects.create(workflow_job_template=wfjt, launch_type='workflow')
+    WorkflowJobNode.objects.create(workflow_job=wfj, unified_job_template=wfjt, job=wfj)  # well, this is a problem
     # mostly, we just care that this assertion finishes in finite time
     assert wfj.get_ancestor_workflows() == []
+
+
+@pytest.mark.django_db
+class TestCombinedArtifacts:
+    @pytest.fixture
+    def wfj_artifacts(self, job_template, organization):
+        wfjt = WorkflowJobTemplate.objects.create(organization=organization, name='has_artifacts')
+        wfj = WorkflowJob.objects.create(workflow_job_template=wfjt, launch_type='workflow')
+        job = job_template.create_unified_job(_eager_fields=dict(artifacts={'foooo': 'bar'}, status='successful', finished=now()))
+        WorkflowJobNode.objects.create(workflow_job=wfj, unified_job_template=job_template, job=job)
+        return wfj
+
+    def test_multiple_types(self, project, wfj_artifacts):
+        project_update = project.create_unified_job()
+        WorkflowJobNode.objects.create(workflow_job=wfj_artifacts, unified_job_template=project, job=project_update)
+
+        assert wfj_artifacts.get_effective_artifacts() == {'foooo': 'bar'}
+
+    def test_precedence_based_on_time(self, wfj_artifacts, job_template):
+        later_job = job_template.create_unified_job(
+            _eager_fields=dict(artifacts={'foooo': 'zoo'}, status='successful', finished=now())  # finished later, should win
+        )
+        WorkflowJobNode.objects.create(workflow_job=wfj_artifacts, unified_job_template=job_template, job=later_job)
+
+        assert wfj_artifacts.get_effective_artifacts() == {'foooo': 'zoo'}
+
+    def test_bad_data_with_artifacts(self, organization):
+        # This is toxic database data, this tests that it doesn't create an infinite loop
+        wfjt = WorkflowJobTemplate.objects.create(organization=organization, name='child')
+        wfj = WorkflowJob.objects.create(workflow_job_template=wfjt, launch_type='workflow')
+        WorkflowJobNode.objects.create(workflow_job=wfj, unified_job_template=wfjt, job=wfj)
+        job = Job.objects.create(artifacts={'foo': 'bar'}, status='successful')
+        WorkflowJobNode.objects.create(workflow_job=wfj, job=job)
+        # mostly, we just care that this assertion finishes in finite time
+        assert wfj.get_effective_artifacts() == {'foo': 'bar'}

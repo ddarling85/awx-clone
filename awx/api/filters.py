@@ -7,15 +7,15 @@ import json
 from functools import reduce
 
 # Django
-from django.core.exceptions import FieldError, ValidationError
+from django.core.exceptions import FieldError, ValidationError, FieldDoesNotExist
 from django.db import models
-from django.db.models import Q, CharField, IntegerField, BooleanField
-from django.db.models.fields import FieldDoesNotExist
+from django.db.models import Q, CharField, IntegerField, BooleanField, TextField, JSONField
 from django.db.models.fields.related import ForeignObjectRel, ManyToManyField, ForeignKey
+from django.db.models.functions import Cast
 from django.contrib.contenttypes.models import ContentType
 from django.contrib.contenttypes.fields import GenericForeignKey
-from django.utils.encoding import force_text
-from django.utils.translation import ugettext_lazy as _
+from django.utils.encoding import force_str
+from django.utils.translation import gettext_lazy as _
 
 # Django REST Framework
 from rest_framework.exceptions import ParseError, PermissionDenied
@@ -27,9 +27,9 @@ from awx.main.utils.db import get_all_field_names
 
 
 class TypeFilterBackend(BaseFilterBackend):
-    '''
+    """
     Filter on type field now returned with all objects.
-    '''
+    """
 
     def filter_queryset(self, request, queryset, view):
         try:
@@ -64,7 +64,7 @@ class TypeFilterBackend(BaseFilterBackend):
 
 
 def get_fields_from_path(model, path):
-    '''
+    """
     Given a Django ORM lookup path (possibly over multiple models)
     Returns the fields in the line, and also the revised lookup path
     ex., given
@@ -73,7 +73,7 @@ def get_fields_from_path(model, path):
     returns tuple of fields traversed as well and a corrected path,
     for special cases we do substitutions
         ([<IntegerField for timeout>], 'project__timeout')
-    '''
+    """
     # Store of all the fields used to detect repeats
     field_list = []
     new_parts = []
@@ -82,12 +82,9 @@ def get_fields_from_path(model, path):
             raise ParseError(_('No related model for field {}.').format(name))
         # HACK: Make project and inventory source filtering by old field names work for backwards compatibility.
         if model._meta.object_name in ('Project', 'InventorySource'):
-            name = {
-                'current_update': 'current_job',
-                'last_update': 'last_job',
-                'last_update_failed': 'last_job_failed',
-                'last_updated': 'last_job_run',
-            }.get(name, name)
+            name = {'current_update': 'current_job', 'last_update': 'last_job', 'last_update_failed': 'last_job_failed', 'last_updated': 'last_job_run'}.get(
+                name, name
+            )
 
         if name == 'type' and 'polymorphic_ctype' in get_all_field_names(model):
             name = 'polymorphic_ctype'
@@ -121,32 +118,46 @@ def get_fields_from_path(model, path):
 
 
 def get_field_from_path(model, path):
-    '''
+    """
     Given a Django ORM lookup path (possibly over multiple models)
     Returns the last field in the line, and the revised lookup path
     ex.
         (<IntegerField for timeout>, 'project__timeout')
-    '''
+    """
     field_list, new_path = get_fields_from_path(model, path)
     return (field_list[-1], new_path)
 
 
 class FieldLookupBackend(BaseFilterBackend):
-    '''
+    """
     Filter using field lookups provided via query string parameters.
-    '''
+    """
 
-    RESERVED_NAMES = ('page', 'page_size', 'format', 'order', 'order_by',
-                      'search', 'type', 'host_filter', 'count_disabled', 'no_truncate')
+    RESERVED_NAMES = ('page', 'page_size', 'format', 'order', 'order_by', 'search', 'type', 'host_filter', 'count_disabled', 'no_truncate', 'limit')
 
-    SUPPORTED_LOOKUPS = ('exact', 'iexact', 'contains', 'icontains',
-                         'startswith', 'istartswith', 'endswith', 'iendswith',
-                         'regex', 'iregex', 'gt', 'gte', 'lt', 'lte', 'in',
-                         'isnull', 'search')
+    SUPPORTED_LOOKUPS = (
+        'exact',
+        'iexact',
+        'contains',
+        'icontains',
+        'startswith',
+        'istartswith',
+        'endswith',
+        'iendswith',
+        'regex',
+        'iregex',
+        'gt',
+        'gte',
+        'lt',
+        'lte',
+        'in',
+        'isnull',
+        'search',
+    )
 
     # A list of fields that we know can be filtered on without the possiblity
     # of introducing duplicates
-    NO_DUPLICATES_WHITELIST = (CharField, IntegerField, BooleanField)
+    NO_DUPLICATES_ALLOW_LIST = (CharField, IntegerField, BooleanField)
 
     def get_fields_from_lookup(self, model, lookup):
 
@@ -174,25 +185,20 @@ class FieldLookupBackend(BaseFilterBackend):
         return (field_list[-1], new_lookup)
 
     def to_python_related(self, value):
-        value = force_text(value)
+        value = force_str(value)
         if value.lower() in ('none', 'null'):
             return None
         else:
             return int(value)
 
     def value_to_python_for_field(self, field, value):
-        if isinstance(field, models.NullBooleanField):
-            return to_python_boolean(value, allow_none=True)
-        elif isinstance(field, models.BooleanField):
+        if isinstance(field, models.BooleanField):
             return to_python_boolean(value)
         elif isinstance(field, (ForeignObjectRel, ManyToManyField, GenericForeignKey, ForeignKey)):
             try:
                 return self.to_python_related(value)
             except ValueError:
-                raise ParseError(_('Invalid {field_name} id: {field_id}').format(
-                    field_name=getattr(field, 'name', 'related field'),
-                    field_id=value)
-                )
+                raise ParseError(_('Invalid {field_name} id: {field_id}').format(field_name=getattr(field, 'name', 'related field'), field_id=value))
         else:
             return field.to_python(value)
 
@@ -205,13 +211,13 @@ class FieldLookupBackend(BaseFilterBackend):
         field_list, new_lookup = self.get_fields_from_lookup(model, lookup)
         field = field_list[-1]
 
-        needs_distinct = (not all(isinstance(f, self.NO_DUPLICATES_WHITELIST) for f in field_list))
+        needs_distinct = not all(isinstance(f, self.NO_DUPLICATES_ALLOW_LIST) for f in field_list)
 
         # Type names are stored without underscores internally, but are presented and
         # and serialized over the API containing underscores so we remove `_`
         # for polymorphic_ctype__model lookups.
         if new_lookup.startswith('polymorphic_ctype__model'):
-            value = value.replace('_','')
+            value = value.replace('_', '')
         elif new_lookup.endswith('__isnull'):
             value = to_python_boolean(value)
         elif new_lookup.endswith('__in'):
@@ -236,6 +242,8 @@ class FieldLookupBackend(BaseFilterBackend):
                     new_lookups.append('{}__{}__icontains'.format(new_lookup[:-8], rm_field.name))
             return value, new_lookups, needs_distinct
         else:
+            if isinstance(field, JSONField):
+                new_lookup = new_lookup.replace(field.name, f'{field.name}_as_txt')
             value = self.value_to_python_for_field(field, value)
         return value, new_lookup, needs_distinct
 
@@ -256,6 +264,11 @@ class FieldLookupBackend(BaseFilterBackend):
             for key, values in request.query_params.lists():
                 if key in self.RESERVED_NAMES:
                     continue
+
+                # HACK: make `created` available via API for the Django User ORM model
+                # so it keep compatiblity with other objects which exposes the `created` attr.
+                if queryset.model._meta.object_name == 'User' and key.startswith('created'):
+                    key = key.replace('created', 'date_joined')
 
                 # HACK: Make job event filtering by host name mostly work even
                 # when not capturing job event hosts M2M.
@@ -280,7 +293,7 @@ class FieldLookupBackend(BaseFilterBackend):
                         search_filter_relation = 'AND'
                         values = reduce(lambda list1, list2: list1 + list2, [i.split(',') for i in values])
                     for value in values:
-                        search_value, new_keys, _ = self.value_to_python(queryset.model, key, force_text(value))
+                        search_value, new_keys, _ = self.value_to_python(queryset.model, key, force_str(value))
                         assert isinstance(new_keys, list)
                         search_filters[search_value] = new_keys
                     # by definition, search *only* joins across relations,
@@ -312,6 +325,9 @@ class FieldLookupBackend(BaseFilterBackend):
                     value, new_key, distinct = self.value_to_python(queryset.model, key, value)
                     if distinct:
                         needs_distinct = True
+                    if '_as_txt' in new_key:
+                        fname = next(item for item in new_key.split('__') if item.endswith('_as_txt'))
+                        queryset = queryset.annotate(**{fname: Cast(fname[:-7], output_field=TextField())})
                     if q_chain:
                         chain_filters.append((q_not, new_key, value))
                     elif q_or:
@@ -324,24 +340,20 @@ class FieldLookupBackend(BaseFilterBackend):
                 args = []
                 for n, k, v in and_filters:
                     if n:
-                        args.append(~Q(**{k:v}))
+                        args.append(~Q(**{k: v}))
                     else:
-                        args.append(Q(**{k:v}))
+                        args.append(Q(**{k: v}))
                 for role_name in role_filters:
                     if not hasattr(queryset.model, 'accessible_pk_qs'):
-                        raise ParseError(_(
-                            'Cannot apply role_level filter to this list because its model '
-                            'does not use roles for access control.'))
-                    args.append(
-                        Q(pk__in=queryset.model.accessible_pk_qs(request.user, role_name))
-                    )
+                        raise ParseError(_('Cannot apply role_level filter to this list because its model ' 'does not use roles for access control.'))
+                    args.append(Q(pk__in=queryset.model.accessible_pk_qs(request.user, role_name)))
                 if or_filters:
                     q = Q()
-                    for n,k,v in or_filters:
+                    for n, k, v in or_filters:
                         if n:
-                            q |= ~Q(**{k:v})
+                            q |= ~Q(**{k: v})
                         else:
-                            q |= Q(**{k:v})
+                            q |= Q(**{k: v})
                     args.append(q)
                 if search_filters and search_filter_relation == 'OR':
                     q = Q()
@@ -355,11 +367,11 @@ class FieldLookupBackend(BaseFilterBackend):
                         for constrain in constrains:
                             q_chain |= Q(**{constrain: term})
                         queryset = queryset.filter(q_chain)
-                for n,k,v in chain_filters:
+                for n, k, v in chain_filters:
                     if n:
-                        q = ~Q(**{k:v})
+                        q = ~Q(**{k: v})
                     else:
-                        q = Q(**{k:v})
+                        q = Q(**{k: v})
                     queryset = queryset.filter(q)
                 queryset = queryset.filter(*args)
                 if needs_distinct:
@@ -372,9 +384,9 @@ class FieldLookupBackend(BaseFilterBackend):
 
 
 class OrderByBackend(BaseFilterBackend):
-    '''
+    """
     Filter to apply ordering based on query string parameters.
-    '''
+    """
 
     def filter_queryset(self, request, queryset, view):
         try:
@@ -386,11 +398,11 @@ class OrderByBackend(BaseFilterBackend):
                         order_by = value.split(',')
                     else:
                         order_by = (value,)
-            if order_by is None:
-                order_by = self.get_default_ordering(view)
+            default_order_by = self.get_default_ordering(view)
+            # glue the order by and default order by together so that the default is the backup option
+            order_by = list(order_by or []) + list(default_order_by or [])
             if order_by:
                 order_by = self._validate_ordering_fields(queryset.model, order_by)
-
                 # Special handling of the type field for ordering. In this
                 # case, we're not sorting exactly on the type field, but
                 # given the limited number of views with multiple types,

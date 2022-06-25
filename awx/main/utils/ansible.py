@@ -6,7 +6,6 @@ import codecs
 import re
 import os
 import logging
-from itertools import islice
 from configparser import ConfigParser
 
 # Django
@@ -18,7 +17,7 @@ logger = logging.getLogger('awx.main.utils.ansible')
 __all__ = ['skip_directory', 'could_be_playbook', 'could_be_inventory']
 
 
-valid_playbook_re = re.compile(r'^\s*?-?\s*?(?:hosts|include|import_playbook):\s*?.*?$')
+valid_playbook_re = re.compile(r'^\s*?-?\s*?(?:hosts|(ansible\.builtin\.)?include|(ansible\.builtin\.)?import_playbook):\s*?.*?$')
 valid_inventory_re = re.compile(r'^[a-zA-Z0-9_.=\[\]]')
 
 
@@ -49,12 +48,7 @@ def could_be_playbook(project_path, dir_path, filename):
     # show up.
     matched = False
     try:
-        for n, line in enumerate(codecs.open(
-            playbook_path,
-            'r',
-            encoding='utf-8',
-            errors='ignore'
-        )):
+        for n, line in enumerate(codecs.open(playbook_path, 'r', encoding='utf-8', errors='ignore')):
             if valid_playbook_re.match(line):
                 matched = True
                 break
@@ -87,18 +81,19 @@ def could_be_inventory(project_path, dir_path, filename):
 
     # Filter files that do not use a character set consistent with
     # Ansible inventory mainly
+    matched = False
     try:
         # only read through first 10 lines for performance
-        with codecs.open(
-            inventory_path,
-            'r',
-            encoding='utf-8',
-            errors='ignore'
-        ) as inv_file:
-            for line in islice(inv_file, 10):
-                if not valid_inventory_re.match(line):
-                    return None
+        with open(inventory_path, encoding='utf-8', errors='ignore') as inv_file:
+            for i, line in enumerate(inv_file):
+                if i > 10:
+                    break
+                elif valid_inventory_re.match(line):
+                    matched = True
+                    break
     except IOError:
+        return None
+    if not matched:
         return None
     return inventory_rel_path
 

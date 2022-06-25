@@ -6,25 +6,45 @@ practices regarding responsible disclosure, see
 https://www.ansible.com/security
 -->
 
+
+
+<!--
+
+PLEASE DO NOT USE A BLANK TEMPLATE IN THE AWX REPO.
+This is a legacy template used for internal testing ONLY.
+
+Any issues opened will this template will be automatically closed.
+
+Instead use the bug or feature request.
+
+-->
+
+
+
 ##### ISSUE TYPE
 <!--- Pick one below and delete the rest: -->
- - Bug Report
- - Feature Idea
- - Documentation
+ - Breaking Change
+ - New or Enhanced Feature
+ - Bug or Docs Fix
+
 
 ##### COMPONENT NAME
 <!-- Pick the area of AWX for this issue, you can have multiple, delete the rest: -->
  - API
  - UI
- - Installer
+ - Collection
+ - Docs
+ - CLI
+ - Other
+
 
 ##### SUMMARY
 <!-- Briefly describe the problem. -->
 
 ##### ENVIRONMENT
 * AWX version: X.Y.Z
-* AWX install method: openshift, minishift, docker on linux, docker for mac, boot2docker
-* Ansible version:  X.Y.Z
+* AWX install method: operator, developer environment
+* AWX deployment target: openshift, kubernetes, minikube
 * Operating System:
 * Web Browser:
 

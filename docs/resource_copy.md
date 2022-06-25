@@ -31,7 +31,6 @@ Currently, the available list of copiable resources are:
 - workflows
 - credentials
 - notifications
-- inventory scripts
 
 For most of the resources above, only the object to be copied itself will be copied; for some resources
 like inventories, however, sub resources belonging to the resource will also be copied to maintain the
@@ -132,7 +131,7 @@ user performing the copy, and `new_objs`, a list of all sub objects of the creat
 `user`'s permission against these new sub objects and unlink related objects or send
 warning logs as necessary. `deep_copy_permission_check_func` should not return anything.
 
-Lastly, macro `REENCRYPTION_BLACKLIST_AT_COPY` is available as part of a model definition. It is a
+Lastly, macro `REENCRYPTION_BLOCKLIST_AT_COPY` is available as part of a model definition. It is a
 list of field names which will escape re-encryption during copy. For example, the `extra_data` field
 of workflow job template nodes.
 
@@ -145,9 +144,6 @@ of workflow job template nodes.
   the same as creating an inventory B with all necessary fields for creation coming from inventory A. Other
   than that, inventory B should inherit A's `instance_groups`, and have exactly the same host and group
   structures as A.
-* Inventory scripts should be able to copy themselves. The behavior of copying inventory script A
-  shall be exactly the same as creating an inventory script B with all necessary fields for creation
-  coming from inventory script A.
 * Job templates should be able to copy themselves. The behavior of copying job template A
   shall be exactly the same as creating a job template B with all necessary fields for creation
   coming from job template A. Other than that, job template B should inherit A's `labels`,
